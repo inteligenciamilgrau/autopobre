@@ -1,3 +1,4 @@
+import {GRID_SIZE} from './race-roster.js';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 export const FANS=[
  {name:'Dona Cida',taste:'família',hint:'Vim com os netos. Adoro uma história de família.',gift:42},
@@ -21,7 +22,7 @@ export class ImmersiveState {
  start(){
   this.sounds=[];this.emitSound('crowdWelcome');
   Object.assign(this,{active:true,phase:'crowd',cash:0,donors:[],fan:null,feedback:'',fuel:0,tankDetached:false,tankWear:0,health:1,glass:0,film:false,
-   pressure:0,crank:0,flood:0,ignitionGood:0,starter:false,raceTime:0,position:6,result:null,reason:'',towSnags:0,inspection:0,judging:false,inspected:false,paid:false,prize:0,savedCash:0,podiumPlace:null,disqualifiedTime:0,alert:'',alertTime:0});this.touch();
+   pressure:0,crank:0,flood:0,ignitionGood:0,starter:false,raceTime:0,position:GRID_SIZE,result:null,reason:'',towSnags:0,inspection:0,judging:false,inspected:false,paid:false,prize:0,savedCash:0,podiumPlace:null,disqualifiedTime:0,alert:'',alertTime:0});this.touch();
  }
  disable(){this.sounds=[];this.active=false;this.phase='off';this.touch();}
  talk(index){if(this.phase!=='crowd'||!FANS[index])return;this.emitSound('talk');this.fan=index;this.feedback='';this.touch();}
@@ -69,7 +70,7 @@ export class ImmersiveState {
   if(this.phase!=='race')return;
   if(this.fuel<=0)this.fail(this.tankDetached?'Combustível acabou após o vazamento':'Acabou a gasolina no meio da volta','fuelEmpty');
   else if(this.health<=0)this.fail('O carro quebrou fora da pista');
-  else if(sensor.finished)this.finish(sensor.position||6);
+  else if(sensor.finished)this.finish(sensor.position||GRID_SIZE);
  }
  fail(reason,sound='breakdown'){if(!['race','starting','grid'].includes(this.phase))return;this.emitSound(sound);this.reason=reason;this.result={position:null,status:'Não terminou'};this.phase='broken';this.rescueWait=3;this.touch();}
  beginTow(){this.emitSound('towArrive');this.phase='tow';this.towTime=0;this.towDistance=0;this.towGap=5;this.towSpeed=0;this.truckSpeed=0;this.snagTime=0;this.touch();}
@@ -87,14 +88,14 @@ export class ImmersiveState {
   if(this.towDistance>=105)this.podium();
  }
  untangle(){if(this.phase==='snag'){this.emitSound('strapFree');this.phase='tow';this.towGap=5;this.towSpeed=0;this.towTime=Math.ceil(this.towTime/12)*12;this.snagTime=0;this.touch();}}
- finish(position){if(this.phase!=='race')return;this.emitSound('finish');this.result={position:clamp(position,1,6),status:'Terminou'};this.podium();}
+ finish(position){if(this.phase!=='race')return;this.emitSound('finish');this.result={position:clamp(position,1,GRID_SIZE),status:'Terminou'};this.podium();}
  leavePodium(){if(this.phase!=='podium')return;this.phase='inspection';this.judging=false;this.touch();}
  requestInspection(){if(this.phase==='inspection'&&!this.judging){this.emitSound('judgeStart');this.judging=true;this.inspection=0;this.touch();}}
  inspectionStep(dt){if(this.phase!=='inspection'||!this.judging)return;const tick=Math.floor(this.inspection/1.4);this.inspection+=dt;if(Math.floor(this.inspection/1.4)>tick)this.emitSound('judgeCheck');if(this.inspection>=8){this.emitSound('judgeApprove');this.inspected=true;this.phase='complete';this.touch();}}
  goToBox(){if(this.phase!=='inspection'||this.inspected)return;this.emitSound('disqualified');this.result={...this.result,status:'Desclassificado'};this.reason='Levou o carro ao box antes da vistoria do juiz';this.profile.fund=Math.max(0,this.profile.fund-this.prize);this.prize=0;this.phase='disqualified';this.disqualifiedTime=6;this.touch();}
  podium(){
   if(this.paid)return;
-  const reward=this.result?.status==='Desclassificado'?0:this.result?.position?[600,450,300,220,170,120][this.result.position-1]:40;
+  const reward=this.result?.status==='Desclassificado'?0:this.result?.position?([600,450,300,220,170,120][this.result.position-1]??Math.max(40,120-(this.result.position-6)*10)):40;
   this.prize=Math.max(0,reward-this.towSnags*25);this.savedCash=Math.max(0,Number.isFinite(this.cash)?this.cash:0);this.profile.fund+=this.prize+this.savedCash;this.cash=0;this.profile.races++;this.emitSound(this.result?.position===1&&this.result?.status!=='Desclassificado'?'podiumWin':'podiumLoss');this.paid=true;this.phase='podium';this.podiumPlace=6;this.touch();
  }
  releaseBlazer(){if(this.phase==='complete'&&!this.profile.released&&this.profile.fund>=BLAZER_COST){this.emitSound('blazer');this.profile.fund-=BLAZER_COST;this.profile.released=true;this.touch();return true;}return false;}

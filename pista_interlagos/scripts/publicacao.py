@@ -7,6 +7,7 @@ import re
 ROOT = Path(__file__).resolve().parents[2]
 GAME = 'pista_interlagos/teste/'
 MODULES = (
+    'race-roster.js',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'cockpit.js',
     'driver.js', 'driver-rig.js', 'driver-helmet.js', 'family-phone.js',
@@ -16,6 +17,7 @@ MODULES = (
     'favicon.svg', 'favicon.ico', 'apple-touch-icon.png',
 )
 ASSETS = (
+    'branding/old_stock_preparada_v1.png',
     'opala99_assinaturas_omp.glb', 'opala99_seiva_danilo.glb',
     'abertura/desclassificado_v1.png', 'abertura/abertura_stevan_opala99.png', 'abertura/logo_auto_pobre_racing.png',
     'piloto/capacete_publico.jpg', 'piloto/referencia_frente.png',

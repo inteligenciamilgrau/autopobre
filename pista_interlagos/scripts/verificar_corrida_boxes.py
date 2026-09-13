@@ -34,7 +34,7 @@ with sync_playwright() as p:
   page.screenshot(path=str(ROOT/'renders/grid_compra_gasolina.png'))
   check('fuel_purchase_has_rear_camera_and_revving_grid',page.evaluate('''()=>{const m=fixtureMode,c=m.car,p=interlagos.cameraSnapshot().position;return (p[0]-c.x)*Math.cos(c.heading)+(-p[2]-c.y)*Math.sin(c.heading)<-6&&m.visual.rivals.every(x=>x.visible)&&interlagos.audioInfo().effects.loops.rival0>0;}'''))
   page.click('#menuButton');page.click('#tab-race');page.uncheck('#immersiveMode');page.click('#settingsBack');page.click('#start')
-  wait_js(page,'interlagos.immersiveInfo().field.rivals.every(r=>r.speed>1)');check('normal_mode_has_five_moving_rivals',len(page.evaluate('interlagos.immersiveInfo().field.rivals'))==5 and not page.evaluate('interlagos.immersiveInfo().active'))
+  wait_js(page,'interlagos.immersiveInfo().field.rivals.every(r=>r.speed>1)');check('normal_mode_has_fourteen_moving_rivals',len(page.evaluate('interlagos.immersiveInfo().field.rivals'))==14 and not page.evaluate('interlagos.immersiveInfo().active'))
   check('fuel_gauge_visible_in_normal_race',page.is_visible('#fuelGauge') and page.evaluate("document.querySelector('#fuelBar').value>0"))
   page.evaluate('fixtureMode.freeFuel=.6');wait_js(page,"document.querySelector('#fuelGauge').classList.contains('reserve')");check('fuel_reserve_warning',page.inner_text('#fuelStatus')=='RESERVA');page.screenshot(path=str(ROOT/'renders/corrida_mapa_combustivel.png'))
   page.evaluate('''()=>{const m=fixtureMode,c=m.car,r=m.field.rivals[0].car;c.x=r.x-Math.cos(r.heading)*4.4;c.y=r.y-Math.sin(r.heading)*4.4;c.heading=r.heading;c.vx=Math.cos(c.heading)*30;c.vy=Math.sin(c.heading)*30;c.surface=c.sample(c.x,c.y);c.index=c.surface.i;}''')

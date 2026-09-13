@@ -1,6 +1,33 @@
 import * as THREE from 'three';
 import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE} from './physics.js';
 
+export async function createTrackBranding(data){
+ const loader=new THREE.TextureLoader(),[oldStock,game]=await Promise.all([
+  loader.loadAsync('./assets/branding/old_stock_preparada_v1.png'),
+  loader.loadAsync('./assets/abertura/logo_auto_pobre_racing.png'),
+ ]);for(const texture of [oldStock,game]){texture.colorSpace=THREE.SRGBColorSpace;texture.anisotropy=4;}
+ const root=new THREE.Group();root.name='Outdoors_AutoPobre_OldStock';
+ const frameMaterial=new THREE.MeshStandardMaterial({color:0x263a3a,roughness:.8,metalness:.3});
+ const white=new THREE.MeshStandardMaterial({color:0xffffff,roughness:1}),dark=new THREE.MeshStandardMaterial({color:0x142a27,roughness:1});
+ const artwork=[new THREE.MeshBasicMaterial({map:oldStock}),new THREE.MeshBasicMaterial({map:game,transparent:true})];
+ for(const material of [white,dark,...artwork]){material.polygonOffset=true;material.polygonOffsetFactor=artwork.includes(material)?-4:-2;material.polygonOffsetUnits=artwork.includes(material)?-4:-2;}
+ const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
+ for(let i=0;i<16;i++){
+  const s=i===0?length-30:i===1?70:230+(i-2)*(length-480)/14;
+  const index=Math.max(0,data.samples.findIndex(p=>p[0]>=s)),p=data.samples[index],side=i%2?1:-1,offset=side*(p[4]/2+GUARDRAIL_CLEARANCE+5);
+  const x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;probe.index=index;const ground=probe.sample(x,y).z;
+  const board=new THREE.Group();board.name=i%2?'Outdoor_AutoPobre':'Outdoor_OldStock';board.position.set(x,ground,-y);
+  // Face the approaching driver, rather than presenting the edge of the sign.
+  const fx=-p[7]*.8+p[8]*side*.6,fz=p[8]*.8+p[7]*side*.6;board.rotation.y=Math.atan2(fx,fz);
+  for(const post of [-4.5,4.5]){const leg=new THREE.Mesh(new THREE.BoxGeometry(.22,5.9,.22),frameMaterial);leg.position.set(post,2.95,0);leg.castShadow=true;board.add(leg);}
+  const backing=new THREE.Mesh(new THREE.BoxGeometry(12.4,5.9,.22),frameMaterial);backing.position.y=4.8;backing.castShadow=true;board.add(backing);
+  const field=new THREE.Mesh(new THREE.PlaneGeometry(12,5.5),i%2?dark:white);field.position.set(0,4.8,.13);board.add(field);
+  const width=i%2?10.6:7.8,height=i%2?5.3:5.2;
+  const logo=new THREE.Mesh(new THREE.PlaneGeometry(width,height),artwork[i%2]);logo.position.set(0,4.8,.15);board.add(logo);root.add(board);
+ }
+ return {root,oldStock,stats:{billboards:16,oldStock:8,autoPobre:8}};
+}
+
 export function createCurbs(data){
  const root=new THREE.Group();root.name='Zebras_circuito_completo';
  const probe=new TestCar(data),batches=[[],[]],profile=[[0,.02],[.48,.065],[1.05,.02]];

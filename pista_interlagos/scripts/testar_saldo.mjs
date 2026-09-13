@@ -9,3 +9,8 @@ for(const outcome of ['loss','win','dq']){
  const reloaded=new ImmersiveState(JSON.parse(JSON.stringify(s.profile)));assert.equal(reloaded.profile.fund,expected,'saved profile preserves total');
 }
 console.log('Balance passed: previous fund plus unspent cash and prize survive loss, victory, disqualification, new race and reload; never credited twice.');
+for(let position=7;position<=15;position++){
+ const s=new ImmersiveState({fund:275,races:2});s.start();s.cash=37.5;s.phase='race';s.finish(position);
+ assert.equal(s.result.position,position);assert.equal(s.podiumPlace,6,'immersive joke remains sixth');
+ assert(Number.isFinite(s.profile.fund)&&s.profile.fund>=275+37.5+40,'expanded field always receives a finite prize');
+}

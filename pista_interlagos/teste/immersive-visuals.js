@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {FANS,strapPath} from './immersive-state.js';
+import {RIVAL_ROSTER} from './race-roster.js';
 const up=new THREE.Vector3(0,1,0);
 export function trackPoint(data,s,offset=0){
  const a=data.samples,L=data.meta.reconstructed_xy_m;s=((s%L)+L)%L;
@@ -29,7 +30,7 @@ export class ImmersiveVisuals {
   this.hero=this.human(0xd82125);this.crowd.add(this.hero);this.hero.position.set(5,0,3);
   const helmet=driver.root.getObjectByName('Capacete_preto_vermelho_balaclava');if(helmet){this.hero.userData.head.visible=false;const h=helmet.clone();h.position.set(0,1.62,0);this.hero.add(h);}
   this.tag(this.hero,'99',[0,1.18,.19],.27,.28,'#fff','#971719');
-  this.rivals=Array.from({length:5},(_,i)=>{const group=this.rivalCar(rivalTemplate,[0xb35d47,0x567ac4,0xe0bd57,0x65a18e,0xcdd3d5][i],String([17,42,63,88,12][i]));this.root.add(group);return group;});
+  this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName);group.userData.entry=entry;this.root.add(group);return group;});
   this.parked=[];
   // Pit garage frontage, open bays and parked cars before the race.
   this.box(this.crowd,[0,.015,0],[25,.03,22],0x555a5b);
@@ -40,7 +41,7 @@ export class ImmersiveVisuals {
    this.box(this.crowd,[x,2.4,-7.2],[.22,4.8,6.6],0x818989);
    this.box(this.crowd,[x+2.6,.025,-4.2],[.06,.035,8],0xe3bf54);
    this.tag(this.crowd,'BOX '+String(i+1).padStart(2,'0'),[x+2.5,4.35,-4.1],3.7,.55,'#f4d16c','#172b30');
-   const parked=this.rivalCar(rivalTemplate,[0xb35d47,0x567ac4,0xe0bd57,0x65a18e][i],String([17,42,63,88][i]));parked.position.set(x+2.5,0,-7);parked.rotation.y=-Math.PI/2;this.crowd.add(parked);this.parked.push({x:x+2.5,z:-7});
+   const entry=RIVAL_ROSTER[[9,0,1,4][i]],parked=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName);parked.position.set(x+2.5,0,-7);parked.rotation.y=-Math.PI/2;this.crowd.add(parked);this.parked.push({x:x+2.5,z:-7});
    this.box(this.crowd,[x+.65,.45,-9.5],[.7,.9,.65],0x9d3c32);
   }
   this.tag(this.crowd,'PADDOCK · VAQUINHA ANTES DA LARGADA',[0,4.65,-10.2],9,.5,'#f5d279','#1a292b');
@@ -98,7 +99,7 @@ export class ImmersiveVisuals {
   if(number==='BLAZER'){this.box(root,[-.55,1.22,0],[3.25,.69,1.52],0x22363e);this.box(root,[-.55,1.59,0],[3.29,.07,1.56],color);for(const x of [-1.5,-.55,.5])this.box(root,[x,1.23,0],[.075,.67,1.57],color);}
   this.tag(root,number,[0,number==='BLAZER'?1.83:1.45,0],number==='BLAZER'?1.3:.7,.35,'#fff','#223234');return root;
  }
- rivalCar(template,color,number){
+ rivalCar(template,color,number,name=''){
   if(!template)return this.car(color,number);
   const root=template.clone(true),materials=new Map(),pivots=[];
   const structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
@@ -117,7 +118,14 @@ export class ImmersiveVisuals {
   root.traverse(o=>{if(!o.isMesh||!o.visible||Array.isArray(o.material)||o.children.length)return;let parent=o.parent;while(parent&&parent!==root){if(pivots.some(p=>p.obj===parent))return;parent=parent.parent;}parts.push(o);});
   for(const o of parts){const geometry=o.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld));geometry.deleteAttribute('tangent');if(!geometry.attributes.uv)geometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));const key=o.material.uuid;if(!batches.has(key))batches.set(key,{material:o.material,geometries:[],objects:[]});const batch=batches.get(key);batch.geometries.push(geometry);batch.objects.push(o);}
   for(const batch of batches.values()){const geometry=mergeGeometries(batch.geometries,false);if(geometry){const mesh=new THREE.Mesh(geometry,batch.material);mesh.castShadow=!batch.material.transparent||batch.material.opacity>=.95;mesh.receiveShadow=true;root.add(mesh);batch.objects.forEach(o=>o.removeFromParent());}batch.geometries.forEach(g=>g.dispose());}
-  this.tag(root,number,[0,1.65,0],.65,.36,'#fff','#243a3d');root.userData.wheels=pivots;return root;
+  this.tag(root,number,[0,1.65,0],.65,.36,'#fff','#243a3d');
+  const label=name?this.tag(root,name,[0,2.08,0],2.7,.30,'#fff','#172a2ddb'):null;
+  // Actual numerals on both doors and the rear, including leading zero and #312.
+  const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;const ctx=canvas.getContext('2d');ctx.fillStyle='#152420';ctx.fillRect(0,0,512,256);ctx.fillStyle='#fff';ctx.font='italic 900 205px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(number,256,139,480);
+  const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;const plate=new THREE.MeshBasicMaterial({map,polygonOffset:true,polygonOffsetFactor:-2});
+  for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.92,.46),plate);decal.position.set(-.18,.75,side*.938);decal.rotation.y=side<0?Math.PI:0;decal.name='Numero_oficial_'+number;root.add(decal);}
+  const rear=new THREE.Mesh(new THREE.PlaneGeometry(.58,.28),plate);rear.position.set(-2.345,.70,-.30);rear.rotation.y=-Math.PI/2;root.add(rear);
+  root.userData.wheels=pivots;root.userData.nameLabel=label;return root;
  }
  truckModel(){const root=new THREE.Group();this.box(root,[0,.66,0],[4.9,.35,2],0xe5b13f);this.box(root,[1.5,1.25,0],[1.65,1,1.9],0xe3c271);this.box(root,[1.55,1.54,0],[1.72,.35,1.91],0x354951);this.box(root,[-.5,1.1,0],[2.4,.22,1.8],0x535c5d);for(const x of [-1.5,1.65])for(const z of [-1,1]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.38,.38,.25,16).rotateX(Math.PI/2),this.mat(0x171a1c));w.position.set(x,.4,z);root.add(w);}this.tag(root,'REBOQUE · SEM PRESSA',[0,2.2,0],3.5,.5,'#222','#e5b13f');return root;}
  setPose(obj,p){obj.position.set(p.x,p.y,p.z);const f=new THREE.Vector3(Math.cos(p.heading),p.grade||0,-Math.sin(p.heading)).normalize(),n=new THREE.Vector3(-(p.grade||0)*Math.cos(p.heading)+(p.bank||0)*Math.sin(p.heading),1,(p.grade||0)*Math.sin(p.heading)+(p.bank||0)*Math.cos(p.heading)).normalize(),side=new THREE.Vector3().crossVectors(f,n).normalize();n.crossVectors(side,f);obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(f,n,side));}
@@ -146,11 +154,11 @@ export class ImmersiveVisuals {
   // Keep the cracks below the opaque sun strip and the mirror housing.
   ctx.clearRect(0,0,1024,120);this.crackTexture.needsUpdate=true;
  }
- updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);this.rivals.forEach((obj,i)=>{const c=rivals[i].car;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
+ updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
  update(state,car,dt,rivals,projectile,towOrigin){
   this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;
   const staged=['crowd','podium'].includes(state.phase);this.stage.visible=staged;this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged;
-  this.rivals.forEach((obj,i)=>{obj.visible=['prepare','starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
+  this.rivals.forEach((obj,i)=>{obj.visible=['prepare','starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
   const selected=state.fan??this.nearSocial;this.socialMarker.visible=state.phase==='crowd'&&Number.isInteger(selected)&&!!this.fans[selected];if(this.socialMarker.visible){this.socialMarker.position.copy(this.fans[selected].pos).add(new THREE.Vector3(.4,2.85,0));this.socialMarker.rotation.y=this.time*1.5;}
   this.fans.forEach((f,i)=>{const laughing=this.time<f.cheerUntil||state.fan===i&&state.feedback.includes('risada');f.person.rotation.z=laughing?Math.sin(this.time*9)*.08:0;f.dollar.visible=!state.donors.includes(i);f.reaction.visible=this.time<f.cheerUntil;f.reaction.position.y=3.15+Math.max(0,2.3-(f.cheerUntil-this.time))*.15;f.label.material.color.setHex(state.donors.includes(i)?0xc4eb93:0xffffff);});
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);

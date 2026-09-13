@@ -2,7 +2,7 @@
 
 Versão 1 · 13/09/2026. Pista 3D editável, com o Opala 99, e teste dirigível local no navegador.
 
-**Modo opcional: [Auto-Pobre Racing com Stevan Gaipo](VERSAO_IMERSIVA.md).** Marque “Versão Imersiva opcional” no menu para jogar a vaquinha com piadas, uma corrida contra cinco adversários, combustível e avarias, resgate com controle do freio, vistoria e o pódio eterno em sexto. Os prêmios ajudam a tirar a Blazer da oficina. A sessão livre continua disponível com a opção desmarcada.
+**Modo opcional: [Auto-Pobre Racing com Stevan Gaipo](VERSAO_IMERSIVA.md).** Marque “Versão Imersiva opcional” no menu para jogar a vaquinha com piadas, uma corrida contra 14 adversários, combustível e avarias, resgate com controle do freio, vistoria e o pódio eterno em sexto. Os prêmios ajudam a tirar a Blazer da oficina. A sessão livre continua disponível com a opção desmarcada.
 
 O carro foi atualizado para a [V4 com assoalho e fechamentos corrigidos](../modelo_3d/v04_fechamentos/README.md), nas duas pinturas. O assoalho contínuo, suas uniões com as soleiras e os anteparos fecham os vãos que deixavam a pista aparecer por dentro do carro. As chapas receberam espessura; a estrutura permanece visível também na câmera interna. A lateral refinada da V3 foi mantida.
 

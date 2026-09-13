@@ -1,9 +1,14 @@
+import {RIVAL_ROSTER} from '../teste/race-roster.js';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {TestCar,GUARDRAIL_CLEARANCE,recognitionInput} from '../teste/physics.js';
 import {RaceField,DRIVER_STYLES} from '../teste/race-field.js';
 import {createGuardrails,createCurbs} from '../teste/track-surface.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));
+assert.equal(RIVAL_ROSTER.length,14);assert.equal(new Set(RIVAL_ROSTER.map(r=>r.number)).size,14);
+assert(RIVAL_ROSTER.some(r=>r.number==='70'&&r.name.includes('Kleber Eletric')&&r.name.includes('JP Velardi')),'Kleber is guaranteed without duplicating his shared car');
+assert(RIVAL_ROSTER.some(r=>r.number==='00')&&RIVAL_ROSTER.some(r=>r.number==='312'),'official number formatting is preserved');
+assert(RIVAL_ROSTER.every(r=>Number.isFinite(r.rating)&&r.rating>0&&r.rating<=1));
 const idle={throttle:0,brake:0,left:0,right:0,reverse:0,handbrake:0};
 function flat(road){const c=new TestCar(data);c.sample=()=>({i:0,u:0,s:500,d:0,z:0,width:1000,bank:0,grade:0,gx:0,gy:0,tx:1,ty:0,lx:0,ly:1,onRoad:road});c.reset();c.x=c.y=c.heading=0;c.surface=c.sample();return c;}
 const road=flat(true),grass=flat(false);road.vx=grass.vx=30;
@@ -35,7 +40,7 @@ for(const base of [0,half])for(let j=0;j<6;j++)for(let axis=0;axis<3;axis++)asse
 const signals=DRIVER_STYLES.map(()=>[]),probe=new TestCar(data);
 for(let i=0;i<data.samples.length;i+=5){probe.reset(i);probe.vx=probe.surface.tx*35;probe.vy=probe.surface.ty*35;DRIVER_STYLES.forEach((style,j)=>signals[j].push(recognitionInput(probe,style).brake));}
 for(let i=0;i<5;i++)for(let j=i+1;j<5;j++)assert(signals[i].filter((v,k)=>Math.abs(v-signals[j][k])>.1).length>8,'drivers choose distinct braking strengths/locations');
-const field=new RaceField(data),player=new TestCar(data),laps=Array(5).fill(null);player.x+=10000;let peak=0,maxOutside=0;
+const field=new RaceField(data),player=new TestCar(data),laps=Array(RIVAL_ROSTER.length).fill(null);player.x+=10000;let peak=0,maxOutside=0;
 for(let frame=0;frame<180*120;frame++){field.step(player,1/120);for(const [i,r] of field.rivals.entries()){peak=Math.max(peak,Math.hypot(r.car.vx,r.car.vy)*3.6);maxOutside=Math.max(maxOutside,Math.abs(r.car.surface.d)-r.car.surface.width/2);if(laps[i]===null&&r.progress>=data.meta.reconstructed_xy_m)laps[i]=frame/120;}}
-assert(laps.every(t=>t!==null&&t<159),'all drivers improve on the previous 160–162 second opening lap');assert(Math.max(...laps)-Math.min(...laps)>3,'different styles produce different lap times');assert(peak>168&&maxOutside<3,'faster rivals stay within the run-off margin');
+assert(laps.every(t=>t!==null&&t<176),'all fourteen rivals maintain a competitive complete lap');assert(Math.max(...laps)-Math.min(...laps)>3,'different styles produce different lap times');assert(peak>168&&maxOutside<3,'faster rivals stay within the run-off margin');
 console.log(JSON.stringify({passed:true,grassCoastingKmh:grass.vx*3.6,grassRecoveryKmh:recover.vx*3.6,railContacts:contacts,laps,peakKmh:peak,maxOutside},null,2));

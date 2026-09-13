@@ -19,6 +19,6 @@ with sync_playwright() as p:
  assert page.evaluate('interlagos.car.laps===0&&interlagos.car.awaitingStart&&!fixtureMode.freeFinished')
  page.evaluate('fixtureMode.rivals.forEach(r=>r.finished=false);interlagos.car.laps=3')
  wait_js(page,"interlagos.state.paused&&interlagos.audioInfo().music.theme==='victory'")
- assert '1º de 6' in page.inner_text('#raceResult')
+ assert '1º de 15' in page.inner_text('#raceResult')
  print('Finish screen, stopped clock, disabled resume, restart and both result music themes passed.',flush=True)
  browser.close()

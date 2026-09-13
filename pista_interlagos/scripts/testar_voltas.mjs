@@ -1,3 +1,4 @@
+import {GRID_START_BACK} from '../teste/race-roster.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {TestCar,recognitionInput} from '../teste/physics.js';
@@ -19,7 +20,7 @@ c.trackLap(surface(100),surface(550),450,50);c.trackLap(surface(L-5),surface(2),
 const field=new RaceField(data);field.rivals[0].progress=L+1;field.step(c,1/120,3);assert(!field.rivals[0].finished,'rivals race past lap one');field.rivals[0].progress=3*L+1;field.step(c,1/120,3);assert(field.rivals[0].finished,'rivals finish after three laps');
 const driven=new TestCar(data);for(let i=0;i<120*900&&driven.laps<3;i++)driven.step(recognitionInput(driven),1/120);assert.equal(driven.laps,3,'three actual simulated laps count correctly');
 const gridCar=new TestCar(data);gridCar.resetGrid();const grid=new RaceField(data);grid.reset(gridCar.surface.s,{grid:true});
-assert(gridCar.surface.s>L-60&&gridCar.surface.s<L-45);
+assert(gridCar.surface.s>=L-GRID_START_BACK&&gridCar.surface.s<L-GRID_START_BACK+3);
 assert(grid.rivals.every(r=>r.car.surface.s>gridCar.surface.s&&r.car.surface.s<L-5),'every rival starts behind the finish line, ahead of player');
 gridCar.trackLap(surface(L-4),surface(2),6,10);assert(!gridCar.awaitingStart);assert.equal(gridCar.laps,0);assert.equal(gridCar.lastLapValid,null);assert(gridCar.lapValid,'initial crossing is not an invalid lap');
 fullLap(gridCar);fullLap(gridCar);fullLap(gridCar);assert.equal(gridCar.laps,3,'three complete laps after the initial crossing');

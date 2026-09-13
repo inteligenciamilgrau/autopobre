@@ -1,4 +1,5 @@
 import {TestCar,clamp,wrap,recognitionInput,MAX_STEER} from './physics.js?v=20260913-burnout';
+import {RIVAL_ROSTER,GRID_ROW_SPACING} from './race-roster.js';
 const HALF_LENGTH=2.38,HALF_WIDTH=.93,MASS=1250,INERTIA=MASS*(4.76**2+1.86**2)/12;
 const axes=c=>[[Math.cos(c.heading),Math.sin(c.heading)],[-Math.sin(c.heading),Math.cos(c.heading)]];
 const center=c=>[c.x+.08*Math.cos(c.heading),c.y+.08*Math.sin(c.heading)];
@@ -12,6 +13,10 @@ export const DRIVER_STYLES=Object.freeze([
  {name:'Atacante',maxSpeed:54,cornerGrip:8,braking:8,brakeResponse:.82,throttleResponse:.9,lookAhead:.54,engineScale:1.1,passDistance:40,passSide:-1,laneRate:2.2,passCooldown:1.9},
  {name:'Foguete de reta',maxSpeed:56,cornerGrip:7.2,braking:7.5,brakeResponse:.75,throttleResponse:.72,lookAhead:.61,engineScale:1.14,passDistance:46,passSide:1,laneRate:1.4,passCooldown:3.7},
 ].map(Object.freeze));
+export function styleForDriver(entry){
+ const base=DRIVER_STYLES[entry.styleIndex],r=entry.rating;
+ return {...base,maxSpeed:base.maxSpeed*(.96+.06*r),cornerGrip:base.cornerGrip*(.92+.1*r),braking:base.braking*(.95+.06*r),engineScale:1+(base.engineScale-1)*(.7+.5*r),passCooldown:base.passCooldown+(1-r)*.5};
+}
 // Four separating axes describe the full, rotated body, including side contacts.
 export function bodyContact(a,b){
  const aa=axes(a),bb=axes(b),ac=center(a),bc=center(b),delta=[bc[0]-ac[0],bc[1]-ac[1]];
@@ -44,7 +49,13 @@ export class RaceField {
  reset(startS=0,{grid=false}={}){
   this.time=0;this.collisions=0;this.cooldowns.clear();
   this.gridLeadIn=grid?(this.data.meta.reconstructed_xy_m-startS)%this.data.meta.reconstructed_xy_m:0;
-  this.rivals=DRIVER_STYLES.map((style,i)=>{const progress=startS+10+i*8,L=this.data.meta.reconstructed_xy_m,s=((progress%L)+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;const car=new TestCar(this.data);car.reset(index);car.engineScale=style.engineScale;const lane=[-2,2,0,-2,2][i];car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);return {car,style,pace:style.maxSpeed,lane,targetLane:lane,maneuverCooldown:0,progress:10+i*8,lastS:car.surface.s,finished:false,stun:0};});
+  this.rivals=RIVAL_ROSTER.map((entry,i)=>{
+   const style=styleForDriver(entry),progress=(Math.ceil(RIVAL_ROSTER.length/2)-Math.floor(i/2))*GRID_ROW_SPACING+8-(i%2)*2;
+   const L=this.data.meta.reconstructed_xy_m,s=((startS+progress)%L+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;
+   const car=new TestCar(this.data);car.reset(index);car.awaitingStart=grid;car.engineScale=style.engineScale;
+   const lane=i%2?2.2:-2.2;car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);
+   return {car,entry,style,pace:style.maxSpeed,lane,targetLane:lane,maneuverCooldown:0,progress,lastS:car.surface.s,finished:false,finishTime:null,stun:0};
+  });
   this.onReset?.();
  }
  step(player,dt,totalLaps=0){
@@ -68,7 +79,7 @@ export class RaceField {
    }
    r.stun=Math.max(0,r.stun-dt);if(r.stun>0){input.throttle=0;input.brake=Math.max(input.brake,.2);}
    if(r.finished&&totalLaps){input.throttle=0;input.brake=1;}
-   c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&r.progress>=L*totalLaps+this.gridLeadIn)r.finished=true;
+   c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&!r.finished&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}
   }
   const bodies=[player,...this.rivals.map(r=>r.car)];
   for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
@@ -80,5 +91,5 @@ export class RaceField {
   if(this.onStep)this.rivals.forEach((r,i)=>this.onStep(r,i,commands[i],dt));
   return impacts;
  }
- info(){return {collisions:this.collisions,rivals:this.rivals.map(r=>({style:r.style.name,x:r.car.x,y:r.car.y,heading:r.car.heading,speed:Math.hypot(r.car.vx,r.car.vy),progress:r.progress,finished:r.finished}))};}
+ info(){return {collisions:this.collisions,rivals:this.rivals.map(r=>({number:r.entry.number,name:r.entry.name,level:r.entry.level,style:r.style.name,x:r.car.x,y:r.car.y,heading:r.car.heading,speed:Math.hypot(r.car.vx,r.car.vy),progress:r.progress,finished:r.finished}))};}
 }

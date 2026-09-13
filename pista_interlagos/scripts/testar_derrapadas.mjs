@@ -1,3 +1,4 @@
+import {RIVAL_ROSTER} from '../teste/race-roster.js';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {SkidMarks} from '../teste/skid-marks.js';
@@ -35,11 +36,11 @@ let maxLength=0;
 const p=real.geometry.attributes.position;
 for(let i=0;i<real.count*4;i+=4)maxLength=Math.max(maxLength,Math.hypot(p.getX(i+2)-p.getX(i),p.getZ(i+2)-p.getZ(i)));
 check('continuous_short_segments',maxLength<2);
-const shared=new SkidMarks(2048),trails=Array.from({length:5},()=>shared.createTrail());
+const shared=new SkidMarks(2048),trails=RIVAL_ROSTER.map(()=>shared.createTrail());
 const rivals=new RaceField(data,{onStep:(r,i,input,dt)=>trails[i].update(r.car,input,dt),onReset:()=>trails.forEach(t=>t.breakTrails())});
 const player=new TestCar(data);player.x+=10000;
 for(let i=0;i<120*45;i++)rivals.step(player,1/120,3);
-shared.flush();check('all_five_ai_cars_leave_braking_marks',trails.every(t=>t.wheels.some(w=>w.segments>0)));
+shared.flush();check('all_fourteen_ai_cars_leave_braking_marks',trails.every(t=>t.wheels.some(w=>w.segments>0)));
 check('rival_marks_share_one_bounded_draw_call',shared.info().drawCalls===1&&shared.count<=2048);
 const sharedPositions=shared.geometry.attributes.position;let rivalMaxLength=0;
 for(let i=0;i<shared.count*4;i+=4)rivalMaxLength=Math.max(rivalMaxLength,Math.hypot(sharedPositions.getX(i+2)-sharedPositions.getX(i),sharedPositions.getZ(i+2)-sharedPositions.getZ(i)));
