@@ -28,10 +28,10 @@ export class MobileControls {
  setSteering(value){
   this.steeringPosition=Math.max(-1,Math.min(1,value));
   // Keep the thumb under the finger; soften the steering response near the center.
-  const amount=Math.max(0,(Math.abs(this.steeringPosition)-.035)/.965);
-  this.steering=Math.sign(this.steeringPosition)*amount*amount;
+  const amount=Math.max(0,(Math.abs(this.steeringPosition)-.10)/.90);
+  this.steering=Math.sign(this.steeringPosition)*amount**2.2;
   this.steerPad.setAttribute('aria-valuenow',String(Math.round(this.steeringPosition*100)));
-  this.steerThumb.style.left=`${50+this.steeringPosition*(50-2200/Math.max(44,this.steerPad.clientWidth||174))}%`;
+  this.steerThumb.style.left=`${50+this.steeringPosition*(50-2200/Math.max(44,this.steerPad.clientWidth||210))}%`;
  }
  clear(){this.pressed.clear();for(const {button} of this.pointers.values())button.classList.remove('held');this.pointers.clear();this.steerPointer=null;this.steerPad.classList.remove('active');this.setSteering(0);this.setHandbrake(this.handbrake);}
  update(paused,phase){this.root.classList.toggle('hidden',!this.enabled||paused||['podium','complete','disqualified'].includes(phase));if(phase===this.phase)return;this.phase=phase;const walking=phase==='crowd';if(walking||['podium','complete','disqualified'].includes(phase))this.setHandbrake(false);document.getElementById('touchGasLabel').textContent=walking?'ANDAR':'ACELERAR';document.getElementById('touchBrakeLabel').textContent=walking?'VOLTAR':'FREAR';document.getElementById('touchHandbrake').hidden=walking;document.getElementById('touchReverse').hidden=walking;document.getElementById('touchReset').hidden=walking;}

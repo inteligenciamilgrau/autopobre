@@ -19,7 +19,7 @@ with sync_playwright() as p:
   check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio===1'));shot('abertura')
   page.tap('#settingsButton');check('settings_fit_landscape',page.evaluate("()=>{const r=document.querySelector('#settings').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.right<=innerWidth}"));shot('config')
   page.uncheck('#immersiveMode');page.tap('#settingsBack');page.tap('#start');wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
-  session=context.new_cdp_session(page);points=[dict(center('[data-key="KeyW"]'),id=1),dict(center('#touchSteering'),x=center('#touchSteering')['x']-50,id=2)]
+  session=context.new_cdp_session(page);points=[dict(center('[data-key="KeyW"]'),id=1),dict(center('#touchSteering'),x=page.locator('#touchSteering').bounding_box()['x']+23,id=2)]
   session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':points});wait_js(page,"interlagos.mobileInfo().pressed.includes('KeyW')&&interlagos.mobileInfo().steering<-.5")
   wait_js(page,'Math.hypot(interlagos.car.vx,interlagos.car.vy)>1');check('simultaneous_gas_and_steering',True);shot('corrida')
   session.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});check('touch_release_clears_controls',page.evaluate('interlagos.mobileInfo().pressed.length')==0)
