@@ -32,13 +32,14 @@ export function resolveContact(a,b){
  return {...hit,speed:Math.max(0,closing)};
 }
 export class RaceField {
- constructor(data){this.data=data;this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
+ constructor(data,{onStep,onReset}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
  reset(startS=0){
   this.time=0;this.collisions=0;this.cooldowns.clear();
   this.rivals=[48,50,47,51,49].map((pace,i)=>{const progress=startS+10+i*8,L=this.data.meta.reconstructed_xy_m,s=((progress%L)+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;const car=new TestCar(this.data);car.reset(index);const lane=[-2,2,0,-2,2][i];car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);return {car,pace,lane,targetLane:lane,maneuverCooldown:0,progress:10+i*8,lastS:car.surface.s,finished:false,stun:0};});
+  this.onReset?.();
  }
  step(player,dt,totalLaps=0){
-  this.time+=dt;const impacts=[],L=this.data.meta.reconstructed_xy_m;
+  this.time+=dt;const impacts=[],commands=[],L=this.data.meta.reconstructed_xy_m;
   for(const r of this.rivals){
    const c=r.car,input=recognitionInput(c,{maxSpeed:r.pace,cornerGrip:6.8,braking:6.1}),speed=Math.hypot(c.vx,c.vy),look=9+speed*.6,p=this.data.samples[(c.index+Math.round(look/2))%c.n];
    r.maneuverCooldown=Math.max(0,r.maneuverCooldown-dt);r.lane+=clamp(r.targetLane-r.lane,-dt*1.5,dt*1.5);
@@ -55,7 +56,7 @@ export class RaceField {
    }
    r.stun=Math.max(0,r.stun-dt);if(r.stun>0){input.throttle=0;input.brake=Math.max(input.brake,.2);}
    if(r.finished&&totalLaps){input.throttle=0;input.brake=1;}
-   c.step(input,dt);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&r.progress>=L*totalLaps)r.finished=true;
+   c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&r.progress>=L*totalLaps)r.finished=true;
   }
   const bodies=[player,...this.rivals.map(r=>r.car)];
   for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
@@ -64,6 +65,7 @@ export class RaceField {
    if(hit.speed>1.6&&this.time-(this.cooldowns.get(`${i}:${j}`)??-10)>.35){this.cooldowns.set(`${i}:${j}`,this.time);this.collisions++;impacts.push({...hit,player:i===0});for(const k of [i,j])if(k>0)this.rivals[k-1].stun=Math.min(1.5,hit.speed*.06);}
   }
   for(const c of bodies){c.surface=c.sample(c.x,c.y);c.index=c.surface.i;}
+  if(this.onStep)this.rivals.forEach((r,i)=>this.onStep(r,i,commands[i],dt));
   return impacts;
  }
  info(){return {collisions:this.collisions,rivals:this.rivals.map(r=>({x:r.car.x,y:r.car.y,heading:r.car.heading,speed:Math.hypot(r.car.vx,r.car.vy),progress:r.progress,finished:r.finished}))};}

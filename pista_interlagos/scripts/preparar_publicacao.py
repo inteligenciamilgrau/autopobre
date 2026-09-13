@@ -11,8 +11,8 @@ def build():
     # A previous build may be replaced, but unexpected files are never published or deleted.
     if dist.is_symlink() or (hasattr(dist, 'is_junction') and dist.is_junction()):
         raise ValueError('dist must be a regular directory')
-    retired_audio = {'assets/audio/race2.mp3'}
-    expected = set(PUBLIC_FILES) | set(OPTIONAL_AUDIO) | retired_audio | {'assets/audio/tracks.json', '_headers', '.nojekyll'}
+    retired_files = {'assets/audio/race2.mp3', 'assets/texturas/asfalto_base_v1.png'}
+    expected = set(PUBLIC_FILES) | set(OPTIONAL_AUDIO) | retired_files | {'assets/audio/tracks.json', '_headers', '.nojekyll'}
     if dist.exists():
         for p in dist.rglob('*'):
             if p.is_symlink() or (hasattr(p, 'is_junction') and p.is_junction()):
@@ -46,8 +46,8 @@ def build():
         if Path(name).suffix in {'.js', '.json', '.html', '.css', '.svg'} and private.search(data):
             raise ValueError('Private data candidate in public file: ' + name)
     dist.mkdir(exist_ok=True)
-    # Remove only known optional songs that the owner removed from the source folder.
-    for name in set(OPTIONAL_AUDIO) | retired_audio:
+    # Remove only known retired assets or optional songs removed by the owner.
+    for name in set(OPTIONAL_AUDIO) | retired_files:
         if name not in payload and (dist / name).is_file():
             contained_file(dist, name).unlink()
     for name, data in payload.items():

@@ -4,13 +4,14 @@ import {TestCar,clamp,wrap} from './physics.js';
 // Metres throughout: the road detail stays attached to the measured surface.
 // These wear patterns are game art, not surveyed marks of the real circuit.
 export async function createTrackSurface(renderer,data){
- const texture=await new THREE.TextureLoader().loadAsync('./assets/texturas/asfalto_base_v1.png');
+ const loader=new THREE.TextureLoader();
+ const [texture,normalMap,roughnessMap]=await Promise.all(['diff','nor_gl','rough'].map(kind=>loader.loadAsync(`./assets/texturas/asfalto_${kind}_v2.jpg`)));
  texture.colorSpace=THREE.SRGBColorSpace;
- texture.wrapS=texture.wrapT=THREE.RepeatWrapping;
- texture.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());
- texture.minFilter=THREE.LinearMipmapLinearFilter;
- const material=new THREE.MeshStandardMaterial({name:'Asfalto_detalhado_v1',map:texture,bumpMap:texture,bumpScale:.0025,roughness:.94,metalness:0});
- material.color.setRGB(.48,.49,.50);
+ for(const map of [texture,normalMap,roughnessMap]){
+  map.wrapS=map.wrapT=THREE.RepeatWrapping;map.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());map.minFilter=THREE.LinearMipmapLinearFilter;
+ }
+ const material=new THREE.MeshStandardMaterial({name:'Asfalto_PBR_v2',map:texture,normalMap,normalScale:new THREE.Vector2(.55,.55),roughnessMap,roughness:1,metalness:0});
+ material.color.setRGB(.82,.84,.86);
  material.onBeforeCompile=shader=>{
   shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute vec4 roadData;\nvarying vec4 vRoad;');
   shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvRoad=roadData;');
@@ -21,11 +22,11 @@ float roadNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(
 float brakeZone(float s,float a,float b){return smoothstep(a,a+25.0,s)*(1.0-smoothstep(b-15.0,b,s));}
 `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
-// Blend rotated, differently scaled grains to conceal the repeating tile.
-vec3 grain=texture2D(map,vMapUv).rgb*.68+texture2D(map,mat2(.0,-1.37,1.37,.0)*vMapUv+vec2(.31,.73)).rgb*.32;
+// Photographic aggregate with independent normal and roughness maps.
+vec3 grain=texture2D(map,vMapUv).rgb;
 float d=vRoad.x, s=vRoad.y, width=vRoad.z;
 float macro=roadNoise(vMapUv*.18)*.65+roadNoise(vMapUv*.047)*.35;
-float wear=mix(.79,1.12,macro);
+float wear=mix(.84,1.15,macro);
 float brake=clamp(brakeZone(s,160.0,345.0)+brakeZone(s,1380.0,1590.0)+brakeZone(s,2320.0,2460.0)+brakeZone(s,2950.0,3160.0),0.0,1.0);
 float path=vRoad.w+(roadNoise(vec2(s*.012,5.3))-.5)*.8;
 float lateral=d-path;
@@ -37,13 +38,21 @@ rubber+=tirePair*brake*.19*(.3+.7*streak);
 float jointDistance=abs(fract((s+roadNoise(vec2(d*.45,3.0))*.9)/73.0)-.5)*73.0;
 float joint=(1.0-smoothstep(.015,.065,jointDistance))*smoothstep(.28,.55,roadNoise(vec2(s*.1,d*.4)));
 float edge=smoothstep(width*.34,width*.5,abs(d));
-diffuseColor.rgb*=grain*wear*(1.0-rubber)*(1.0-joint*.24);
-diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(1.10,1.06,.98),edge*.55);
+// Sparse resurfaced areas and longitudinal paving seams, in road metres.
+float section=floor(s/47.0),along=mod(s,47.0),patchCenter=(roadHash(vec2(section,2.4))-.5)*width*.5;
+float roadRepair=step(.79,roadHash(vec2(section,7.6)))*smoothstep(5.0,7.0,along)*(1.0-smoothstep(32.0,34.0,along));
+roadRepair*=1.0-smoothstep(1.2,1.45,abs(d-patchCenter));
+float seam=(1.0-smoothstep(.01,.045,abs(abs(d)-width*.24)))*(.4+.6*roadNoise(vec2(s*.13,d)));
+diffuseColor.rgb*=grain*wear*(1.0-rubber)*(1.0-joint*.24)*(1.0-roadRepair*.13)*(1.0-seam*.12);
+diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(1.13,1.08,.98),edge*.6);
+`);
+  shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`
+float roughnessFactor=clamp(.66+.30*texture2D(roughnessMap,vRoughnessMapUv).g-rubber*.28+edge*.05+roadRepair*.04,.5,1.0);
 `);
  };
- material.customProgramCacheKey=()=> 'opala-track-asphalt-v1';
+ material.customProgramCacheKey=()=> 'opala-track-asphalt-pbr-v2';
  const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
- const stats={texture:'assets/texturas/asfalto_base_v1.png',tileMetres:2.4,anisotropy:texture.anisotropy,vertices:0,wear:'decorative',bumpMetres:.0025};
+ const stats={texture:'assets/texturas/asfalto_diff_v2.jpg',normal:'assets/texturas/asfalto_nor_gl_v2.jpg',roughness:'assets/texturas/asfalto_rough_v2.jpg',resolution:2048,tileMetres:2.1,anisotropy:texture.anisotropy,vertices:0,wear:'decorative',pbr:true};
  function geometry(source){
   const g=source.index?source.toNonIndexed():source;
   if(g!==source)source.dispose();
@@ -53,7 +62,7 @@ diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(1.10,1.06,.98),edge*
    const a=data.samples[(p.i-18+probe.n)%probe.n],b=data.samples[(p.i+18)%probe.n];
    const bend=wrap(Math.atan2(b[8],b[7])-Math.atan2(a[8],a[7]));
    const path=clamp(bend*1.2,-1,1)*p.width*.18;
-   uv.set([x/2.4,z/2.4],i*2);coords.set([p.d,p.s,p.width,path],i*4);
+   uv.set([x/2.1,z/2.1],i*2);coords.set([p.d,p.s,p.width,path],i*4);
   }
   // Do not interpolate a whole lap of wear patterns across the closing triangle.
   for(let i=0;i<pos.count;i+=3){

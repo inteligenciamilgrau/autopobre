@@ -36,3 +36,5 @@
   }
   #menu article{width:min(390px,100%);margin-top:22vh}
 }
+
+.race-restart[hidden]{display:none!important}

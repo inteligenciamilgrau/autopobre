@@ -7,9 +7,9 @@ const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const idle={throttle:0,brake:1,left:0,right:0,handbrake:0,reverse:0};
 const money=n=>`R$ ${n.toFixed(2).replace('.',',')}`;
 export class ImmersiveMode {
- constructor({scene,carRoot,car,data,driver,rivalTemplate,resetVehicle,releaseMouse,onNormal}){
+ constructor({scene,carRoot,car,data,driver,rivalTemplate,skidMarks,resetVehicle,releaseMouse,onNormal}){
   Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
-  this.freeFuel=12;this.freeTotalLaps=3;this.freeFinished=false;this.freePosition=6;this.freePlayerProgress=0;this.field=new RaceField(data);this.parts=new CrashParts(scene);this.state=new ImmersiveState(profile);this.visual=new ImmersiveVisuals(scene,carRoot,data,driver,car,rivalTemplate);this.lastPhase='off';this.lastUI='';this.near=-1;this.rivals=this.field.rivals;this.projectile=null;this.towOrigin=0;this.prepLitres=6;this.prepFilm=false;
+  this.freeFuel=12;this.freeTotalLaps=3;this.freeFinished=false;this.freePosition=6;this.freePlayerProgress=0;this.rivalTrails=Array.from({length:5},()=>skidMarks?.createTrail());this.field=new RaceField(data,{onStep:(r,i,input,dt)=>this.rivalTrails[i]?.update(r.car,input,dt),onReset:()=>this.rivalTrails.forEach(t=>t?.breakTrails())});this.parts=new CrashParts(scene);this.state=new ImmersiveState(profile);this.visual=new ImmersiveVisuals(scene,carRoot,data,driver,car,rivalTemplate);this.lastPhase='off';this.lastUI='';this.near=-1;this.rivals=this.field.rivals;this.projectile=null;this.towOrigin=0;this.prepLitres=6;this.prepFilm=false;
   this.brand=document.querySelector('.wordmark');this.baseBrand=this.brand.innerHTML;this.baseTitle=document.title;
   this.controls=document.querySelector('footer>div');this.baseControls=this.controls.innerHTML;
   this.panel=document.createElement('section');this.panel.id='immersivePanel';this.panel.className='hidden';this.panel.setAttribute('aria-label','Auto-Pobre Racing');document.body.append(this.panel);

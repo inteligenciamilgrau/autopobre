@@ -13,7 +13,7 @@ export class SkidMarks {
   this.geometry=new THREE.BufferGeometry();
   for(const [name,size] of [['position',3],['skidUv',2],['strength',1]])
    this.geometry.setAttribute(name,new THREE.BufferAttribute(new Float32Array(capacity*4*size),size).setUsage(THREE.DynamicDrawUsage));
-  const indices=new Uint16Array(capacity*6);
+  const IndexArray=capacity*4>65535?Uint32Array:Uint16Array,indices=new IndexArray(capacity*6);
   for(let i=0;i<capacity;i++)indices.set([i*4,i*4+1,i*4+2,i*4+2,i*4+1,i*4+3],i*6);
   this.geometry.setIndex(new THREE.BufferAttribute(indices,1));this.geometry.setDrawRange(0,0);
   this.material=new THREE.MeshBasicMaterial({color:0x100e0c,transparent:true,depthWrite:false,
@@ -41,6 +41,12 @@ export class SkidMarks {
   for(const w of this.wheels){w.last=null;w.strength=0;w.stamp=0;}
   this.previous=null;
  }
+ createTrail(){
+  // Each car owns its wheel history; all trails share this one bounded mesh.
+  return {wheels:WHEELS.map(w=>({...w,last:null,strength:0,segments:0})),previous:null,
+   breakTrails:SkidMarks.prototype.breakTrails,update:SkidMarks.prototype.update,
+   addSegment:(a,b)=>this.addSegment(a,b)};
+ }
  update(car,input,dt){
   const speed=Math.hypot(car.vx,car.vy);
   // Reset, relocation or wall correction must never draw a line across the circuit.
@@ -57,7 +63,7 @@ export class SkidMarks {
    const wheelSlip=Math.abs(pointLat*Math.cos(w.front?car.steer:0)-pointLong*Math.sin(w.front?car.steer:0));
    const rearSlip=Math.abs(lateral-car.yaw*1.117);
    const drift=clamp((rearSlip-1.5)/3,0,1)*clamp((wheelSlip-.7)/2,0,1);
-   const braking=input.brake?clamp((speed-8)/7,0,1)*.72:0;
+   const braking=clamp(((input.brake??0)-.3)/.7,0,1)*clamp((speed-8)/7,0,1)*.72;
    const handbrake=input.handbrake&&!w.front?clamp((speed-2)/5,0,1)*.86:0;
    const wheelspin=w.front?0:clamp(((car.rearSlipSpeed??0)-1)/12,0,1);
    const target=surface.onRoad?Math.max(wheelspin,speed>2?Math.max(drift*.82,braking,handbrake):0):0;

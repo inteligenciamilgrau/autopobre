@@ -19,7 +19,8 @@ ASSETS = (
     'opala99_assinaturas_omp.glb', 'opala99_seiva_danilo.glb',
     'abertura/desclassificado_v1.png', 'abertura/abertura_stevan_opala99.png', 'abertura/logo_auto_pobre_racing.png',
     'piloto/capacete_publico.jpg', 'piloto/referencia_frente.png',
-    'texturas/asfalto_base_v1.png', 'texturas/cockpit_faixa_invent.png',
+    'texturas/asfalto_diff_v2.jpg', 'texturas/asfalto_nor_gl_v2.jpg', 'texturas/asfalto_rough_v2.jpg',
+    'texturas/asfalto_creditos.txt', 'texturas/cockpit_faixa_invent.png',
 )
 THREE = (
     'build/three.module.js', 'build/three.core.js',

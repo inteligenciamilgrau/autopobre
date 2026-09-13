@@ -66,3 +66,5 @@ O `.gitignore` mantém fora do repositório segredos/configurações locais, dep
 Repositório: [inteligenciamilgrau/autopobre](https://github.com/inteligenciamilgrau/autopobre). Antes de cada commit, confira `git status` e os arquivos preparados para commit. O `.gitignore` não remove arquivos de um histórico Git existente.
 
 Veja [a revisão de segurança](SEGURANCA.md) e [as regras do modo imersivo](pista_interlagos/VERSAO_IMERSIVA.md).
+
+O asfalto usa os mapas de cor, normal OpenGL e rugosidade em 2K de [Clean Asphalt, de Dimitrios Savva / Poly Haven](https://polyhaven.com/a/clean_asphalt), sob CC0. O shader acrescenta borracha na linha de corrida, remendos, juntas e desgaste nas bordas. Essas marcas decorativas não representam um levantamento do asfalto real de Interlagos. Os cinco adversários também deixam marcas dinâmicas nas freadas fortes e derrapadas, nos dois modos de corrida; todos os pneus compartilham um único buffer limitado.

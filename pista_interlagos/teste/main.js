@@ -46,7 +46,7 @@ scene.add(new THREE.HemisphereLight('#d9edff','#60643c',2.4));
 const sun=new THREE.DirectionalLight('#fff2d5',3);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:2048,touchDevice?1024:2048);Object.assign(sun.shadow.camera,{left:-45,right:45,top:45,bottom:-45,near:1,far:250});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;scene.add(sun,sun.target);
 const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
 const cockpit=createCockpit();carRoot.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,96);
-const skidMarks=new SkidMarks();scene.add(skidMarks.mesh);
+const skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
 const tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
 const carAudio=new CarAudio();
 function audioControls(){ for(const key of ['musicVolume','effectsVolume']){$(key).value=Math.round(carAudio[key]*100);$(key+'Value').textContent=`${Math.round(carAudio[key]*100)}%`;} $('volume').value=Math.round(carAudio.volume*100);$('volumeValue').textContent=`${Math.round(carAudio.volume*100)}%`;$('mute').textContent=carAudio.muted?'Ativar som (M)':'Silenciar (M)';$('mute').setAttribute('aria-pressed',String(carAudio.muted)); }
@@ -304,7 +304,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  }
  renderer.render(scene,camera);
 }
-function updateMenuLabels(){const resume=sessionStarted&&!immersive?.freeFinished&&$('immersiveMode').checked===!!immersive?.active;$('start').textContent=resume?'Voltar à pista →':sessionStarted?'Iniciar nova corrida →':'Entrar na pista →';$('settingsResume').hidden=!sessionStarted||(!immersive?.active&&immersive?.freeFinished);$('raceResult').hidden=immersive?.active||!immersive?.freeFinished;if(!immersive?.active&&immersive?.freeFinished)$('raceResult').textContent=`Bandeirada! ${immersive.freePosition}º de 6 · ${immersive.freeTotalLaps} voltas · ${fmt(car.clock)}`;}
+function updateMenuLabels(){const resume=sessionStarted&&(immersive?.active||!immersive?.freeFinished)&&$('immersiveMode').checked===!!immersive?.active;$('start').textContent=resume?'Voltar à pista →':sessionStarted?'Iniciar nova corrida →':'Entrar na pista →';$('restartRace').hidden=!resume;$('settingsResume').hidden=!sessionStarted||(!immersive?.active&&immersive?.freeFinished);$('settingsRestart').hidden=$('settingsResume').hidden;$('raceResult').hidden=immersive?.active||!immersive?.freeFinished;if(!immersive?.active&&immersive?.freeFinished)$('raceResult').textContent=`Bandeirada! ${immersive.freePosition}º de 6 · ${immersive.freeTotalLaps} voltas · ${fmt(car.clock)}`;}
 function resumeRace(){if(!sessionStarted||(!immersive.active&&immersive.freeFinished))return;$('settings').close();menu(false);}
 $('settingsResume').onclick=resumeRace;
 function menu(show){paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();mobile?.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
@@ -329,13 +329,23 @@ window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camer
 $('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit');};
 $('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit');};
 $('skinButton').onclick=cycleLivery;
-$('start').onclick=()=>{const same=sessionStarted&&$('immersiveMode').checked===immersive.active&&!(!immersive.active&&immersive.freeFinished);if(same){menu(false);return;}automatic=false;if($('immersiveMode').checked){immersive.start();}else{if(immersive.active)immersive.disable();reset();setCameraMode('chase');updateCar(1);updateCamera(1);}sessionStarted=true;menu(false);};$('tour').onclick=()=>{if(!ready||$('immersiveMode').checked)return;if(immersive?.active)immersive.disable();reset();sessionStarted=true;automatic=true;menu(false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{try{await setLivery(e.target.value);}catch(err){status('Falha ao carregar a pintura. Abra o teste pelo INICIAR_TESTE.cmd.');console.error(err);}};
+function beginRace(restart=false){
+ const same=sessionStarted&&$('immersiveMode').checked===immersive.active&&!(!immersive.active&&immersive.freeFinished);
+ if(same&&!restart){menu(false);return;}
+ automatic=false;
+ if($('immersiveMode').checked){immersive.start();}
+ else{if(immersive.active)immersive.disable();reset();setCameraMode('chase');updateCar(1);updateCamera(1);}
+ sessionStarted=true;menu(false);
+}
+$('start').onclick=()=>beginRace();$('restartRace').onclick=()=>beginRace(true);
+$('settingsRestart').onclick=()=>{$('settings').close();beginRace(true);};
+$('tour').onclick=()=>{if(!ready||$('immersiveMode').checked)return;if(immersive?.active)immersive.disable();reset();sessionStarted=true;automatic=true;menu(false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{try{await setLivery(e.target.value);}catch(err){status('Falha ao carregar a pintura. Abra o teste pelo INICIAR_TESTE.cmd.');console.error(err);}};
 try{
  data=await (await fetch('../dados/pista.json')).json();car=new TestCar(data);
  roadSurface=await createTrackSurface(renderer,data);
  driver=await createDriver(cockpit.wheel,cockpit.wheelTurn);carRoot.add(driver.root);
  const track=await loader.loadAsync('../exports/interlagos_pista.glb');flattenStatic(track.scene);await setLivery($('livery').value);
- immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
+ immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
  ready=true;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;$('start').textContent='Entrar na pista →';
  window.interlagos={ready:true,car,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),
