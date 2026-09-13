@@ -97,7 +97,7 @@ export class SoundEffects {
   level('wind',scene.driving?Math.min(.075,speed*.0014):0);
   level('scrape',scene.tankDetached?Math.min(.15,speed*.012):0);
   level('leak',scene.tankDetached&&scene.fuel>0?.025:0);
-  for(let i=0;i<2;i++){const r=scene.rivals?.[i];level('rival'+i,r?Math.max(0,1-r.distance/75)**2*.085:0,r?65+r.speed*4:65,r?.pan||0);}
+  for(let i=0;i<2;i++){const r=scene.rivals?.[i];level('rival'+i,r?Math.max(0,1-r.distance/95)**2*.23:0,r?65+r.speed*4:65,r?.pan||0);}
   if(!audible)return;
   const braking=scene.phase==='tow'&&(scene.truckSpeed||0)<2;
   if(braking&&!this.wasBraking)this.play('towBrake');this.wasBraking=braking;

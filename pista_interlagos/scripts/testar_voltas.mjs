@@ -18,4 +18,14 @@ c=new TestCar(data);c.trackLap(surface(L-5),surface(2),7,-4);assert.equal(c.laps
 c.trackLap(surface(100),surface(550),450,50);c.trackLap(surface(L-5),surface(2),7,50);assert.equal(c.laps,0,'missing checkpoints never finishes');
 const field=new RaceField(data);field.rivals[0].progress=L+1;field.step(c,1/120,3);assert(!field.rivals[0].finished,'rivals race past lap one');field.rivals[0].progress=3*L+1;field.step(c,1/120,3);assert(field.rivals[0].finished,'rivals finish after three laps');
 const driven=new TestCar(data);for(let i=0;i<120*900&&driven.laps<3;i++)driven.step(recognitionInput(driven),1/120);assert.equal(driven.laps,3,'three actual simulated laps count correctly');
+const gridCar=new TestCar(data);gridCar.resetGrid();const grid=new RaceField(data);grid.reset(gridCar.surface.s,{grid:true});
+assert(gridCar.surface.s>L-60&&gridCar.surface.s<L-45);
+assert(grid.rivals.every(r=>r.car.surface.s>gridCar.surface.s&&r.car.surface.s<L-5),'every rival starts behind the finish line, ahead of player');
+gridCar.trackLap(surface(L-4),surface(2),6,10);assert(!gridCar.awaitingStart);assert.equal(gridCar.laps,0);assert.equal(gridCar.lastLapValid,null);assert(gridCar.lapValid,'initial crossing is not an invalid lap');
+fullLap(gridCar);fullLap(gridCar);fullLap(gridCar);assert.equal(gridCar.laps,3,'three complete laps after the initial crossing');
+grid.rivals[0].progress=3*L+1;grid.step(gridCar,1/120,3);assert(!grid.rivals[0].finished,'AI must reach the actual finish, not the back of the grid');
+grid.rivals[0].progress=3*L+grid.gridLeadIn+1;grid.step(gridCar,1/120,3);assert(grid.rivals[0].finished);
+const gridDriven=new TestCar(data);gridDriven.resetGrid();let crossed=false;
+for(let i=0;i<120*900&&gridDriven.laps<3;i++){gridDriven.step(recognitionInput(gridDriven),1/120);if(!gridDriven.awaitingStart&&!crossed){crossed=true;assert.equal(gridDriven.lastLapValid,null);assert.equal(gridDriven.laps,0);}}
+assert.equal(gridDriven.laps,3,'physical start behind the line followed by three valid laps');
 console.log('Laps passed: runoff, small excursions, actual shortcuts, invalid laps, recovery, reverse, checkpoints, three-lap rivals and three complete simulated laps.');

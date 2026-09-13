@@ -33,7 +33,7 @@ export class ImmersiveMode {
  allowsPointer(){return ['race','tow','grid','prepare'].includes(this.state.phase);}
  blockingUI(){return this.active&&!this.allowsPointer();}
  save(){try{localStorage.setItem('opala99-immersive-v1',JSON.stringify(this.state.profile));}catch{}}
- start(){this.resetVehicle();this.state.start();this.visual.reset();this.near=-1;this.walkToFan=null;this.footDistance=0;this.projectile=null;this.raceProgress=0;this.previousS=0;this.field.reset();this.parts.reset();this.rivals=this.field.rivals;this.debrisTimer=6;this.contactCooldown=0;this.sync();}
+ start(){this.resetVehicle();this.state.start();this.visual.reset();this.near=-1;this.walkToFan=null;this.footDistance=0;this.projectile=null;this.raceProgress=0;this.previousS=this.car.surface.s;this.field.reset(this.car.surface.s,{grid:true});this.parts.reset();this.rivals=this.field.rivals;this.debrisTimer=6;this.contactCooldown=0;this.sync();}
  disable(){this.state.disable();this.visual.restoreCamera();this.visual.root.visible=this.visual.damage.visible=false;this.carRoot.visible=true;this.panel.classList.add('hidden');this.hud.classList.add('hidden');document.getElementById('dqScreen').classList.add('hidden');document.body.classList.remove('disqualified-scene','podium-scene','tow-scene');document.body.classList.remove('immersive-mode','immersive-stage');this.brand.innerHTML=this.baseBrand;this.controls.innerHTML=this.baseControls;document.title=this.baseTitle;this.lastPhase='off';}
  sync(){
   const s=this.state;if(s.phase===this.lastPhase)return;this.lastPhase=s.phase;this.lastUI='';
@@ -42,7 +42,7 @@ export class ImmersiveMode {
   this.controls.innerHTML=this.baseControls.replace('reposicionar','chamar reboque');
   if(this.blockingUI())this.releaseMouse();
   if(['crowd','prepare','starting','broken','snag','podium'].includes(s.phase))this.stop();
-  if(s.phase==='prepare'){this.resetVehicle();this.field.reset();this.rivals=this.field.rivals;}
+  if(s.phase==='prepare'){this.resetVehicle();this.field.reset(this.car.surface.s,{grid:true});this.rivals=this.field.rivals;}
   if(s.phase==='grid'){this.resetVehicle();this.previousS=this.car.surface.s;}
   if(s.phase==='broken')this.towOrigin=this.car.surface.s;
   if(s.phase==='inspection'){
@@ -85,11 +85,11 @@ export class ImmersiveMode {
   else if(s.phase==='starting')s.startEngine(input,dt);
   else if(s.phase==='grid'){const before=Math.ceil(s.countdown);s.countdown-=dt;if(s.countdown<=0)s.startRace();else if(Math.ceil(s.countdown)<before)s.emitSound('countdown');}
   else if(s.phase==='race'){
-   const before=Math.hypot(c.vx,c.vy);c.step(input,dt);const speed=Math.hypot(c.vx,c.vy),L=this.data.meta.reconstructed_xy_m;if(before-speed>4)this.wallImpact(before-speed);
+   const before=Math.hypot(c.vx,c.vy);c.step(input,dt);const speed=Math.hypot(c.vx,c.vy),L=this.data.meta.reconstructed_xy_m,impact=Math.max(c.wallImpactSpeed??0,before-speed);if(impact>4)this.wallImpact(impact);
    let travel=c.surface.s-this.previousS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;this.raceProgress=Math.max(0,this.raceProgress+travel);this.previousS=c.surface.s;
    this.contacts(this.field.step(c,dt,true));
    s.position=1+this.rivals.filter(r=>r.progress>this.raceProgress).length;
-   s.raceStep({speed,throttle:input.throttle,wheelspin:c.rearSlipSpeed,offTrack:Math.max(0,Math.abs(c.surface.d)-c.surface.width/2),collision:before-speed>4,finished:c.laps>=1,position:s.position},dt);
+   s.raceStep({speed,throttle:input.throttle,wheelspin:c.rearSlipSpeed,offTrack:Math.max(0,Math.abs(c.surface.d)-c.surface.width/2),collision:impact>4,finished:c.laps>=1,position:s.position},dt);
    this.hazards(dt);
   }else if(s.phase==='broken'){s.rescueWait-=dt;if(s.rescueWait<=0)s.beginTow();}
   else if(s.phase==='tow'){
@@ -112,16 +112,16 @@ export class ImmersiveMode {
   }
   if(this.projectile){this.projectile.age+=dt;if(this.projectile.age>=this.projectile.duration){const target=this.projectile.end,fx=c.x+Math.cos(c.heading)*.45,fy=-c.y-Math.sin(c.heading)*.45;if(Math.hypot(target.x-fx,target.z-fy)<1.35)s.hitDebris();else s.emitSound('debrisMiss');this.projectile=null;}}
  }
- resetField(){this.freeFuel=12;this.freeFinished=false;this.freePosition=6;this.freePlayerProgress=0;this.freeLastS=this.car.surface.s;this.field.reset(this.car.surface.s);this.rivals=this.field.rivals;this.parts.reset();}
+ resetField(){this.freeFuel=12;this.freeFinished=false;this.freePosition=6;this.freePlayerProgress=0;this.freeLastS=this.car.surface.s;this.field.reset(this.car.surface.s,{grid:!!this.car.awaitingStart});this.rivals=this.field.rivals;this.parts.reset();}
  wallImpact(speed){this.parts.burst({speed,point:[this.car.x+Math.cos(this.car.heading)*2,this.car.y+Math.sin(this.car.heading)*2]},this.car);}
  contacts(hits){for(const hit of hits){this.parts.burst(hit,this.car);if(hit.player&&this.active)this.state.hitCar(Math.min(1.5,hit.speed/10));else{const dx=hit.point[0]-this.car.x,dy=hit.point[1]-this.car.y,d=Math.hypot(dx,dy);if(d<65)this.state.emitSound('collision',{strength:Math.min(1.5,hit.speed/10)*(1-d/65),pan:clamp((-dx*Math.sin(this.car.heading)+dy*Math.cos(this.car.heading))/Math.max(1,d),-1,1)});}}}
- stepFree(dt,input={}){const previous=this.freeFuel;this.freeFuel=Math.max(0,this.freeFuel-dt*(.002+Math.hypot(this.car.vx,this.car.vy)*.00045+(input.throttle||0)*.005+(this.car.rearSlipSpeed||0)*.0023));if(previous>=1&&this.freeFuel<1)this.state.emitSound('reserve');if(previous>0&&this.freeFuel===0)this.state.emitSound('fuelEmpty');this.contacts(this.field.step(this.car,dt,this.freeTotalLaps));
+ stepFree(dt,input={}){if(this.freeFinished)return;const previous=this.freeFuel;this.freeFuel=Math.max(0,this.freeFuel-dt*(.002+Math.hypot(this.car.vx,this.car.vy)*.00045+(input.throttle||0)*.005+(this.car.rearSlipSpeed||0)*.0023));if(previous>=1&&this.freeFuel<1)this.state.emitSound('reserve');if(previous>0&&this.freeFuel===0)this.state.emitSound('fuelEmpty');this.contacts(this.field.step(this.car,dt,this.freeTotalLaps));
   const L=this.data.meta.reconstructed_xy_m;let advance=this.car.surface.s-(this.freeLastS??0);if(advance<-L/2)advance+=L;if(advance>L/2)advance-=L;this.freePlayerProgress+=advance;this.freeLastS=this.car.surface.s;
-  const progress=Math.min(this.freePlayerProgress,this.car.laps*L+this.car.surface.s);
+  const progress=Math.min(this.freePlayerProgress,this.car.laps*L+this.car.surface.s+this.field.gridLeadIn);
   this.freePosition=1+this.rivals.filter(r=>r.progress>progress).length;
   if(this.car.laps>=this.freeTotalLaps&&!this.freeFinished){this.freeFinished=true;this.freePosition=1+this.rivals.filter(r=>r.finished).length;this.state.emitSound(this.freePosition===1?'podiumWin':'podiumLoss');}
  }
- audioScene(){const s=this.state,c=this.car;return {phase:s.active?s.phase:'free',starter:s.phase==='starting'&&s.crank>0,pressure:s.pressure,crank:s.crank,truckSpeed:s.phase==='tow'?s.truckSpeed:0,towGap:s.towGap,tankDetached:s.active&&s.tankDetached,fuel:s.fuel,won:s.result?.position===1&&s.result?.status!=='Desclassificado',driving:!s.active||s.phase==='race',rivals:!s.active||['prepare','starting','grid','race'].includes(s.phase)?this.rivals.filter(r=>!r.finished).map(r=>{const p={x:r.car.x,z:-r.car.y},dx=p.x-c.x,dy=-p.z-c.y,distance=Math.hypot(dx,dy);return {distance,speed:['prepare','starting','grid'].includes(s.phase)?10+6*Math.sin(this.visual.time*3+r.progress):Math.hypot(r.car.vx,r.car.vy),pan:clamp((-dx*Math.sin(c.heading)+dy*Math.cos(c.heading))/Math.max(1,distance),-1,1)};}).sort((a,b)=>a.distance-b.distance).slice(0,2):[]};}
+ audioScene(){const s=this.state,c=this.car;return {phase:s.active?s.phase:this.freeFinished?'free-finish':'free',starter:s.phase==='starting'&&s.crank>0,pressure:s.pressure,crank:s.crank,truckSpeed:s.phase==='tow'?s.truckSpeed:0,towGap:s.towGap,tankDetached:s.active&&s.tankDetached,fuel:s.fuel,won:s.active?s.result?.position===1&&s.result?.status!=='Desclassificado':this.freeFinished&&this.freePosition===1,driving:!s.active?!this.freeFinished:s.phase==='race',rivals:!s.active||['prepare','starting','grid','race'].includes(s.phase)?this.rivals.filter(r=>!r.finished).map(r=>{const p={x:r.car.x,z:-r.car.y},dx=p.x-c.x,dy=-p.z-c.y,distance=Math.hypot(dx,dy);return {distance,speed:['prepare','starting','grid'].includes(s.phase)?10+6*Math.sin(this.visual.time*3+r.progress):Math.hypot(r.car.vx,r.car.vy),pan:clamp((-dx*Math.sin(c.heading)+dy*Math.cos(c.heading))/Math.max(1,distance),-1,1)};}).sort((a,b)=>a.distance-b.distance).slice(0,2):[]};}
  audioCommand(input){return this.active?{...input,throttle:['race','grid'].includes(this.state.phase)?input.throttle:0,engineOff:!['race','grid','inspection'].includes(this.state.phase)||!!this.state.reason}:{...input,engineOff:this.freeFuel<=0};}
  update(dt,camera){this.camera=camera;this.parts.update(dt,this.car);if(!this.active){this.visual.updateFree(this.rivals,dt);return;}this.sync();this.visual.update(this.state,this.car,dt,this.rivals,this.projectile,this.towOrigin);this.visual.camera(camera,this.state,dt);this.ui();this.positionDialogue();}
  prepCost(){const cost=100+this.prepLitres*6.5+(this.prepFilm?30:0),price=this.panel.querySelector('#immCost');if(price)price.textContent=`${this.prepLitres} L · Total ${money(cost)} · Vaquinha ${money(this.state.cash)}`;const b=this.panel.querySelector('[data-action="buy"]');if(b)b.disabled=cost>this.state.cash;}

@@ -10,6 +10,10 @@ O pódio vem antes da vistoria, com o primeiro no centro e os pares à esquerda.
 
 ## Preparar e publicar
 
+Nos dois modos, os seis carros largam atrás da linha. A primeira passagem não conta como volta completa nem como volta inválida. As zebras verde e amarela e o guardrail percorrem as duas bordas do circuito. Os motores adversários ficam mais presentes na mistura de efeitos, com atenuação pela distância e posição estéreo.
+
+Depois das três voltas válidas na corrida livre, a tela “Fim de corrida” mostra a classificação e o tempo, toca a música do resultado e permite correr novamente. A partida encerrada não pode ser retomada. Se uma volta for rejeitada, o aviso permanece por dez segundos após a linha. `verificar_final_corrida.py` simula a corrida inteira e verifica o encerramento, o reinício e as músicas de vitória/derrota.
+
 A corrida normal tem **3 voltas**; a imersiva tem **1 volta**. O HUD mostra volta/total, posição entre os seis carros, tempo, combustível e velocidade. A câmera da corrida normal começa atrás do carro. Ao pausar, **Voltar à pista** retoma a sessão; ao completar as três voltas, o menu mostra a classificação e permite iniciar uma nova corrida. As instruções de teclado e os dados técnicos ficam fora da tela de corrida.
 
 Na abertura do celular, **Tela cheia** entra e sai desse modo quando o navegador oferece suporte. Durante a compra de gasolina, arraste o dedo ou o mouse na pista para olhar o carro ao redor; o painel de compra continua utilizável. A publicação inclui versões nos módulos e estilos para evitar misturar arquivos antigos do cache com a atualização.
@@ -67,4 +71,6 @@ Repositório: [inteligenciamilgrau/autopobre](https://github.com/inteligenciamil
 
 Veja [a revisão de segurança](SEGURANCA.md) e [as regras do modo imersivo](pista_interlagos/VERSAO_IMERSIVA.md).
 
-O asfalto usa os mapas de cor, normal OpenGL e rugosidade em 2K de [Clean Asphalt, de Dimitrios Savva / Poly Haven](https://polyhaven.com/a/clean_asphalt), sob CC0. O shader acrescenta borracha na linha de corrida, remendos, juntas e desgaste nas bordas. Essas marcas decorativas não representam um levantamento do asfalto real de Interlagos. Os cinco adversários também deixam marcas dinâmicas nas freadas fortes e derrapadas, nos dois modos de corrida; todos os pneus compartilham um único buffer limitado.
+O asfalto usa os mapas de cor, normal OpenGL e rugosidade em 2K de [Clean Asphalt, de Dimitrios Savva / Poly Haven](https://polyhaven.com/a/clean_asphalt), sob CC0. O shader acrescenta borracha na linha de corrida, remendos, juntas e desgaste nas bordas, com uma camada de grãos maiores e manchas contrastadas para leitura em velocidade. Essas marcas decorativas não representam um levantamento do asfalto real de Interlagos. Os cinco adversários também deixam marcas dinâmicas nas freadas fortes e derrapadas, nos dois modos de corrida; todos os pneus compartilham um único buffer limitado.
+
+Os adversários têm cinco estilos: freada tardia, especialista em curvas, condução constante, atacante e especialista em retas. Cada um tem ritmo, resposta dos pedais, antecipação das curvas e preferências de ultrapassagem próprios. Fora do asfalto, há maior resistência ao avanço, mais aderência que na versão anterior e trepidação da carroceria proporcional à velocidade. O guardrail contínuo acompanha os dois lados do traçado, com colisão que rebate para dentro e preserva o movimento ao raspar de lado. Essa proteção é uma adaptação para o jogo, não um levantamento das barreiras reais. `testar_terreno_rivais.mjs` verifica os estilos, o ritmo, a recuperação na grama e o contato ao redor do circuito.

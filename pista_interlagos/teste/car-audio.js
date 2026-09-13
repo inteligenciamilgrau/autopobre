@@ -64,7 +64,7 @@ export class CarAudio {
   const enabled=this.focused&&!this.muted&&this.volume>0&&this.context.state==='running';
   if(!this.paused)this.hasDriven=true;
   if(enabled&&this.paused&&!this.hasDriven)this.openingTime+=dt;
-  let theme=this.paused?(!this.hasDriven&&(this.recordings?.has('opening')?!this.recordings.ended:this.openingTime<18)?'opening':'menu'):
+  let theme=scene.phase==='free-finish'?(scene.won?'victory':'defeat'):this.paused?(!this.hasDriven&&(this.recordings?.has('opening')?!this.recordings.ended:this.openingTime<18)?'opening':'menu'):
    ['broken','tow','snag','disqualified'].includes(scene.phase)?'defeat':['podium','complete'].includes(scene.phase)?(scene.won?'victory':'defeat'):
    scene.driving||scene.phase==='grid'?'race':scene.phase==='crowd'?'sponsor':'menu';
   const recorded=this.recordings?.update(theme,enabled&&this.musicVolume>0);
