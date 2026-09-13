@@ -12,6 +12,7 @@ MODULES = (
     'immersive-mode.js', 'immersive-state.js', 'immersive-visuals.js',
     'skid-marks.js', 'track-surface.js', 'tyre-smoke.js',
     'style.css', 'immersive.css', 'abertura.css', 'index.html', 'sobre.html',
+    'favicon.svg', 'favicon.ico', 'apple-touch-icon.png',
 )
 ASSETS = (
     'opala99_assinaturas_omp.glb', 'opala99_seiva_danilo.glb',

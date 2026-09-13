@@ -29,7 +29,7 @@ def build():
     # Fail closed on accidental workstation paths or credential-like literals in text.
     private = re.compile(rb'(?i)(?<![A-Za-z0-9])[a-z]:[\\/]|/Users/|/home/|file://[A-Za-z/]|-----BEGIN (?:RSA |EC |OPENSSH )?PRIVATE KEY-----|gh[pousr]_[A-Za-z0-9]{30,}|sk-[A-Za-z0-9_-]{24,}')
     for name, data in payload.items():
-        if Path(name).suffix in {'.js', '.json', '.html', '.css'} and private.search(data):
+        if Path(name).suffix in {'.js', '.json', '.html', '.css', '.svg'} and private.search(data):
             raise ValueError('Private data candidate in public file: ' + name)
     dist.mkdir(exist_ok=True)
     for name, data in payload.items():
