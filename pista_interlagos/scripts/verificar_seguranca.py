@@ -37,8 +37,13 @@ def main():
         def log_message(self, *args):
             pass
 
-    local = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
-    release = ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(ReleaseHandler, directory=str(dist)))
+    class TestServer(ThreadingHTTPServer):
+        # Repeated browser reloads create bursts of short HTTP/1.0 connections.
+        # The default backlog of five can refuse image/module requests on Windows.
+        request_queue_size = 64
+
+    local = TestServer(('127.0.0.1', 0), Handler)
+    release = TestServer(('127.0.0.1', 0), functools.partial(ReleaseHandler, directory=str(dist)))
     for server in (local, release):
         threading.Thread(target=server.serve_forever, daemon=True).start()
     local_url = f'http://127.0.0.1:{local.server_port}'
