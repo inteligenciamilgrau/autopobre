@@ -15,7 +15,9 @@ with sync_playwright() as p:
   page.tap('#settingsButton');page.uncheck('#immersiveMode');page.select_option('#camera','aerial');page.tap('#settingsBack');page.tap('#start')
   wait_js(page,"interlagos.state.mode==='chase'");check('normal_starts_with_rear_camera',True)
   wait_js(page,"document.querySelector('#lap').textContent==='1 / 3'");page.wait_for_selector('#touchControls:not(.hidden)');check('three_laps_and_visible_position',page.is_visible('#racePosition') and page.inner_text('#racePosition')=='6º / 6')
-  check('pedals_left_steering_right',page.locator('.touch-pedals').bounding_box()['x']<200 and page.locator('.touch-steering').bounding_box()['x']>500)
+  def check_control_layout(width):
+   check(f'steering_left_all_pedals_right_{width}',page.evaluate("()=>{const r=s=>document.querySelector(s).getBoundingClientRect();const steering=r('#touchSteering');const pedals=['[data-key=KeyW]','[data-key=KeyS]','#touchReverse','#touchHandbrake'].map(r);return steering.right<innerWidth/2&&pedals.every(p=>p.left>innerWidth/2&&p.right<=innerWidth&&p.bottom<=innerHeight)&&pedals.every((a,i)=>pedals.slice(i+1).every(b=>a.right<=b.left||b.right<=a.left||a.bottom<=b.top||b.bottom<=a.top))&&pedals[0].bottom<pedals[1].top&&pedals[0].left===pedals[1].left}"))
+  check_control_layout(844)
   cdp=context.new_cdp_session(page);steer=page.locator('#touchSteering').bounding_box();gas=page.locator('[data-key="KeyW"]').bounding_box();pedal={'x':gas['x']+gas['width']/2,'y':gas['y']+gas['height']/2,'id':1};center=steer['x']+steer['width']/2
   finger={'x':center+20,'y':steer['y']+steer['height']/2,'id':2};cdp.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[pedal,finger]});wait_js(page,"interlagos.mobileInfo().steering>.1&&interlagos.mobileInfo().pressed.includes('KeyW')");check('analog_partial_steering_with_gas',page.evaluate('interlagos.mobileInfo().steering')<.5)
   finger['x']=steer['x']+23;cdp.send('Input.dispatchTouchEvent',{'type':'touchMove','touchPoints':[pedal,finger]});wait_js(page,'interlagos.mobileInfo().steering<-.9&&interlagos.car.steer>0');check('same_finger_crosses_to_other_direction',True)
@@ -36,7 +38,9 @@ with sync_playwright() as p:
   page.evaluate("()=>{const m=fixtureMode;m.state.phase='race';m.state.fail('Pane de teste');m.state.beginTow();m.sync();}");wait_js(page,"document.body.classList.contains('tow-scene')")
   for width,height in [(844,390),(667,375)]:
    page.set_viewport_size({'width':width,'height':height});page.wait_for_timeout(250);shot(f'reboque_{width}')
+   check_control_layout(width)
    check(f'tow_panel_leaves_center_visible_{width}',page.evaluate("()=>{const r=document.querySelector('#immersivePanel').getBoundingClientRect();return r.left>innerWidth*.5&&r.right<=innerWidth&&r.bottom<innerHeight-75}"))
+   check(f'tow_panel_clear_of_pedals_{width}',page.evaluate("()=>{const panel=document.querySelector('#immersivePanel').getBoundingClientRect();return ['[data-key=KeyW]','#touchHandbrake'].every(s=>panel.bottom<document.querySelector(s).getBoundingClientRect().top)}"))
   page.tap('#touchMenu');page.uncheck('#immersiveMode');page.tap('#settingsBack');page.tap('#start');check('return_to_normal_uses_rear_camera',page.evaluate("interlagos.state.mode==='chase'"))
   check('no_browser_errors',not report['errors']);report['passed']=True
  finally:
