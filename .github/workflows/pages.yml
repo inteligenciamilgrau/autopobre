@@ -44,6 +44,7 @@ jobs:
           node pista_interlagos/scripts/testar_eventos_audio.mjs
           node pista_interlagos/scripts/testar_colisoes.mjs
           node pista_interlagos/scripts/testar_saldo.mjs
+          node pista_interlagos/scripts/testar_imersivo.mjs
       - name: Gerar somente os arquivos publicos
         run: python pista_interlagos/scripts/preparar_publicacao.py
       - name: Configurar GitHub Pages

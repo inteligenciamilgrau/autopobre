@@ -18,6 +18,7 @@ def main():
 
     def check(name, value):
         report['checks'][name] = bool(value)
+        print(name, bool(value), flush=True)
         assert value, name
 
     class ReleaseHandler(SimpleHTTPRequestHandler):
@@ -75,7 +76,8 @@ def main():
             page.set_default_timeout(120000)
             page.on('pageerror', lambda error: report['browser_errors'].append(str(error)))
             console_errors = []
-            page.on('console', lambda message: console_errors.append(message.text) if message.type == 'error' else None)
+            page.on('requestfailed', lambda request: print('Request failed:', request.url, request.failure, flush=True))
+            page.on('console', lambda message: (console_errors.append(message.text), print(message.text, flush=True)) if message.type == 'error' else None)
             page.goto(local_url + '/pista_interlagos/teste/', wait_until='networkidle')
             page.wait_for_selector('#start:not([disabled])')
             check('local_game_ready_with_csp', True)
