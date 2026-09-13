@@ -171,6 +171,19 @@ function cameraHint(){
  $('cameraHint').textContent=pointerLocked?'Mouse capturado · mova para olhar · Esc libera · retorno após 3 s em movimento':lockUnavailable?'Arraste para girar · retorno após 3 s em movimento':'Clique na pista para capturar o mouse · Esc libera';
 }
 function lockFailed(){lockPending=false;orbit.enableRotate=true;cameraHint();status('Mouse livre. Clique novamente na pista para tentar capturar.');}
+// Ignore the entire touch gesture when it starts near driving controls,
+// before either the camera-mode handler or OrbitControls receives it.
+const blockedCameraTouches=new Set();
+for(const type of ['pointerdown','pointermove','pointerup','pointercancel']){
+ $('view').addEventListener(type,e=>{
+  if(e.pointerType!=='touch')return;
+  if(type==='pointerdown'&&mobile?.blocksCameraGesture(e))blockedCameraTouches.add(e.pointerId);
+  if(!blockedCameraTouches.has(e.pointerId))return;
+  if(type==='pointerup'||type==='pointercancel')blockedCameraTouches.delete(e.pointerId);
+  e.preventDefault();e.stopImmediatePropagation();
+ },{capture:true,passive:false});
+}
+window.addEventListener('blur',()=>blockedCameraTouches.clear());
 // Native lock is requested only from a deliberate click on the playing surface.
 $('view').addEventListener('pointerdown',e=>{
  if(!ready||paused||e.button!==0||immersive?.active&&!immersive.allowsPointer())return;

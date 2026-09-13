@@ -3,6 +3,7 @@ export class MobileControls {
   this.enabled=enabled;this.pressed=new Set();this.pointers=new Map();this.phase='';this.handbrake=false;this.steering=0;this.steeringPosition=0;this.steerPointer=null;
   document.body.classList.toggle('touch-device',enabled);
   this.root=document.getElementById('touchControls');
+  this.cameraGuards=[...this.root.querySelectorAll('.touch-steering,.touch-pedals,#touchHandbrake,#touchReverse,.touch-toolbar')];
   this.steerPad=document.getElementById('touchSteering');this.steerThumb=document.getElementById('steeringThumb');
   const steerAt=event=>{const rect=this.steerPad.getBoundingClientRect(),value=(event.clientX-rect.left-rect.width/2)/(rect.width/2-22);this.setSteering(Math.max(-1,Math.min(1,value)));};
   this.steerPad.addEventListener('pointerdown',event=>{if(!enabled||this.steerPointer!==null)return;event.preventDefault();event.stopPropagation();onUnlock();this.steerPointer=event.pointerId;this.steerPad.setPointerCapture(event.pointerId);this.steerPad.classList.add('active');steerAt(event);});
@@ -23,6 +24,14 @@ export class MobileControls {
   const fullscreen=async()=>{try{if(document.fullscreenElement){await document.exitFullscreen();return;}await document.documentElement.requestFullscreen();try{await screen.orientation?.lock?.('landscape');}catch{}}catch{openingFull.textContent='Tentar tela cheia novamente';}};
   full.onclick=fullscreen;openingFull.onclick=fullscreen;document.addEventListener('fullscreenchange',()=>{const label=document.fullscreenElement?'Sair da tela cheia':'Tela cheia';full.textContent=openingFull.textContent=label;});
   window.addEventListener('blur',()=>this.clear());document.addEventListener('visibilitychange',()=>{if(document.hidden)this.clear();});
+ }
+ blocksCameraGesture(event){
+  if(!this.enabled||this.root.classList.contains('hidden'))return false;
+  if(this.steerPointer!==null||this.pointers.size)return true;
+  return this.cameraGuards.some(element=>{
+   const rect=element.getBoundingClientRect(),margin=32;
+   return rect.width>0&&rect.height>0&&event.clientX>=rect.left-margin&&event.clientX<=rect.right+margin&&event.clientY>=rect.top-margin&&event.clientY<=rect.bottom+margin;
+  });
  }
  setHandbrake(value){this.handbrake=value;if(value)this.pressed.add('Space');else this.pressed.delete('Space');const button=document.getElementById('touchHandbrake');button.classList.toggle('held',value);button.setAttribute('aria-pressed',String(value));button.textContent=value?'SOLTAR FREIO DE MÃO':'FREIO DE MÃO';}
  setSteering(value){
