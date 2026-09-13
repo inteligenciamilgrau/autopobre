@@ -6,6 +6,16 @@ Na primeira visita, a versão imersiva vem selecionada. Depois, o jogo lembra a 
 
 ## Preparar e publicar
 
+### GitHub Pages
+
+Em **Settings → Pages → Build and deployment → Source**, selecione **GitHub Actions**. O fluxo [Publicar Auto-Pobre Racing](.github/workflows/pages.yml) instala a dependência pelo lock, testa as preferências, gera `dist/` e publica somente esse conteúdo. Cada envio para `main` atualiza o jogo; também é possível executá-lo manualmente pela aba **Actions → Publicar Auto-Pobre Racing → Run workflow**.
+
+Endereço do jogo: **https://inteligenciamilgrau.github.io/autopobre/**. Aguarde o fluxo concluir com sucesso antes de abrir. Não selecione a raiz de `main` em “Deploy from a branch”: ela contém o código-fonte, e o jogo precisa da etapa de geração.
+
+No GitHub Pages, a CSP incorporada no HTML protege o carregamento do jogo. O arquivo `_headers` é destinado a outros provedores; não configura cabeçalhos personalizados no Pages.
+
+### Gerar para outra hospedagem ou testar o pacote
+
 Requisitos: Python 3.10+ e Node.js/npm no PATH. Na raiz do projeto:
 
 ```sh
