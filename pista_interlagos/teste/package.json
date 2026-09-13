@@ -1,0 +1,11 @@
+{
+  "name": "interlagos-opala99-teste",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "python ../scripts/preparar_publicacao.py"
+  },
+  "dependencies": {
+    "three": "0.183.2"
+  }
+}

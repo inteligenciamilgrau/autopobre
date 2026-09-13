@@ -1,0 +1,154 @@
+# Interlagos — pista de testes do Opala 99
+
+Versão 1 · 13/09/2026. Pista 3D editável, com o Opala 99, e teste dirigível local no navegador.
+
+**Modo opcional: [Auto-Pobre Racing com Stevan Gaipo](VERSAO_IMERSIVA.md).** Marque “Versão Imersiva opcional” no menu para jogar a vaquinha com piadas, uma corrida contra cinco adversários, combustível e avarias, resgate com controle do freio, vistoria e o pódio eterno em sexto. Os prêmios ajudam a tirar a Blazer da oficina. A sessão livre continua disponível com a opção desmarcada.
+
+O carro foi atualizado para a [V4 com assoalho e fechamentos corrigidos](../modelo_3d/v04_fechamentos/README.md), nas duas pinturas. O assoalho contínuo, suas uniões com as soleiras e os anteparos fecham os vãos que deixavam a pista aparecer por dentro do carro. As chapas receberam espessura; a estrutura permanece visível também na câmera interna. A lateral refinada da V3 foi mantida.
+
+O teste no navegador agora usa asfalto texturizado, com granulação em escala métrica, rugosidade, variações de desgaste, juntas discretas e borracha nas frenagens. Os detalhes fixos no chão ajudam a perceber o deslocamento e a velocidade. A [textura e seu registro de geração](teste/assets/texturas/README.md) estão incluídos localmente.
+
+A câmera **Interna** tem um cockpit 3D baseado na foto [carro_14_interna.JPG](../carro/carro_14_interna.JPG), complementada pela [foto do piloto no interior](../carro/carro_8_piloto_dentro_edu_neves.jpg). Inclui painel escuro, conta-giros e instrumentos auxiliares, volante de três raios com faixa amarela, suporte inferior, visor vermelho, alavanca, gaiola, redes laterais, interruptores superiores e retrovisor panorâmico. O enquadramento aproxima a posição da câmera embarcada da referência, ligeiramente à direita do piloto.
+
+O suporte na parte inferior do volante agora tem o **celular do piloto**, com tela de mensagens no lugar do “99”. Após quatro segundos na câmera interna, chega **“Buscar filha na escola”**, enviada pela esposa. Depois aparecem recados fictícios de família, escola e tarefas de casa em intervalos de 48–75 segundos, sem repetir o recado anterior. Cada notificação fica na tela por 18 segundos, acompanhada de uma vibração visual curta e um toque que respeita o volume e o silêncio do jogo. Olhar para baixo com o mouse permite examinar a tela. O relógio das notificações congela na pausa e nas câmeras externas; a troca de pintura preserva a mensagem e reposicionar reinicia a sequência. Os textos e a tela estão em `teste/family-phone.js`; os testes estão em `scripts/testar_celular.mjs` e `scripts/verificar_celular.py`.
+
+O **herói 99** pilota o carro nas duas pinturas, com macacão vermelho OMP/OLI e luvas pretas do [visual aprovado](../geracoes_piloto/v01_omp_oli/LEIA-ME.md). Agora usa capacete integral preto com grafismos vermelhos e balaclava clara, baseado na [nova foto do piloto](../carro/piloto_capacete_bala_clava.jpg). O capacete tem queixeira, abertura dos olhos, bordas emborrachadas, viseira levantada, pivôs laterais e faixa oval clara na testa. A foto original é usada diretamente na região dos olhos e da balaclava; o cabelo e a barba ficam cobertos. O piloto aparece na câmera interna e através das janelas nas vistas externas.
+
+As mãos acompanham o volante compartilhado; cotovelos e ombros são articulados mantendo o comprimento dos braços. O piloto inclina o tronco suavemente para dentro da curva, fazendo força contra o empurrão para fora. A intensidade acompanha a aceleração lateral, com estabilização parcial da cabeça e pequena reação à aceleração/frenagem. Na reta, retorna ao centro; parado, esterçar não inclina o corpo. A amplitude do volante visual é limitada para a pegada das mãos; o esterçamento e a física das rodas mantêm os valores da condução.
+
+## Abrir e dirigir
+
+Execute **INICIAR_TESTE.cmd** nesta pasta. O servidor abre o navegador e atende apenas em `127.0.0.1:8799`. Mantenha a janela do servidor aberta durante o teste; feche-a para encerrar. Não precisa instalar extensões nem acessar serviços externos para jogar. A biblioteca Three.js e as duas pinturas estão incluídas.
+
+- **W / ↑**: acelerar; **S / ↓**: frear; **A/D / ←/→**: direção.
+- **Q**: ré; **Espaço**: freio de mão, freia e reduz a aderência traseira.
+- **W + Espaço**, parado no asfalto: segura o carro e faz as rodas traseiras patinarem, com fumaça, som e borracha no chão. Solte **Espaço** mantendo **W** para sair cantando pneu.
+- **W + Espaço + A/D**: faz zerinho para a esquerda/direita. A combinação tem assistência de manobra em baixa velocidade; **S** segura a rotação do carro. Soltar o acelerador deixa a fumaça se dissipar.
+- **C**: alternar perseguição, capô, **interna**, câmera aérea e **órbita 360°**.
+- **Interna**: botão direto na pista ou opção do menu. O volante acompanha A/D, o visor indica a velocidade e o retrovisor mostra a pista atrás. A câmera fica presa ao interior do carro e acompanha as inclinações da pista.
+- **Clique na pista** para capturar o mouse (Pointer Lock). Mova o mouse sem segurar botão: nas vistas externas ele controla a órbita; na interna e no capô, permite olhar para os lados mantendo a câmera escolhida. **Scroll** aproxima/afasta na órbita.
+- Após **3 segundos em movimento sem mexer no mouse**, a câmera retorna suavemente: atrás do carro na órbita, para a frente na interna/capô. O retorno só começa acima de 7,2 km/h; parado, o enquadramento fica livre. Mover o mouse interrompe o retorno e reinicia a espera.
+- O botão **Órbita 360°** alterna entre órbita e perseguição. A câmera acompanha o carro e respeita a altura do solo. Em tela de toque, ou sem suporte a Pointer Lock, o arraste continua disponível; no toque, dois dedos fazem zoom.
+- **R**: reposicionar no centro do trecho mais próximo e reiniciar a sessão.
+- **P / Esc**: liberar o mouse e pausar/abrir opções. Perder o foco da janela também libera e pausa. Para capturar novamente, retome a sessão e clique na pista.
+- **M**: silenciar/reativar os sons. O controle **Volume** fica nas opções e salva sua preferência no navegador. O áudio começa ao clicar em Entrar na pista ou Reconhecimento e silencia na pausa ou ao perder o foco.
+- No menu, escolha **Assinaturas · OMP** ou **Seiva · Danilo Veículos**.
+- O botão **Pintura**, ao lado das câmeras na pista, alterna entre as duas skins sem pausar. **V** faz a mesma troca com o mouse capturado. O botão mostra a pintura atual e aguarda o carregamento antes de permitir outra troca; o seletor do menu acompanha a seleção.
+- **Volta de reconhecimento automática** conduz pelo circuito usando a mesma física. W/A/S/D permitem assumir o volante.
+
+O cronômetro conta voltas após passar pelos 20 setores de controle na ordem do percurso. Uma saída além dos limites invalida a volta para o melhor tempo. A sessão não tem tráfego nem rede.
+
+O áudio inclui motor e escapamento com giro e carga variáveis, ruído mecânico nas subidas/reduções de marcha e chiado de pneus ligado ao mesmo deslizamento que desenha as marcas de borracha. O conta-giros e a marcha do HUD compartilham os valores usados pelo som. A troca automática tem uma pequena faixa de tolerância para não repetir o efeito quando a velocidade oscila no limite entre marchas. Na câmera interna, o motor fica mais abafado; na aérea, mais distante. São sons sintetizados localmente por Web Audio, com caráter de seis cilindros em linha; não são gravações do Opala real. A marcha e o RPM continuam sendo uma representação audiovisual, sem mudar a física de tração.
+
+`scripts/testar_audio.mjs` verifica marchas, tolerância dos limites, pausa, ré, reposicionamento e ativação dos pneus. `scripts/verificar_audio.py` confere a saída real de áudio no navegador, os controles, a persistência do volume e renderiza o grafo de áudio offline para conferir sinal, variação de frequência e ausência de saturação. Resultado em `dados/validacao_audio.json`.
+
+Abra **interlagos_opala99.blend** para editar no Blender. O carro está na largada, orientado com a rampa e o caimento locais. A cena contém câmeras de perseguição, planta e visão geral. O Blender é o arquivo de edição; a condução está no teste do navegador.
+
+## Arquivos principais
+
+| Arquivo | Conteúdo |
+|---|---|
+| `interlagos_opala99.blend` | Cena editável em metros; pista, terreno, cenário e Opala OMP |
+| `exports/interlagos_pista.glb` | Pista e cenário com textura incorporada, para outras engines |
+| `exports/interlagos_colisao.glb` | Apenas a faixa do asfalto, para colisão estática |
+| `teste/` | Aplicação Three.js, biblioteca local e carros nas duas pinturas |
+| `dados/perfil_pista.csv` | Centro, largura, rampa e caimento das 2.144 seções |
+| `dados/pista.json` | Mesma superfície e terreno usados pela simulação |
+| `dados/validacao_geometria.json` | Métricas finais e fator de calibração |
+| `dados/validacao_fisica.json` | Teste de duas voltas e efeito da gravidade |
+| `dados/validacao_browser.json` | Carregamento e controles testados no Edge |
+| `dados/validacao_orbita.json` | Órbita, zoom, obstáculos e esterçamento das duas pinturas |
+| `dados/validacao_asfalto.json` | Material WebGL, textura e condução nas câmeras de perseguição, capô e órbita |
+| `dados/validacao_cockpit.json` | Câmera interna, volante, visor, pinturas e retorno às câmeras externas |
+| `dados/validacao_pointer_lock.json` | Captura nativa, olhar livre, retorno automático e liberação do mouse |
+| `teste/cockpit.js` | Interior 3D e instrumentos reconstruídos das fotos locais |
+| `teste/driver.js` e `teste/driver-rig.js` | Herói sentado, mãos no volante e animação do corpo |
+| `dados/validacao_piloto.json` | Pegada, braços, curvas dos dois lados, pinturas e reset |
+| `renders/` | Visão geral, carro na largada, teste e gráficos |
+| `fontes/` | Mapa FIA, ortofoto, metadados e recorte dos dados LiDAR oficiais |
+| `scripts/` | Código de extração, processamento, criação e verificação |
+
+## Fontes oficiais
+
+1. **FIA — mapa do GP de São Paulo de 2025**, edição de 06/11/2025, folha 2 do PDF: traçado, sentido, numeração T1–T15 e comprimento nominal. [Documento da FIA](https://www.fia.com/system/files/decision-document/2025_sao_paulo_grand_prix_-_event_notes_-_circuit_map_pit_lane_drawing_emergency_exits_map_quarantine_zone_and_red_zones_map.pdf). Cópia em `fontes/fia_interlagos_mapa_2025.pdf`.
+2. **Prefeitura de São Paulo — Pista Oficial**: extensão de 4.309 m e largura de 12–15 m. A página também cita aproximadamente 56 m de desnível. [Página do autódromo](https://autodromodeinterlagos.prefeitura.sp.gov.br/pistaoficial).
+3. **Prefeitura / GeoSampa — levantamento LiDAR 2017**: utilizado o solo, classificação LAS 2. [Metadados municipais](https://metadados.geosampa.prefeitura.sp.gov.br/geonetwork/srv/resources/datasets/6f659d23-762a-4e16-9506-e0bd4f535417), [visualizador público](https://visualizador-laz-web.s3-sa-east-1.amazonaws.com/index.html), [índice EPT público indicado pelo visualizador](https://ept-m3dc-pmsp.s3-sa-east-1.amazonaws.com/ept.json). Instruções oficiais de uso: [tutorial GeoSampa](https://geoinfo-smdu.github.io/tutorial-GeoSampa/).
+4. **GeoSampa — ortofoto RGB 2020**, camada `ORTO_RGB_2020`, usada para registrar o centro do asfalto e como textura do terreno. [Serviço raster WMS](https://raster.geosampa.prefeitura.sp.gov.br/geoserver/geoportal/wms?service=WMS&request=GetCapabilities). Recorte em EPSG:31983: `[326250, 7376700, 327850, 7378550]`, imagem de 2.400 × 2.775 px, aproximadamente 0,667 m/px.
+5. **Formula 1 — características de Interlagos**: referência independente de cerca de 43 m de variação de altitude. [Artigo oficial da F1](https://www.formula1.com/en/latest/article/5-reasons-we-love-the-brazilian-grand-prix.37v8PT899Wnp7v6y51sUMf).
+
+As fontes foram consultadas em 13/09/2026. Os links são públicos, sem contato com terceiros ou uso de credenciais.
+
+## Como a superfície foi construída
+
+O desenho da FIA contém uma faixa vetorial triangulada. Extraí seu eixo e o registrei sobre a ortofoto municipal usando pontos de controle visuais. O mapa da FIA é esquemático: a conferência na ortofoto foi necessária principalmente na Junção. Os controles e o método estão em `dados/registro_tracado.json`; `renders/alinhamento_tracado.jpg` mostra a sobreposição. Não são pontos de controle GNSS levantados em campo.
+
+Foram obtidos 1.458 nós EPT, com 60.037.880 pontos antes do recorte. O processamento reteve **4.580.960 pontos classificados como solo** dentro da área de interesse. A fonte e as contagens estão em `dados/lidar_proveniencia.json`; as coordenadas originais estão em `dados/lidar_solo_2017.npz`.
+
+Ao longo do centro, a cada aproximadamente 2 m, ajustei um plano aos pontos de solo num raio de 4 m, com rejeição robusta de resíduos. O plano fornece a altura central e a inclinação transversal; o caimento não foi calculado a partir do raio das curvas. Foram suavizados o perfil longitudinal em uma janela de 15 amostras e o transversal em 25 amostras, para reduzir ruído de levantamento. Todos os pontos finais tiveram pelo menos 30 pontos de suporte. O RMSE mediano dos ajustes locais ficou em 0,045 m; **isso mede o ajuste aos pontos locais, não a precisão absoluta da reconstrução**.
+
+Após a correção do alinhamento, o percurso bruto em 3D ficou em **4.291,37 m**, 0,41% abaixo do nominal. Apliquei um fator horizontal explícito de **1,004116838** a toda a cena e ao terreno para obter **4.309,00 m no eixo 3D**, preservando as alturas medidas. O eixo em planta mede 4.304,56 m. Esta é uma calibração para o jogo, não uma alegação de que a digitalização produziu exatamente o comprimento homologado. As coordenadas UTM originais foram preservadas separadamente.
+
+O terreno usa uma grade de cerca de 4 m, interpolada dos pontos de solo. Um colar visual próximo à faixa de asfalto foi ajustado para ligar o terreno à superfície suavizada e evitar interseções. O relevo original está preservado no campo `z` de `dados/terreno.npz`; o campo `visual_z` contém esse ajuste de apresentação. A ortofoto foi aplicada ao terreno inteiro com o mesmo fator horizontal.
+
+## Medidas do modelo final
+
+| Medida | Resultado |
+|---|---:|
+| Comprimento do eixo 3D, calibrado ao nominal FIA | 4.309,00 m |
+| Desnível entre maior e menor altura central | 43,60 m |
+| Menor / maior cota na base LiDAR | 739,58 / 783,18 m |
+| Maior descida / subida no perfil suavizado | −13,71% / +10,18% |
+| Caimento transversal assinado | −17,41% a +12,23% |
+| Seções do asfalto | 2.144 |
+| Largura adotada | cerca de 12,5–15 m |
+
+O sinal do caimento é positivo quando o lado esquerdo, olhando no sentido de corrida, está mais alto. São resultados da reconstrução e do tratamento dos dados, não números publicados pela FIA.
+
+O desnível extraído concorda aproximadamente com os **43 m** citados pela F1. A página municipal cita **56 m**; mantive o resultado do levantamento no percurso, sem esticar o eixo vertical para forçar esse outro valor.
+
+As larguras foram escolhidas dentro do intervalo municipal, com alargamento na reta e no início do S do Senna. **Não foi obtida uma tabela oficial de largura ou superelevação por estaca**. A largura local, as zebras, os muros, os boxes, a arquibancada e o pórtico são representações simplificadas, não um levantamento das instalações atuais. Algumas zebras são posicionadas por curvatura para o teste.
+
+## Limites e física do teste
+
+Esta versão é uma base de jogo apoiada em dados oficiais de épocas diferentes: solo de 2017, imagem de 2020 e mapa de 2025. Mudanças posteriores de pavimento e infraestrutura não estão garantidas. Não é uma pista homologada, um laser scan atual dedicado ao asfalto ou uma reprodução arquitetônica completa.
+
+A condução usa um modelo de bicicleta com entre-eixos de 2,667 m, aceleração/frenagem simplificadas, aderência lateral limitada, menor aderência na grama, contato simples com os muros de alguns trechos e gravidade projetada sobre a rampa e o caimento medidos. A orientação do carro acompanha a superfície; as rodas giram e as dianteiras esterçam. Os números de marcha são indicativos. Não há modelo completo de suspensão, deformação de pneus, danos, câmbio ou acerto real do carro de competição.
+
+O burnout é uma assistência de jogo ativada por acelerador e freio de mão juntos, no asfalto e abaixo de 43,2 km/h. Ela segura o carro quando alinhado, permite que a traseira escorregue para fora ao esterçar e calcula um giro traseiro independente. Ao soltar o freio de mão, a patinagem diminui progressivamente na arrancada. Essa combinação representa a manobra de forma simplificada; não é uma simulação mecânica do freio de mão bloqueando o mesmo eixo tracionado.
+
+O giro excedente alimenta o som dos pneus, o RPM, as marcas no ponto de contato e a fumaça. As derrapagens em movimento também soltam fumaça conforme a intensidade. `teste/tyre-smoke.js` mantém até 256 partículas em uma única chamada de desenho; elas crescem e desaparecem no espaço da pista, congelam na pausa e são removidas ao reposicionar. Os testes estão em `scripts/testar_burnout.mjs` e `scripts/verificar_burnout.py`, com relatórios `dados/validacao_burnout*.json` e capturas `renders/burnout_*.png`.
+
+A aderência nas curvas considera a posição do eixo traseiro, 1,117 m atrás da origem do carro, e a força necessária para acompanhar a mudança de direção. Isso evita que a traseira deslize por atraso da resposta em manobras lentas. A aderência também compensa a gravidade transversal dentro do seu limite, evitando escorregar parado apenas por causa do caimento. O freio de mão reduz a aderência lateral e mantém a possibilidade de derrapagem. As marcas e o chiado distinguem o movimento normal de curva do deslizamento; o efeito visual de frenagem cresce progressivamente acima de aproximadamente 29 km/h.
+
+`scripts/testar_aderencia.mjs` verifica curvas lentas dos dois lados, ré, repouso em caimento, embalo sem acelerar, passos de simulação de 1/60 a 1/240 s e derrapagem com freio de mão. A comparação inicial está em `dados/aderencia_antes.json` e o resultado atual em `dados/aderencia_depois.json`. `scripts/verificar_aderencia.py` confere direção, frenagem, marcas e som no navegador.
+
+O GLB de colisão inclui apenas o asfalto. Ao integrar em outra engine, configure-o como corpo estático com colisão côncava/triangular e acrescente colisores ao terreno e às instalações conforme necessário. A física do navegador consulta o mesmo perfil em JSON, não depende de uma colisão escondida ou de uma pista plana.
+
+## Coordenadas e reprodução
+
+Blender: **X = leste, Y = norte, Z = cima**, em metros. Origem dos dados: E 327050, N 7377625, Z 720, SIRGAS 2000 / UTM 23S, EPSG:31983. Para converter coordenadas horizontais do modelo de volta para a base original, divida X/Y pelo fator 1,004116838 e some a origem. Para Z, some 720. O glTF usa Y para cima; a conversão é `(X, Z, −Y)`.
+
+Scripts, na ordem: `baixar_lidar.py` (só se precisar obter novamente a fonte), `extrair_tracado.py`, `processar_relevo.py`, `criar_blender.py` executado pelo Blender. Dependências Python locais estão em `scripts/_deps`. Para o teste pronto não é necessário instalar essas bibliotecas: basta o Python existente, os arquivos entregues e um navegador com WebGL2.
+
+Depois dos scripts de criação, execute `modelo_3d/scripts/corrigir_fechamentos_v04.py` com o Blender, a partir da raiz do projeto, para aplicar a revisão atual do carro à cena e ao navegador. As exportações atuais ficam em `../modelo_3d/v04_fechamentos/exports/`, com cópias em `teste/assets/`. As versões anteriores foram preservadas. A verificação no navegador está em `scripts/verificar_fechamentos.py`, com resultado em `dados/validacao_fechamentos_browser.json` e capturas `renders/fechamento_*.png`.
+
+## Verificação
+
+As derrapadas deixam marcas dinâmicas de borracha na trajetória dos pneus, com bordas suaves e intensidade proporcional ao deslizamento. **Espaço** aciona o freio de mão e marca primeiro os pneus traseiros; **S / seta para baixo**, em velocidade, também deixa marcas de frenagem. As quatro rodas podem marcar durante uma derrapagem. As faixas acompanham o relevo e o caimento do asfalto, sem pintar a grama ou deixar riscos com o carro parado. As marcas permanecem ao reposicionar com R e ao trocar a pintura; recarregar a página limpa a sessão. O limite de 8.192 segmentos substitui os mais antigos e usa um único objeto de renderização. O efeito é visual, baseado na física simplificada de condução, sem acrescentar um modelo de desgaste dos pneus.
+
+`scripts/testar_derrapadas.mjs` confere aderência ao relevo, largura dos pneus, ativação, limite de memória e interrupção ao reposicionar. `scripts/verificar_derrapadas.py` testa os comandos no Edge e salva as capturas em `renders/derrapadas_*.png`.
+
+- Duas voltas completas com o controlador de reconhecimento e a mesma física de condução: nenhuma saída do asfalto; afastamento lateral máximo de 1,68 m e mais de 43 m de variação de altura percorrida.
+- Teste de embalo: o carro ganhou velocidade na descida e perdeu na subida, sem acelerar.
+- Edge com WebGL: carregamento sem erros de JavaScript, aceleração, frenagem, direção, troca de câmera e carregamento das duas pinturas. Quatro pivôs de roda identificados.
+- Órbita no Edge: quatro quadrantes por arraste, vista superior, zoom, acompanhamento em movimento, reposicionamento e troca das câmeras. A câmera aproxima antes de obstáculos como o pórtico da largada.
+- Esterçamento conferido pelos eixos das rodas dos GLBs: A aponta as dianteiras para a esquerda do carro, D para a direita; as traseiras permanecem alinhadas. Verificação nas duas pinturas e em cinco fases de rotação, incluindo marcha à ré, sem inversão ou inclinação lateral causada pelo giro.
+- Arquivo Blender salvo, renders produzidos e exports GLB separados para cena e colisão. Relatórios e imagens de conferência estão em `dados/` e `renders/`.
+
+O teste automatizado de navegador usou renderização por software, portanto seus tempos de captura não representam o desempenho de uma GPU. Em computadores mais lentos, a simulação reduz o avanço por quadro para manter estabilidade.
+
+O cockpit é uma reconstrução visual para o navegador, com medidas aproximadas. O conta-giros e o shift light usam uma estimativa baseada na velocidade e nas marchas indicativas do teste; os instrumentos de óleo/temperatura são ilustrativos. O retrovisor renderiza a cena traseira em 768 × 192 a cada quadro da câmera interna, usando a posição atual do carro. A passagem do retrovisor reutiliza as sombras e só roda na visão interna. O teste `scripts/verificar_retrovisor.py` confere a sincronização em movimento, nas trocas de câmera e após reposicionar o carro. O interior detalhado está no módulo do jogo; os arquivos Blender anteriores continuam disponíveis para edição e referência.
+
+O controle do mouse usa a [API Pointer Lock documentada pela MDN](https://developer.mozilla.org/en-US/docs/Web/API/Element/requestPointerLock), acionada por clique, com tratamento de `pointerlockchange` e `pointerlockerror`. O temporizador do retorno usa tempo real, enquanto a rotação usa interpolação suave. `scripts/testar_retorno_camera.mjs` verifica os limites de tempo, pausa, parada e interrupção por movimento do mouse; `scripts/verificar_pointer_lock.py` verifica a integração no Edge.
+
+O piloto é um modelo de jogo com proporções aproximadas e articulação por partes; não é uma digitalização corporal. Seu modelo e animação estão nos módulos do navegador. O capacete acompanha a cabeça e sua compensação nas curvas, com espaço abaixo do teto. As partes não visíveis na foto foram completadas por aproximação e simetria. A referência original sem capacete continua disponível nos arquivos de imagens. `scripts/testar_piloto.mjs` verifica o alcance dos braços nas combinações extremas de volante e inclinação. `scripts/verificar_capacete.py` confere a integração nas duas pinturas e gera vistas interna, externa e detalhes do capacete em `renders/capacete_*.png`.

@@ -1,0 +1,62 @@
+# Credentials, local settings and agent/session data
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+*.har
+cookies*.txt
+credentials*.json
+service-account*.json
+.npmrc
+.pypirc
+.codex/
+.agents/
+.vscode/
+.idea/
+
+# Dependencies and caches (recreated from the lock file)
+node_modules/
+.npm-cache/
+_deps/
+_tools/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+mpl_cache/
+*.log
+*.tmp
+*.bak
+*.zip
+*.7z
+*.sqlite*
+*.db
+*.blend[0-9]*
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Generated web release and local checks
+/dist/
+/.audit-local/
+/pista_interlagos/renders/
+/pista_interlagos/versoes_anteriores/
+/pista_interlagos/dados/*
+!/pista_interlagos/dados/pista.json
+/pista_interlagos/fontes/
+/pista_interlagos/*.blend
+/pista_interlagos/exports/*
+!/pista_interlagos/exports/interlagos_pista.glb
+
+# Local art/model workshop. Runtime copies stay in teste/assets/.
+# These originals remain on disk; keep a separate backup of the workshop.
+/carro/
+/geracoes_carro/
+/geracoes_piloto/
+/geracoes_jogo/
+/modelo_3d/
+/pista_interlagos/teste/assets/piloto/referencia_capacete.jpg

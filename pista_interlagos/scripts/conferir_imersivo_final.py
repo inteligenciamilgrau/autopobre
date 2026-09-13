@@ -1,0 +1,41 @@
+from browser_config import browser_executable, wait_js
+from pathlib import Path
+from playwright.sync_api import sync_playwright
+import json
+ROOT=Path(__file__).resolve().parents[1]
+report={'errors':[],'checks':{}}
+def check(name,value):
+ report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
+with sync_playwright() as p:
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ page=browser.new_page(viewport={'width':1280,'height':800});page.set_default_timeout(120000)
+ page.on('pageerror',lambda e:report['errors'].append(str(e)))
+ page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
+ def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
+ def shot(name):frame();page.screenshot(path=str(ROOT/'renders'/('imersivo_'+name+'.png')))
+ try:
+  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
+  page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
+  page.check('#immersiveMode');page.click('#start');shot('torcida');check('immersive_branding',page.title()=='Auto-Pobre Racing com Stevan Gaipo')
+  # Real car physics and lap gates, with opponents placed behind for an incident-free finish fixture.
+  race=page.evaluate('''async()=>{const m=fixtureMode,{FANS,JOKES}=await import('./immersive-state.js'),{recognitionInput}=await import('./physics.js');
+   for(let i=0;i<FANS.length;i++){m.state.talk(i);m.state.joke(JOKES.findIndex(j=>j.topic===FANS[i].taste));}m.state.prepare();m.state.buy(6,false);m.sync();m.state.starter=true;
+   for(let i=0;i<600&&m.state.phase==='starting';i++)m.step({throttle:m.state.pressure<.45?1:0},1/120);
+   for(let i=0;i<500&&m.state.phase==='grid';i++)m.step({},1/120);
+   m.rivals.forEach((r,i)=>r.progress=-300-i*20);
+   let steps=0;while(m.state.phase==='race'&&steps++<65000)m.step(recognitionInput(m.car),1/120);
+   return {phase:m.state.phase,result:m.state.result,fuel:m.state.fuel,time:m.state.raceTime,steps};}''');report['full_lap']=race
+  check('full_lap_reaches_inspection',race['phase']=='inspection' and race['result']['position']==1 and race['fuel']>0)
+  frame();page.click('[data-action="inspect"]');page.evaluate('''()=>{for(let i=0;i<1100&&fixtureMode.state.phase==='inspection';i++)fixtureMode.step({},1/120);}''');shot('podio_vitoria')
+  check('real_finish_still_sixth',page.evaluate('interlagos.immersiveInfo().podiumPlace===6'))
+  page.evaluate("()=>{const m=fixtureMode;m.start();m.state.phase='race';m.state.fuel=6;m.state.hitDebris();m.sync();}");page.click('#cockpitButton');shot('vidro')
+  page.evaluate("()=>{const m=fixtureMode;m.state.fail('Teste de resgate');m.sync();m.state.beginTow();m.sync();for(let i=0;i<60;i++)m.step({brake:1,left:0,right:0},1/120);}");page.click('#orbitButton');frame()
+  strap=page.evaluate('''async()=>{const THREE=await import('three'),v=fixtureMode.visual,a=v.strap.geometry.attributes.position,pts=Array.from({length:25},(_,i)=>new THREE.Vector3((a.getX(i*2)+a.getX(i*2+1))/2,(a.getY(i*2)+a.getY(i*2+1))/2,(a.getZ(i*2)+a.getZ(i*2+1))/2));
+   const start=new THREE.Vector3(2.22,.12,0).applyMatrix4(v.carRoot.matrixWorld),end=new THREE.Vector3(-2.45,.12,0).applyMatrix4(v.truck.matrixWorld);
+   return {actualStart:pts[0].toArray(),expectedStart:start.toArray(),actualEnd:pts.at(-1).toArray(),expectedEnd:end.toArray(),length:pts.slice(1).reduce((s,p,i)=>s+p.distanceTo(pts[i]),0),startError:pts[0].distanceTo(start),endError:pts.at(-1).distanceTo(end),gap:fixtureMode.state.towGap};}''');report['strap']=strap
+  check('rendered_strap_attached_and_fixed',abs(strap['length']-5)<.08 and strap['startError']<.03 and strap['endError']<.03);shot('reboque')
+  page.evaluate('''()=>{for(let i=0;i<2500&&fixtureMode.state.phase==='tow';i++)fixtureMode.step({brake:0,left:0,right:0},1/120);}''');shot('fita_enroscada')
+  page.click('#menuButton');page.uncheck('#immersiveMode');page.click('#tour');check('uncheck_and_tour_restores_normal',page.evaluate('!interlagos.immersiveInfo().active&&interlagos.state.automatic'))
+  check('normal_branding_restored',page.title()=='Interlagos · Opala 99');check('no_browser_errors',not report['errors']);report['passed']=True
+ finally:
+  report.setdefault('passed',False);(ROOT/'dados/validacao_imersivo_final.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps(report,ensure_ascii=False,indent=2),flush=True);browser.close()

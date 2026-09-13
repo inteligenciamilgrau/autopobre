@@ -1,0 +1,38 @@
+/* Shared opening artwork for the free session and the optional immersive mode. */
+#menu{
+  background-color:#101b1b;
+  background-image:linear-gradient(90deg,rgba(6,15,15,.97),rgba(6,15,15,.87) 26%,rgba(6,15,15,.28) 48%,transparent 68%),url('./assets/abertura/abertura_stevan_opala99.png');
+  background-size:cover;
+  background-position:center;
+  background-repeat:no-repeat;
+  backdrop-filter:none;
+  padding:32px 5vw;
+}
+#menu article{width:390px;max-width:100%}
+#menu .opening-brand{display:block;margin:0 0 12px}
+.opening-brand img{display:block;width:100%;height:auto;filter:drop-shadow(0 3px 14px #0009)}
+.opening-brand figcaption{font-size:13px;line-height:1.65;color:#eadfc8;margin-top:-12px;max-width:320px}
+#menu article>.eyebrow,
+#menu article>h1,
+#menu article>p{display:none}
+#menu .immersive-choice{background:#152d29e8;border-color:#9f914a;margin:16px 0}
+#menu .choices{margin:18px 0}
+#menu .primary{background:#f4ce39;color:#171c15}
+#menu .primary:hover{background:#ffe574}
+#menu:has(#immersiveMode:checked) #tour{display:none}
+#menu article>small{color:#bac6bd;margin-top:14px}
+#menu select,
+#menu #mute{background:#19302de8}
+@media(max-height:720px) and (min-width:701px){
+  #menu{padding-block:20px}
+  #menu .opening-brand{width:320px;margin-bottom:6px}
+  #menu .immersive-choice{margin:10px 0;padding-block:9px}
+  #menu .choices{margin:12px 0}
+}
+@media(max-width:700px){
+  #menu{
+    background-image:linear-gradient(180deg,rgba(6,15,15,.24),rgba(6,15,15,.93) 40%,#0b1817 80%),url('./assets/abertura/abertura_stevan_opala99.png');
+    background-position:center,84% top;background-size:100% 100%,auto 70vh;padding:24px;
+  }
+  #menu article{width:min(390px,100%);margin-top:22vh}
+}

@@ -1,0 +1,308 @@
+import * as THREE from 'three';
+import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
+import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
+import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
+import {TestCar,clamp,wrap,recognitionInput} from './physics.js?v=20260913-burnout';
+import {createTrackSurface} from './track-surface.js';
+import {createCockpit} from './cockpit.js?v=20260913-family';
+import {CameraReturn} from './camera-return.js';
+import {createDriver} from './driver.js?v=20260913-inward';
+import {SkidMarks} from './skid-marks.js?v=20260913-burnout';
+import {TyreSmoke} from './tyre-smoke.js';
+import {ImmersiveMode} from './immersive-mode.js';
+import {CarAudio} from './car-audio.js?v=20260913-immersive';
+import {PlayerPreferences,CAMERA_MODES} from './player-preferences.js';
+const $=id=>document.getElementById(id);
+const preferences=new PlayerPreferences();
+$('immersiveMode').checked=preferences.values.immersive;
+$('livery').value=preferences.values.livery;
+$('camera').value=preferences.values.camera;
+$('tour').disabled=preferences.values.immersive;
+function chooseImmersive(value){
+ $('immersiveMode').checked=value;$('tour').disabled=value;
+ preferences.update({immersive:value});
+}
+$('immersiveMode').onchange=()=>chooseImmersive($('immersiveMode').checked);
+const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');scene.fog=new THREE.Fog('#a8c8dd',700,2100);
+const renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;
+const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,6500);
+const orbit=new OrbitControls(camera,$('view'));
+orbit.enabled=false;orbit.enablePan=false;orbit.minDistance=3.2;orbit.maxDistance=45;
+orbit.minPolarAngle=.015;orbit.maxPolarAngle=Math.PI/2;
+orbit.rotateSpeed=.8;orbit.zoomSpeed=.8;
+const orbitTarget=new THREE.Vector3(),orbitDelta=new THREE.Vector3();
+const cameraObstacles=[],cameraRay=new THREE.Raycaster(),cameraRayDirection=new THREE.Vector3();
+const obstacleMaterial=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});
+const cameraModes=CAMERA_MODES;
+const cameraReturn=new CameraReturn(),orbitSphere=new THREE.Spherical();
+const headLook={yaw:0,pitch:0};
+let pointerLocked=false,lockPending=false,lockUnavailable=!$('view').requestPointerLock;
+const isInside=()=>mode==='cockpit'||mode==='hood';
+scene.add(new THREE.HemisphereLight('#d9edff','#60643c',2.4));
+const sun=new THREE.DirectionalLight('#fff2d5',3);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-45,right:45,top:45,bottom:-45,near:1,far:250});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;scene.add(sun,sun.target);
+const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
+const cockpit=createCockpit();carRoot.add(cockpit.root);
+const skidMarks=new SkidMarks();scene.add(skidMarks.mesh);
+const tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
+const carAudio=new CarAudio();
+function audioControls(){ $('volume').value=Math.round(carAudio.volume*100);$('volumeValue').textContent=`${Math.round(carAudio.volume*100)}%`;$('mute').textContent=carAudio.muted?'Ativar som (M)':'Silenciar (M)';$('mute').setAttribute('aria-pressed',String(carAudio.muted)); }
+audioControls();
+$('volume').oninput=e=>{carAudio.setVolume(Number(e.target.value)/100);audioControls();};
+$('mute').onclick=()=>{carAudio.toggleMute();carAudio.unlock();audioControls();};
+let immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
+const keys=new Set(),clock=new THREE.Clock(),matrix=new THREE.Matrix4(),forward=new THREE.Vector3(),up=new THREE.Vector3(),right=new THREE.Vector3(),desired=new THREE.Vector3(),look=new THREE.Vector3();
+const wheelForward=new THREE.Vector3(),wheelUp=new THREE.Vector3(0,1,0),wheelAxle=new THREE.Vector3(),wheelMatrix=new THREE.Matrix4(),wheelTurn=new THREE.Quaternion(),wheelSpin=new THREE.Quaternion(),axleAxis=new THREE.Vector3(0,0,1);
+function status(text){$('status').textContent=text;$('status').classList.toggle('hidden',!text);}
+function flattenStatic(root){
+ root.updateMatrixWorld(true);const batches=new Map();
+ root.traverse(ob=>{if(!ob.isMesh)return;
+  if(Array.isArray(ob.material)){ob.receiveShadow=true;return;}
+  let g=ob.geometry.clone().applyMatrix4(ob.matrixWorld);
+  if(ob.material.name==='Asfalto'){ob.material=roadSurface.material;g=roadSurface.geometry(g);}
+  const key=ob.material.uuid;
+  // Proxies so para consulta: os meshes visiveis seguem agrupados por material.
+  if(/^(Portico_|Box_|Arquibancada|Muro)/.test(ob.name)){
+   const proxy=new THREE.Mesh(g.clone(),obstacleMaterial);proxy.name=ob.name;cameraObstacles.push(proxy);
+  }
+  // Todos os meshes de um lote precisam dos mesmos atributos.
+  g.deleteAttribute('tangent');if(!g.attributes.uv)g.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(g.attributes.position.count*2),2));
+  if(!batches.has(key))batches.set(key,{mat:ob.material,gs:[],obs:[]});const b=batches.get(key);b.gs.push(g);b.obs.push(ob);
+ });
+ for(const b of batches.values()){
+  const g=mergeGeometries(b.gs,false);if(!g)continue;const m=new THREE.Mesh(g,b.mat);m.castShadow=true;m.receiveShadow=true;scene.add(m);b.obs.forEach(o=>o.removeFromParent());b.gs.forEach(g=>g.dispose());
+ }
+ scene.add(root);
+}
+async function setLivery(value){
+ if(!['assinaturas_omp','seiva_danilo'].includes(value))throw new Error('Pintura inválida');
+ const token=++loadToken;status('Carregando Opala 99…');
+ $('skinButton').disabled=true;$('skinButton').textContent='Carregando pintura…';$('livery').disabled=true;
+ try{
+ const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=04-fechamentos`);
+ if(token!==loadToken)return;
+ if(model)carRoot.remove(model);model=gltf.scene;wheels=[];
+ model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;
+  for(const m of Array.isArray(o.material)?o.material:[o.material])if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
+ }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){wheels.push({obj:o,front:o.name.includes('Dianteira'),base:o.quaternion.clone()});}});
+ // These solid Blender panels close the cabin in every view. The detailed
+ // cockpit hides the outer model, so retain its floor/bulkheads independently.
+ if(carStructure)carRoot.remove(carStructure);
+ carStructure=new THREE.Group();carStructure.name='Estrutura_cabine_V04';
+ model.updateMatrixWorld(true);const structuralParts=[];
+ model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
+ for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
+ carRoot.add(model,carStructure);model.visible=mode!=='cockpit';activeLivery=value;status('');
+ preferences.update({livery:value});
+ }finally{
+  if(token===loadToken){
+   $('skinButton').disabled=!ready;$('livery').disabled=false;
+   if(activeLivery)$('livery').value=activeLivery;
+   $('skinButton').textContent=`Pintura: ${activeLivery==='seiva_danilo'?'Seiva':'OMP'} (V)`;
+   $('skinButton').title=`Trocar para ${activeLivery==='seiva_danilo'?'Assinaturas · OMP':'Seiva · Danilo Veículos'} (V)`;
+  }
+ }
+}
+async function cycleLivery(){
+ if(!ready||$('skinButton').disabled)return;
+ try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
+ catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
+}
+function reset(nearest=false){car.reset(nearest?car.index:0);driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();automatic=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
+const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
+function location(s){let name=names[0][1];for(const [d,n] of names)if(s>=d)name=n;return name;}
+const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
+function drawMap(){
+ const ctx=$('map').getContext('2d'),w=260,h=300;ctx.clearRect(0,0,w,h);
+ const xy=p=>[130+p[1]*.23,156-p[2]*.23];
+ ctx.beginPath();data.samples.forEach((p,i)=>{const [x,y]=xy(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.lineWidth=8;ctx.strokeStyle='#ffffff16';ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle='#b6c5b5';ctx.stroke();
+ const [sx,sy]=xy(data.samples[0]);ctx.fillStyle='#ffffff';ctx.fillRect(sx-3,sy-3,6,6);
+ const x=130+car.x*.23,y=156-car.y*.23;ctx.save();ctx.translate(x,y);ctx.rotate(-car.heading);ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(-5,-4);ctx.lineTo(-3,0);ctx.lineTo(-5,4);ctx.closePath();ctx.fillStyle='#e2fb57';ctx.shadowBlur=10;ctx.shadowColor='#d6fa4b';ctx.fill();ctx.restore();
+}
+function updateCar(dt){
+ const p=car.surface,c=Math.cos(car.heading),s=Math.sin(car.heading);
+ carRoot.position.set(car.x,p.z,-car.y);
+ forward.set(c,p.gx*c+p.gy*s,-s).normalize();up.set(-p.gx,1,p.gy).normalize();right.crossVectors(forward,up).normalize();up.crossVectors(right,forward).normalize();
+ matrix.makeBasis(forward,up,right);const q=new THREE.Quaternion().setFromRotationMatrix(matrix);carRoot.quaternion.slerp(q,Math.min(1,dt*15));
+ for(const w of wheels){
+  // Fisica: angulo positivo aponta para a esquerda. No GLB: frente +X,
+  // cima +Y e esquerda -Z. Construir o eixo de rodagem evita inverter
+  // esquerda/direita ao converter os eixos Blender -> glTF.
+  const angle=w.front?car.steer:0;
+  wheelForward.set(Math.cos(angle),0,-Math.sin(angle));
+  wheelAxle.crossVectors(wheelForward,wheelUp);
+  wheelTurn.setFromRotationMatrix(wheelMatrix.makeBasis(wheelForward,wheelUp,wheelAxle));
+  wheelSpin.setFromAxisAngle(axleAxis,-(w.front?car.spin:car.rearSpin));
+  w.obj.quaternion.copy(wheelTurn).multiply(w.base).multiply(wheelSpin);
+ }
+}
+function setCameraMode(value){
+ if(!cameraModes.includes(value))return;
+ const previous=mode;mode=value;orbit.enabled=value==='orbit';$('camera').value=value;
+ preferences.update({camera:value});
+ orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;
+ cockpit.root.visible=value==='cockpit';if(model)model.visible=value!=='cockpit';
+ document.body.classList.toggle('cockpit-mode',value==='cockpit');
+ $('cockpitButton').classList.toggle('active',value==='cockpit');$('cockpitButton').setAttribute('aria-pressed',String(value==='cockpit'));
+ camera.fov=value==='cockpit'?74:58;camera.near=value==='cockpit'?.025:.1;camera.updateProjectionMatrix();
+ if(value!=='cockpit')camera.up.set(0,1,0);
+ $('orbitButton').classList.toggle('active',orbit.enabled);
+ $('orbitButton').setAttribute('aria-pressed',String(orbit.enabled));
+ cameraHint();
+ if(orbit.enabled&&ready&&previous!=='orbit'){
+  orbit.target.copy(carRoot.position).add(new THREE.Vector3(0,.85,0));
+  // Capo e aerea comecam a orbita numa distancia que enquadra o carro.
+  if(previous!=='chase')camera.position.copy(orbit.target).addScaledVector(forward,-7).add(new THREE.Vector3(0,2.8,0));
+  orbit.update();
+ }
+}
+function cameraHint(){
+ $('cameraHint').textContent=pointerLocked?'Mouse capturado · mova para olhar · Esc libera · retorno após 3 s em movimento':lockUnavailable?'Arraste para girar · retorno após 3 s em movimento':'Clique na pista para capturar o mouse · Esc libera';
+}
+function lockFailed(){lockPending=false;orbit.enableRotate=true;cameraHint();status('Mouse livre. Clique novamente na pista para tentar capturar.');}
+// Native lock is requested only from a deliberate click on the playing surface.
+$('view').addEventListener('pointerdown',e=>{
+ if(!ready||paused||e.button!==0||immersive?.active&&!immersive.allowsPointer())return;
+ cameraReturn.manual(performance.now());
+ if(e.pointerType==='mouse'&&!lockUnavailable&&$('view').requestPointerLock){
+  e.stopImmediatePropagation();
+  if(pointerLocked||lockPending)return;
+  lockPending=true;
+  try{const request=$('view').requestPointerLock();request?.catch(lockFailed);}catch{lockFailed();}
+ }else{if(mode!=='orbit')setCameraMode('orbit');$('view').classList.add('dragging');}
+},{capture:true});
+document.addEventListener('pointerlockchange',()=>{
+ const wasLocked=pointerLocked;pointerLocked=document.pointerLockElement===$('view');lockPending=false;
+ if(pointerLocked&&paused){document.exitPointerLock();return;}
+ orbit.enableRotate=!pointerLocked;document.body.classList.toggle('pointer-locked',pointerLocked);$('view').classList.remove('dragging');
+ cameraReturn.manual(performance.now());cameraHint();
+ if(pointerLocked)status('');
+ if(wasLocked&&!pointerLocked&&!immersive?.blockingUI())menu(true);
+});
+document.addEventListener('pointerlockerror',lockFailed);
+document.addEventListener('mousemove',e=>{
+ if(!pointerLocked||paused||(!e.movementX&&!e.movementY))return;
+ if(isInside()){
+  headLook.yaw=clamp(headLook.yaw+e.movementX*.0025,-1.45,1.45);
+  headLook.pitch=clamp(headLook.pitch-e.movementY*.0025,-.60,.45);
+ }else{
+  if(mode!=='orbit')setCameraMode('orbit');
+  orbit.rotateLeft(e.movementX*.0025);orbit.rotateUp(e.movementY*.0025);
+ }
+ cameraReturn.manual(performance.now());
+});
+$('view').addEventListener('pointermove',e=>{if(!pointerLocked&&e.buttons)cameraReturn.manual(performance.now());});
+window.addEventListener('pointerup',()=>$('view').classList.remove('dragging'));
+$('view').addEventListener('pointercancel',()=>$('view').classList.remove('dragging'));
+$('view').addEventListener('wheel',e=>{if(ready&&!paused){if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}if(mode!=='orbit')setCameraMode('orbit');cameraReturn.manual(performance.now());}},{capture:true,passive:true});
+function updateCamera(dt){
+ const p=carRoot.position,vel=Math.hypot(car.vx,car.vy);
+ const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
+ if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
+ if(mode==='cockpit'){
+  // Rigid attachment prevents the camera crossing the dashboard under acceleration.
+  carRoot.updateMatrixWorld(true);camera.position.copy(cockpit.eye).applyMatrix4(carRoot.matrixWorld);
+  look.set(Math.cos(headLook.pitch)*Math.cos(headLook.yaw)*20,Math.sin(headLook.pitch)*20-.20,Math.cos(headLook.pitch)*Math.sin(headLook.yaw)*20).add(cockpit.eye).applyMatrix4(carRoot.matrixWorld);
+  camera.up.set(0,1,0).transformDirection(carRoot.matrixWorld);camera.lookAt(look);
+ } else if(mode==='orbit'){
+  orbitTarget.copy(p).add(new THREE.Vector3(0,.85,0));
+  orbitDelta.subVectors(orbitTarget,orbit.target);camera.position.add(orbitDelta);orbit.target.copy(orbitTarget);orbit.update();
+  if(centering){
+   orbitSphere.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));
+   const behind=Math.atan2(-forward.x,-forward.z);
+   orbitSphere.theta+=wrap(behind-orbitSphere.theta)*blend;
+   orbitSphere.phi+=(1.25-orbitSphere.phi)*blend;
+   camera.position.copy(orbit.target).add(orbitDelta.setFromSpherical(orbitSphere));orbit.update();
+  }
+  // Evita entrar no solo nas subidas e nas bordas inclinadas da pista.
+  const ground=car.sample(camera.position.x,-camera.position.z).z;
+  camera.position.y=Math.max(camera.position.y,ground+.3);
+  cameraRayDirection.subVectors(camera.position,orbit.target);
+  cameraRay.far=cameraRayDirection.length();cameraRay.set(orbit.target,cameraRayDirection.normalize());
+  const obstruction=cameraRay.intersectObjects(cameraObstacles,false)[0];
+  if(obstruction)camera.position.copy(orbit.target).addScaledVector(cameraRayDirection,Math.max(.2,obstruction.distance-.3));
+  camera.lookAt(orbit.target);
+ } else {
+ if(mode==='hood'){desired.copy(p).addScaledVector(forward,1.1).addScaledVector(up,1.25);look.copy(desired).addScaledVector(forward,35*Math.cos(headLook.pitch)*Math.cos(headLook.yaw)).addScaledVector(right,35*Math.cos(headLook.pitch)*Math.sin(headLook.yaw)).addScaledVector(up,35*Math.sin(headLook.pitch)-.25);}
+ else if(mode==='aerial'){desired.copy(p).addScaledVector(forward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(forward,22);}
+ else{desired.copy(p).addScaledVector(forward,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(forward,13).add(new THREE.Vector3(0,1,0));}
+ camera.position.lerp(desired,Math.min(1,dt*(mode==='hood'?30:5)));camera.up.set(0,1,0);camera.lookAt(look);
+ }
+ sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();
+}
+function input(){return {ignition:keys.has('KeyI')?1:0,throttle:keys.has('KeyW')||keys.has('ArrowUp')?1:0,brake:keys.has('KeyS')||keys.has('ArrowDown')?1:0,left:keys.has('KeyA')||keys.has('ArrowLeft')?1:0,right:keys.has('KeyD')||keys.has('ArrowRight')?1:0,reverse:keys.has('KeyQ')?1:0,handbrake:keys.has('Space')?1:0};}
+function pilot(){
+ return recognitionInput(car);
+}
+function hud(){const p=car.surface,speed=Math.hypot(car.vx,car.vy)*3.6;
+ $('speed').textContent=Math.round(speed);$('gear').textContent=carAudio.state.gear;$('rev').style.width=`${carAudio.state.rpm/7400*100}%`;
+ $('grade').textContent=`${(p.grade*100).toFixed(1).replace('.',',')}%`;$('bank').textContent=`${(p.bank*100).toFixed(1).replace('.',',')}%`;$('alt').textContent=`${(p.z+720).toFixed(1)} m`;
+ $('lap').textContent=String(car.laps+1).padStart(2,'0');$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);$('valid').textContent=car.lapValid?'Volta válida':'Volta inválida · fora dos limites';$('valid').style.color=car.lapValid?'#e2fb57':'#ffb789';
+ $('surface').textContent=automatic?'RECONHECIMENTO AUTOMÁTICO':p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=location(p.s);drawMap();
+}
+let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0;
+function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);if(!ready)return;
+ renderedFrame++;
+ if(!paused){accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(!immersive?.step(command,1/120))car.step(command,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;}}
+ skidMarks.flush();
+ tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);
+ const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
+ carAudio.update(car,immersive?.audioCommand(automatic?pilot():input())??input(),skid,paused,mode);
+ updateCar(dt);updateCamera(Math.min(rawDt,.25));if(cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ immersive?.update(paused?0:dt,camera);
+ // Render the reflection from this frame's car pose before displaying the cockpit.
+ // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
+ if(mode==='cockpit'){
+  cockpit.root.visible=false;driver.root.visible=false;carStructure.visible=false;
+  cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carRoot.matrixWorld);
+  look.set(-30,1.14,0).applyMatrix4(carRoot.matrixWorld);
+  cockpit.rearCamera.up.set(0,1,0).transformDirection(carRoot.matrixWorld);cockpit.rearCamera.lookAt(look);
+  const oldShadowUpdate=renderer.shadowMap.autoUpdate;renderer.shadowMap.autoUpdate=false;
+  tyreSmoke.material.uniforms.viewport.value=cockpit.mirrorTarget.height;
+  renderer.setRenderTarget(cockpit.mirrorTarget);renderer.render(scene,cockpit.rearCamera);renderer.setRenderTarget(null);
+  tyreSmoke.material.uniforms.viewport.value=renderer.domElement.height;
+  mirrorFrame=renderedFrame;
+  renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;carStructure.visible=true;
+ }
+ renderer.render(scene,camera);
+}
+function menu(show){paused=show;carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
+document.addEventListener('keydown',e=>{
+ if(['INPUT','SELECT'].includes(e.target.tagName)&&!['Escape','KeyP'].includes(e.code))return;
+ if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat||!ready)return;
+ if(immersive?.handleKey(e.code))return;
+ if(e.code==='KeyC')setCameraMode(cameraModes[(cameraModes.indexOf(mode)+1)%cameraModes.length]);
+ if(e.code==='KeyR')reset(true);
+ if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
+ if(e.code==='KeyV')cycleLivery();
+ if(e.code==='KeyP')menu(!paused);
+ if(e.code==='Escape')menu(true);
+ if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){automatic=false;status('');}
+});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{keys.clear();if(ready)menu(true);});
+document.addEventListener('visibilitychange',()=>{if(document.hidden&&ready)menu(true);});
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+$('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit');};
+$('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit');};
+$('skinButton').onclick=cycleLivery;
+$('start').onclick=()=>{automatic=false;if($('immersiveMode').checked){if(!immersive.active)immersive.start();}else if(immersive.active){immersive.disable();reset();}menu(false);};$('tour').onclick=()=>{if(!ready||$('immersiveMode').checked)return;if(immersive?.active)immersive.disable();reset();automatic=true;menu(false);};$('menuButton').onclick=()=>menu(true);$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{try{await setLivery(e.target.value);}catch(err){status('Falha ao carregar a pintura. Abra o teste pelo INICIAR_TESTE.cmd.');console.error(err);}};
+try{
+ data=await (await fetch('../dados/pista.json')).json();car=new TestCar(data);
+ roadSurface=await createTrackSurface(renderer,data);
+ driver=await createDriver(cockpit.wheel,cockpit.wheelTurn);carRoot.add(driver.root);
+ const track=await loader.loadAsync('../exports/interlagos_pista.glb');flattenStatic(track.scene);await setLivery($('livery').value);
+ immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
+ ready=true;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;$('start').textContent='Entrar na pista →';
+ window.interlagos={ready:true,car,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
+  immersiveInfo:()=>immersive.info(),
+  audioInfo:()=>carAudio.info(),
+  skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),
+  structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
+  driverInfo:()=>driver.info(),
+  surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
+  cockpitInfo:()=>({...cockpit.info(),eyeLocal:carRoot.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
+   renderedFrame,mirrorFrame,mirrorEyeLocal:carRoot.worldToLocal(cockpit.rearCamera.position.clone()).toArray()}),
+  viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs}),
+  cameraSnapshot:()=>({position:camera.position.toArray(),target:orbit.target.toArray(),car:carRoot.position.toArray(),distance:camera.position.distanceTo(orbit.target),ground:car.sample(camera.position.x,-camera.position.z).z}),
+  wheelSnapshot:()=>{carRoot.updateMatrixWorld(true);const inverse=carRoot.getWorldQuaternion(new THREE.Quaternion()).invert();return wheels.map(w=>{const axle=new THREE.Vector3(0,0,1).applyQuaternion(w.obj.getWorldQuaternion(new THREE.Quaternion())).applyQuaternion(inverse);return {name:w.obj.name,front:w.front,angle:Math.atan2(axle.x,axle.z),axle:axle.toArray()};});},
+  get state(){return {paused,automatic,mode,livery:activeLivery,wheels:wheels.length,drawCalls:renderer.info.render.calls};}};
+ frame();
+}catch(err){console.error(err);status('Não foi possível carregar. Inicie pelo arquivo INICIAR_TESTE.cmd.');$('start').textContent='Falha ao carregar';}

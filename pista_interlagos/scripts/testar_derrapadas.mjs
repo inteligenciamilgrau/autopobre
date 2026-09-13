@@ -1,0 +1,38 @@
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import {SkidMarks} from '../teste/skid-marks.js';
+import {TestCar} from '../teste/physics.js';
+const checks={};
+const check=(name,value)=>{checks[name]=!!value;assert(value,name);};
+const flat={x:0,y:0,heading:0,vx:0,vy:0,yaw:0,steer:0,
+ sample:(x,y)=>({z:.055+x*.1+y*.08,onRoad:Math.abs(y)<6,d:y,width:12})};
+const marks=new SkidMarks(128),step=(n,input={},car=flat)=>{
+ for(let i=0;i<n;i++){car.x+=car.vx/120;car.y+=car.vy/120;marks.update(car,input,1/120);}marks.flush();
+};
+step(120,{brake:1,handbrake:1});check('stationary_no_marks',marks.count===0);
+flat.vx=15;step(120);check('straight_no_marks',marks.count===0);
+step(120,{handbrake:1});
+check('handbrake_rear_only',marks.wheels.slice(0,2).every(w=>!w.segments)&&marks.wheels.slice(2).every(w=>w.segments>0));
+const positions=marks.geometry.attributes.position;
+let maxHeightError=0,maxWidthError=0;
+for(let i=0;i<marks.count*4;i++)maxHeightError=Math.max(maxHeightError,Math.abs(positions.getY(i)-(flat.sample(positions.getX(i),-positions.getZ(i)).z+.001)));
+for(let i=0;i<marks.count*4;i+=2)maxWidthError=Math.max(maxWidthError,Math.abs(Math.hypot(positions.getX(i+1)-positions.getX(i),positions.getZ(i+1)-positions.getZ(i))-.21));
+check('conforms_to_grade_and_bank',maxHeightError<1e-5);check('tyre_width_21cm',maxWidthError<1e-5);
+marks.breakTrails();flat.y=20;const beforeGrass=marks.total;step(120,{brake:1});check('no_grass_marks',marks.total===beforeGrass);
+flat.y=0;marks.breakTrails();step(120,{brake:1});check('braking_four_wheels',marks.wheels.every(w=>w.segments>0));
+check('bounded_buffer',marks.count===128&&marks.geometry.drawRange.count===128*6&&positions.count===128*4);
+const beforeReset=marks.total;marks.breakTrails();flat.x+=500;step(1,{brake:1});check('reset_no_bridge_keeps_old_marks',marks.total===beforeReset&&marks.count===128);
+const beforeTeleport=marks.total;flat.x+=200;step(1,{handbrake:1});check('teleport_no_bridge',marks.total===beforeTeleport);
+
+const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));
+const car=new TestCar(data),real=new SkidMarks();car.reset(600);
+car.vx=Math.cos(car.heading)*18;car.vy=Math.sin(car.heading)*18;
+for(let i=0;i<180;i++){const input={throttle:0,brake:0,left:1,right:0,reverse:0,handbrake:1};car.step(input,1/120);real.update(car,input,1/120);}
+real.flush();check('real_physics_drift_marks',real.count>40&&real.wheels.slice(2).every(w=>w.segments>0));
+let maxLength=0;
+const p=real.geometry.attributes.position;
+for(let i=0;i<real.count*4;i+=4)maxLength=Math.max(maxLength,Math.hypot(p.getX(i+2)-p.getX(i),p.getZ(i+2)-p.getZ(i)));
+check('continuous_short_segments',maxLength<2);
+const report={passed:true,checks,maxHeightError,maxWidthError,maxLength,realPhysics:real.info()};
+fs.writeFileSync(new URL('../dados/validacao_derrapadas_geometria.json',import.meta.url),JSON.stringify(report,null,2));
+console.log(JSON.stringify(report,null,2));marks.dispose();real.dispose();

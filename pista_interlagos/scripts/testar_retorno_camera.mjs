@@ -1,0 +1,18 @@
+import assert from 'node:assert/strict';
+import {CameraReturn} from '../teste/camera-return.js';
+const c=new CameraReturn();
+c.manual(1000);
+assert.equal(c.update(5000,0,false),false,'No return while parked');
+assert.equal(c.update(6000,10,false),false,'Moving starts its own delay');
+assert.equal(c.update(8999,10,false),false,'No early return');
+assert.equal(c.update(9000,10,false),true,'Return after three seconds moving');
+c.manual(9200);assert.equal(c.active,false,'Mouse cancels immediately');
+assert.equal(c.update(12199,10,false),false,'New mouse input renews delay');
+assert.equal(c.update(12200,10,false),true);
+assert.equal(c.update(13000,1,false),false,'Ignore low speed creep');
+assert.equal(c.update(14000,10,false),false,'Restart full delay after stop');
+assert.equal(c.update(17000,10,true),false,'Pause cancels return');
+assert.equal(c.update(18000,10,false),false,'Resume restarts movement delay');
+assert.equal(c.update(21000,10,false),true);
+c.reset(22000);assert.equal(c.active,false);assert.equal(c.movingSince,null);
+console.log('Camera return: 14 timing/state assertions passed.');

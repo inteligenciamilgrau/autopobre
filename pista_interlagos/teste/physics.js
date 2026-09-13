@@ -1,0 +1,98 @@
+// Modelo de teste: bicicleta, aderencia limitada, gravidade no plano medido.
+// Nao e simulacao homologada de pneus/suspensao do Old Stock.
+export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
+export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
+export class TestCar {
+ constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.reset();}
+ reset(index=0){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.surface=this.sample(this.x,this.y);}
+ nearest(x,y,global=false){
+  let best=Infinity,out;
+  const count=global?this.n:81,start=global?0:this.index-40;
+  for(let k=0;k<count;k++){
+   const i=(start+k+this.n)%this.n,a=this.a[i],b=this.a[(i+1)%this.n];
+   const dx=b[1]-a[1],dy=b[2]-a[2],u=clamp(((x-a[1])*dx+(y-a[2])*dy)/(dx*dx+dy*dy),0,1);
+   const ex=x-a[1]-u*dx,ey=y-a[2]-u*dy,d2=ex*ex+ey*ey;
+   if(d2<best){best=d2;out={i,u,ex,ey};}
+  }
+  if(best>10000&&!global)return this.nearest(x,y,true);
+  return out;
+ }
+ terrain(x,y){const t=this.data.terrain,fx=clamp((x-t.x0)/t.step,0,t.nx-1.001),fy=clamp((y-t.y0)/t.step,0,t.ny-1.001),ix=Math.floor(fx),iy=Math.floor(fy),u=fx-ix,v=fy-iy,k=iy*t.nx+ix;
+  return (t.z[k]*(1-u)+t.z[k+1]*u)*(1-v)+(t.z[k+t.nx]*(1-u)+t.z[k+t.nx+1]*u)*v;
+ }
+ sample(x,y){
+  const q=this.nearest(x,y),a=this.a[q.i],b=this.a[(q.i+1)%this.n],mix=k=>a[k]+(b[k]-a[k])*q.u;
+  const tx=mix(7),ty=mix(8),lx=-ty,ly=tx,d=q.ex*lx+q.ey*ly,bank=mix(5),grade=mix(6),width=mix(4);
+  const gx=tx*grade+lx*bank,gy=ty*grade+ly*bank;
+  const roadz=mix(3)+bank*d,blend=clamp((Math.abs(d)-width/2)/3,0,1);
+  const z=roadz*(1-blend)+this.terrain(x,y)*blend+.055;
+  const s=(a[0]+q.u*Math.hypot(b[1]-a[1],b[2]-a[2]))%this.data.meta.reconstructed_xy_m;
+  return {i:q.i,u:q.u,s:s>this.data.meta.reconstructed_xy_m-.01?0:s,d,z,width,bank,grade,gx,gy,tx,ty,lx,ly,onRoad:Math.abs(d)<width/2};
+ }
+ step(input,dt){
+  const oldIndex=this.index,p=this.surface;
+  const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
+  const mu=p.onRoad?.99:.35,steerTarget=(input.left-input.right)*.52/(1+speed/28);
+  this.steer+=(steerTarget-this.steer)*Math.min(1,dt*7);
+  // Deliberate low-speed stunt assist: hold + throttle spins the driven rear
+  // tyres; steering allows a tight powered circle. Ordinary driving is unchanged.
+  const burning=!!(input.handbrake&&input.throttle&&!input.reverse&&p.onRoad&&speed<12);
+  this.burnout=(this.burnout??0)+((burning?input.throttle:0)-(this.burnout??0))*(1-Math.exp(-dt*(burning?3:input.throttle?2:7)));
+  this.rearSlipSpeed=this.burnout*20;
+  const turn=clamp(this.steer/.52,-1,1);
+  let targetYaw=v/2.667*Math.tan(this.steer);
+  targetYaw=clamp(targetYaw,-mu*9.81/Math.max(speed,3),mu*9.81/Math.max(speed,3));
+  if(burning)targetYaw=input.brake?0:turn*1.35*this.burnout;
+  this.yaw+=(targetYaw-this.yaw)*Math.min(1,dt*6);
+  this.heading=wrap(this.heading+this.yaw*dt);
+  let drive=input.throttle*Math.min(5.8,190/Math.max(Math.abs(v),7));
+  if(input.reverse)drive-=3;
+  const drag=.00145*v*Math.abs(v)+Math.sign(v)*(p.onRoad?.16:1.3);
+  const braking=Math.max(input.brake*11,input.handbrake&&!burning?7:0)*Math.min(1,Math.abs(v)/Math.max(dt*11,.001))*Math.sign(v);
+  const gx=-9.81*p.gx,gy=-9.81*p.gy;
+  // The car origin is 1.117 m ahead of the rear axle. In a gripping turn its
+  // lateral velocity is yaw * rearOffset; damping it toward zero made the rear slide.
+  const lateralLimit=mu*9.81*(input.handbrake?.45:1);
+  const turnAcross=clamp(v*this.yaw,-lateralLimit,lateralLimit);
+  const rollingLateral=this.yaw*1.117,gravityAcross=-gx*s+gy*c;
+  const across=clamp(turnAcross+(rollingLateral-lat)*(input.handbrake?1.5:12)-gravityAcross,-lateralLimit,lateralLimit);
+  // The turning force is perpendicular to travel, rather than adding free speed.
+  const along=drive-drag-braking-(Math.abs(v)>.5?turnAcross*lat/v:0);
+  this.vx+=(along*c-across*s+gx)*dt;this.vy+=(along*s+across*c+gy)*dt;
+  if(burning){
+   // Bracing at rest, then a tight powered circle that fits the asphalt width.
+   const crawl=input.brake?0:Math.abs(turn)*2*this.burnout;
+   // Let the rear swing outward around the gripping front end.
+   const side=input.brake?0:-this.yaw*1.1;
+   const blend=1-Math.exp(-dt*8);
+   this.vx+=(crawl*c-side*s-this.vx)*blend;
+   this.vy+=(crawl*s+side*c-this.vy)*blend;
+   if(Math.abs(turn)<.02&&speed<.8){this.vx=0;this.vy=0;}
+  }
+  if(input.brake&&speed<.3){this.vx=0;this.vy=0;}
+  if(input.handbrake&&!burning&&speed<.3){this.vx=0;this.vy=0;}
+  this.x+=this.vx*dt;this.y+=this.vy*dt;
+  this.surface=this.sample(this.x,this.y);this.index=this.surface.i;
+  // Contato simples com os muros dos trechos definidos no cenario Blender.
+  const r=this.surface,hasWall=r.s<250||r.s>3820||(r.s>750&&r.s<1570),wall=r.width/2+(r.s<250?2.5:5)-1.15;
+  if(hasWall&&Math.abs(r.d)>wall&&Math.abs(r.d)<wall+5){const correction=r.d-Math.sign(r.d)*wall;this.x-=r.lx*correction;this.y-=r.ly*correction;this.vx*=.45;this.vy*=.45;this.surface=this.sample(this.x,this.y);}
+  this.distance+=speed*dt;this.clock+=dt;this.spin+=v*dt/.31595;
+  this.rearSpin=(this.rearSpin??0)+(input.handbrake&&!burning?0:v+this.rearSlipSpeed)*dt/.31595;
+  if(Math.abs(r.d)>r.width/2+2)this.lapValid=false;
+  this.checkpoints.add(Math.floor(this.index/this.n*20));
+  if(Math.floor(this.index/this.n*20)===this.nextCheckpoint)this.nextCheckpoint++;
+  if(oldIndex>this.n-8&&this.index<8&&v>1){
+   if(this.nextCheckpoint===20){this.lastLap=this.clock-this.lapStart;this.laps++;if(this.lapValid&&(this.best===null||this.lastLap<this.best))this.best=this.lastLap;}
+   this.lapStart=this.clock;this.lapValid=true;this.checkpoints=new Set([0]);this.nextCheckpoint=1;
+  }
+ }
+ telemetry(){return {x:this.x,y:this.y,z:this.surface.z,speed:Math.hypot(this.vx,this.vy)*3.6,index:this.index,s:this.surface.s,grade:this.surface.grade*100,bank:this.surface.bank*100,onRoad:this.surface.onRoad,laps:this.laps,best:this.best,clock:this.clock};}
+}
+export function recognitionInput(car){
+ const data=car.data,speed=Math.hypot(car.vx,car.vy),la=9+speed*.6,target=data.samples[(car.index+Math.round(la/2))%car.n],dx=target[1]-car.x,dy=target[2]-car.y;
+ const alpha=wrap(Math.atan2(dy,dx)-car.heading),steer=Math.atan2(2*2.667*Math.sin(alpha),Math.hypot(dx,dy));
+ const command=clamp(steer/(.52/(1+speed/28)),-1,1);
+ let desiredSpeed=33;
+ for(let j=0;j<40;j+=5){const a=data.samples[(car.index+j+car.n-3)%car.n],b=data.samples[(car.index+j+3)%car.n];const curvature=Math.abs(wrap(Math.atan2(b[8],b[7])-Math.atan2(a[8],a[7])))/12;const corner=Math.sqrt(3.3/Math.max(curvature,.0001));desiredSpeed=Math.min(desiredSpeed,Math.sqrt(corner*corner+2*3.5*j*2));}
+ return {left:Math.max(0,command),right:Math.max(0,-command),throttle:clamp((desiredSpeed-speed)*.5,0,1),brake:clamp((speed-desiredSpeed)*.6,0,1),reverse:0,handbrake:0};
+}

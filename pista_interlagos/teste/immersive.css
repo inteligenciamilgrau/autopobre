@@ -1,0 +1,22 @@
+.immersive-choice{display:block;padding:13px 15px;background:#422f22;border:1px solid #a98046;border-radius:7px;margin:18px 0;color:#ffdb91;font-size:13px;line-height:1.6;cursor:pointer}
+.immersive-choice input{accent-color:#f1bd63;margin-right:8px}.immersive-choice small{margin:3px 0 0 25px;font-size:11px;color:#d4c2a5}
+.overlay{align-items:flex-start;overflow-y:auto}.overlay article{margin-block:auto;flex-shrink:0}
+#immersivePanel{position:absolute;right:26px;top:104px;bottom:145px;width:min(445px,44vw);padding:24px;background:rgba(14,27,30,.95);border:1px solid #a9874e;border-radius:12px;overflow-y:auto;box-shadow:0 12px 40px #0006;z-index:3}
+#immersivePanel h2{font-size:31px;line-height:1.12;letter-spacing:-1px;margin:12px 0 18px;color:#ffda98}
+#immersivePanel p{font-size:14px;line-height:1.55;color:#d2dedc;margin:12px 0}#immersivePanel small{font-size:12px;color:#a2b6b4;line-height:1.6;display:block;margin-top:12px}
+#immersivePanel button{display:block;width:100%;text-align:left;margin:9px 0;font-size:13px;line-height:1.5;background:#263f42;border-color:#69817b}
+#immersivePanel button.imm-primary{background:#efbd6a;border-color:#efbd6a;color:#172b2e;font-weight:750}#immersivePanel button:disabled{opacity:.45;cursor:default}
+.imm-eyebrow{font-size:10px;letter-spacing:1.7px;font-weight:750;color:#b6cdc9}.imm-cash{display:block;font-size:38px;color:#f2ce8e}.imm-controls{padding:10px;border-left:3px solid #efbd6a;background:#1c393d}.imm-feedback{padding:10px;border-radius:6px;background:#285447}
+.imm-jokes button{font-size:12px!important}.imm-check{display:flex;align-items:center;gap:9px;font-size:13px;margin:18px 0}#immersivePanel input[type=range]{display:block;width:100%;accent-color:#efbd6a;margin-top:14px}#immersivePanel input[type=checkbox]{accent-color:#efbd6a}
+#immersivePanel progress,#immersivePanel meter{width:100%;height:20px;accent-color:#efbd6a}.imm-dream{padding:16px;background:#203c3f;border:1px solid #49625f;border-radius:7px;margin:18px 0;font-size:12px;line-height:1.6}.imm-dream progress{display:block;margin:10px 0}
+.imm-start-gauge{height:30px;background:#a44837;border-radius:5px;position:relative;margin:24px 0;overflow:hidden}.imm-start-gauge span{position:absolute;left:22%;width:43%;height:100%;background:#68b482}.imm-start-gauge i{position:absolute;width:4px;height:100%;background:white;box-shadow:0 0 7px white}
+#immersiveHud{position:absolute;left:28px;bottom:91px;width:265px;background:rgba(13,31,32,.93);border:1px solid #8c754d;border-radius:9px;padding:13px;z-index:2;pointer-events:none}
+.imm-brand{font-size:12px;font-weight:900;letter-spacing:1px;color:#f4c77f}.imm-brand span{display:block;color:#aabfba;font-size:9px;letter-spacing:1.5px;margin-top:5px}.imm-meters{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:13px 0 0}.imm-meters span{font-size:8px;letter-spacing:.5px;color:#b9cac6}.imm-meters b{display:block;font-size:16px;color:#fff;margin-top:4px}
+#immAlert:not(:empty){font-size:11px;line-height:1.5;color:#ffd98b;border-top:1px solid #5d5c48;padding-top:9px;margin-top:10px}
+.immersive-stage #mapcard,.immersive-stage #timing,.immersive-stage #telemetry,.immersive-stage #cameraTools,.immersive-stage footer>div{display:none}
+.immersive-stage footer{justify-content:flex-end}
+.immersive-mode.cockpit-mode #immersiveHud{top:310px;bottom:auto;left:20px;width:185px}
+.immersive-mode #cameraTools{left:auto;right:34px;max-width:55vw;flex-wrap:wrap;justify-content:flex-end}.immersive-mode #telemetry{bottom:156px}
+.immersive-mode:has(#immersivePanel:not(.hidden)) #timing,.immersive-mode:has(#immersivePanel:not(.hidden)) #telemetry{display:none}
+body:has(#menu:not(.hidden)) #immersivePanel,body:has(#menu:not(.hidden)) #immersiveHud{display:none}
+@media(max-width:900px){#immersivePanel{right:16px;width:48vw;padding:16px;top:92px;bottom:118px}#immersivePanel h2{font-size:24px}#immersivePanel p{font-size:12px}#immersiveHud{left:16px;width:220px;bottom:82px}.imm-meters b{font-size:14px}.immersive-mode #cameraTools{right:16px}}
