@@ -37,7 +37,7 @@ export class RaceField {
   this.time=0;this.collisions=0;this.cooldowns.clear();
   this.rivals=[43,45,42,46,44].map((pace,i)=>{const progress=startS+10+i*8,L=this.data.meta.reconstructed_xy_m,s=((progress%L)+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;const car=new TestCar(this.data);car.reset(index);const lane=[-2,2,0,-2,2][i];car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);return {car,pace,lane,targetLane:lane,maneuverCooldown:0,progress:10+i*8,lastS:car.surface.s,finished:false,stun:0};});
  }
- step(player,dt,oneLap=false){
+ step(player,dt,totalLaps=0){
   this.time+=dt;const impacts=[],L=this.data.meta.reconstructed_xy_m;
   for(const r of this.rivals){
    const c=r.car,input=recognitionInput(c,{maxSpeed:r.pace,cornerGrip:6.2,braking:5.4}),speed=Math.hypot(c.vx,c.vy),look=9+speed*.6,p=this.data.samples[(c.index+Math.round(look/2))%c.n];
@@ -54,8 +54,8 @@ export class RaceField {
     if(forward>0&&forward<6+Math.max(0,relative)*.8&&Math.abs(side)<2){input.throttle=0;input.brake=Math.max(input.brake,clamp((7+relative-forward)/7,.2,1));}
    }
    r.stun=Math.max(0,r.stun-dt);if(r.stun>0){input.throttle=0;input.brake=Math.max(input.brake,.2);}
-   if(r.finished&&oneLap){input.throttle=0;input.brake=1;}
-   c.step(input,dt);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(oneLap&&r.progress>=L)r.finished=true;
+   if(r.finished&&totalLaps){input.throttle=0;input.brake=1;}
+   c.step(input,dt);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&r.progress>=L*totalLaps)r.finished=true;
   }
   const bodies=[player,...this.rivals.map(r=>r.car)];
   for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){

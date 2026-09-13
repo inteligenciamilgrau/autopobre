@@ -10,6 +10,12 @@ O pódio vem antes da vistoria, com o primeiro no centro e os pares à esquerda.
 
 ## Preparar e publicar
 
+A corrida normal tem **3 voltas**; a imersiva tem **1 volta**. O HUD mostra volta/total, posição entre os seis carros, tempo, combustível e velocidade. A câmera da corrida normal começa atrás do carro. Ao pausar, **Voltar à pista** retoma a sessão; ao completar as três voltas, o menu mostra a classificação e permite iniciar uma nova corrida. As instruções de teclado e os dados técnicos ficam fora da tela de corrida.
+
+Na abertura do celular, **Tela cheia** entra e sai desse modo quando o navegador oferece suporte. Durante a compra de gasolina, arraste o dedo ou o mouse na pista para olhar o carro ao redor; o painel de compra continua utilizável. A publicação inclui versões nos módulos e estilos para evitar misturar arquivos antigos do cache com a atualização.
+
+No celular, os pedais ficam à **esquerda** e a direção à **direita**, em um controle deslizante proporcional que permite trocar o sentido sem tirar o dedo e centraliza ao soltar. O freio de mão alterna entre travado e solto a cada toque, com indicação no botão; a trava permanece ao pausar e é liberada ao iniciar outra corrida. O painel do reboque ocupa a lateral, deixando o centro livre. Sair da pista por si só não invalida a volta: a regra compara o trecho avançado no circuito com a distância percorrida fora dele, tolerando pequenas excursões. Cortes relevantes ou checkpoints pulados impedem que a volta conte para a chegada. `testar_voltas.mjs` e `verificar_hud_corrida.py` cobrem essas regras e a interface.
+
 **Configurações** abre uma tela com Corrida, Áudio e Controles. Volume global, música e efeitos são independentes e ficam salvos. O controle de efeitos toca uma prévia. A música começa depois da primeira interação, muda conforme a cena e silencia ao sair da aba.
 
 As faixas ficam em [`pista_interlagos/teste/assets/audio/`](pista_interlagos/teste/assets/audio/README.md): `intro.mp3` na abertura, `patrocinio.mp3` na vaquinha, `race.mp3` na corrida, `turbo.mp3` na vitória e `hojenaodeu.mp3` na derrota. `energia.mp3` toca nos menus e substitui qualquer faixa ausente. Se também faltar, há cinco composições originais sintetizadas no navegador. O build descobre e copia somente os nomes permitidos. As cópias otimizadas usam 128 kbps estéreo; `audios_originais/` preserva os originais fora da publicação e do Git.

@@ -25,7 +25,15 @@ def build():
     for name in tracks:
         target = 'assets/audio/' + name
         payload[target] = contained_file(ROOT, OPTIONAL_AUDIO[target]).read_bytes()
+    # One release tag prevents a cached old module from mixing with the new HUD/physics.
+    version = hashlib.sha256(b''.join(payload[name] for name in sorted(payload) if Path(name).suffix in {'.js', '.css', '.html'})).hexdigest()[:12]
+    module_import = re.compile(r'''((?:from\s*|import\s*\(\s*|import\s*)['"])(\.{1,2}/[^'"?]+\.js)(?:\?[^'"]*)?(['"])''')
+    for name in payload:
+        if name.endswith('.js'):
+            source = payload[name].decode('utf-8')
+            payload[name] = module_import.sub(lambda m: m[1] + m[2] + '?v=' + version + m[3], source).encode('utf-8')
     html = payload['index.html'].decode('utf-8').replace('./node_modules/three/', './vendor/three/')
+    html = re.sub(r'''((?:src|href)=["'][^"'?]+\.(?:js|css))(?:\?[^"']*)?(["'])''', lambda m: m[1] + '?v=' + version + m[2], html)
     policy = content_policy(html)
     html = html.replace('<link rel="icon"', '<meta http-equiv="Content-Security-Policy" content="' + policy + '">\n<meta name="referrer" content="no-referrer">\n<link rel="icon"', 1)
     payload['index.html'] = html.encode('utf-8')

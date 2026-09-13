@@ -4,7 +4,7 @@ export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.reset();}
- reset(index=0){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.surface=this.sample(this.x,this.y);}
+ reset(index=0){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.surface=this.sample(this.x,this.y);}
  nearest(x,y,global=false){
   let best=Infinity,out;
   const count=global?this.n:81,start=global?0:this.index-40;
@@ -30,7 +30,7 @@ export class TestCar {
   return {i:q.i,u:q.u,s:s>this.data.meta.reconstructed_xy_m-.01?0:s,d,z,width,bank,grade,gx,gy,tx,ty,lx,ly,onRoad:Math.abs(d)<width/2};
  }
  step(input,dt){
-  const oldIndex=this.index,p=this.surface;
+  const p=this.surface,oldX=this.x,oldY=this.y;
   const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
   const mu=p.onRoad?.99:.35,steerTarget=(input.left-input.right)*.52/(1+speed/28);
   this.steer+=(steerTarget-this.steer)*Math.min(1,dt*7);
@@ -78,11 +78,27 @@ export class TestCar {
   if(hasWall&&Math.abs(r.d)>wall&&Math.abs(r.d)<wall+5){const correction=r.d-Math.sign(r.d)*wall;this.x-=r.lx*correction;this.y-=r.ly*correction;this.vx*=.45;this.vy*=.45;this.surface=this.sample(this.x,this.y);}
   this.distance+=speed*dt;this.clock+=dt;this.spin+=v*dt/.31595;
   this.rearSpin=(this.rearSpin??0)+(input.handbrake&&!burning?0:v+this.rearSlipSpeed)*dt/.31595;
-  if(Math.abs(r.d)>r.width/2+2)this.lapValid=false;
-  this.checkpoints.add(Math.floor(this.index/this.n*20));
-  if(Math.floor(this.index/this.n*20)===this.nextCheckpoint)this.nextCheckpoint++;
-  if(oldIndex>this.n-8&&this.index<8&&v>1){
-   if(this.nextCheckpoint===20){this.lastLap=this.clock-this.lapStart;this.laps++;if(this.lapValid&&(this.best===null||this.lastLap<this.best))this.best=this.lastLap;}
+  this.trackLap(p,this.surface,Math.hypot(this.x-oldX,this.y-oldY),v);
+ }
+ trackLap(previous,current,distance,forwardSpeed){
+  const L=this.data.meta.reconstructed_xy_m;
+  let advance=current.s-previous.s;if(advance<-L/2)advance+=L;if(advance>L/2)advance-=L;
+  const outside=p=>Math.abs(p.d)>p.width/2+1;
+  if(!this.excursion&&(outside(previous)||outside(current)))this.excursion={advance:0,distance:0};
+  if(this.excursion){this.excursion.advance+=advance;this.excursion.distance+=distance;}
+  const finish=previous.s>L-16&&current.s<16&&advance>0&&forwardSpeed>1;
+  // A runoff alone is allowed. Reject only a meaningful gain from cutting the route.
+  if(this.excursion&&(!outside(current)||finish)){
+   if(this.excursion.advance>40&&this.excursion.advance-this.excursion.distance>18)this.lapValid=false;
+   this.excursion=null;
+  }
+  const checkpoint=Math.floor(current.s/L*20);
+  this.checkpoints.add(checkpoint);
+  if(advance>0&&checkpoint===this.nextCheckpoint)this.nextCheckpoint++;
+  if(finish){
+   this.lastLapValid=this.lapValid&&this.nextCheckpoint===20;
+   this.lastLap=this.clock-this.lapStart;
+   if(this.lastLapValid){this.laps++;if(this.best===null||this.lastLap<this.best)this.best=this.lastLap;}
    this.lapStart=this.clock;this.lapValid=true;this.checkpoints=new Set([0]);this.nextCheckpoint=1;
   }
  }

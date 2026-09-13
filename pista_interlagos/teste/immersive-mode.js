@@ -9,7 +9,7 @@ const money=n=>`R$ ${n.toFixed(2).replace('.',',')}`;
 export class ImmersiveMode {
  constructor({scene,carRoot,car,data,driver,rivalTemplate,resetVehicle,releaseMouse,onNormal}){
   Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
-  this.freeFuel=12;this.field=new RaceField(data);this.parts=new CrashParts(scene);this.state=new ImmersiveState(profile);this.visual=new ImmersiveVisuals(scene,carRoot,data,driver,car,rivalTemplate);this.lastPhase='off';this.lastUI='';this.near=-1;this.rivals=this.field.rivals;this.projectile=null;this.towOrigin=0;this.prepLitres=6;this.prepFilm=false;
+  this.freeFuel=12;this.freeTotalLaps=3;this.freeFinished=false;this.freePosition=6;this.freePlayerProgress=0;this.field=new RaceField(data);this.parts=new CrashParts(scene);this.state=new ImmersiveState(profile);this.visual=new ImmersiveVisuals(scene,carRoot,data,driver,car,rivalTemplate);this.lastPhase='off';this.lastUI='';this.near=-1;this.rivals=this.field.rivals;this.projectile=null;this.towOrigin=0;this.prepLitres=6;this.prepFilm=false;
   this.brand=document.querySelector('.wordmark');this.baseBrand=this.brand.innerHTML;this.baseTitle=document.title;
   this.controls=document.querySelector('footer>div');this.baseControls=this.controls.innerHTML;
   this.panel=document.createElement('section');this.panel.id='immersivePanel';this.panel.className='hidden';this.panel.setAttribute('aria-label','Auto-Pobre Racing');document.body.append(this.panel);
@@ -30,11 +30,11 @@ export class ImmersiveMode {
  }
  positionDialogue(){if(this.state.phase!=='crowd'||this.state.fan===null||!this.camera)return;const p=this.visual.fans[this.state.fan].person.getWorldPosition(new THREE.Vector3());p.y+=1.85;p.project(this.camera);const x=(p.x*.5+.5)*innerWidth,y=(-p.y*.5+.5)*innerHeight,rect=this.panel.getBoundingClientRect();this.panel.style.left=`${Math.round(clamp(x+22+rect.width>innerWidth?x-rect.width-22:x+22,12,Math.max(12,innerWidth-rect.width-12)))}px`;this.panel.style.top=`${Math.round(clamp(y-rect.height*.3,80,Math.max(80,innerHeight-rect.height-70)))}px`;this.panel.style.bottom='auto';}
  get active(){return this.state.active;}
- allowsPointer(){return ['race','tow','grid'].includes(this.state.phase);}
+ allowsPointer(){return ['race','tow','grid','prepare'].includes(this.state.phase);}
  blockingUI(){return this.active&&!this.allowsPointer();}
  save(){try{localStorage.setItem('opala99-immersive-v1',JSON.stringify(this.state.profile));}catch{}}
  start(){this.resetVehicle();this.state.start();this.visual.reset();this.near=-1;this.walkToFan=null;this.footDistance=0;this.projectile=null;this.raceProgress=0;this.previousS=0;this.field.reset();this.parts.reset();this.rivals=this.field.rivals;this.debrisTimer=6;this.contactCooldown=0;this.sync();}
- disable(){this.state.disable();this.visual.restoreCamera();this.visual.root.visible=this.visual.damage.visible=false;this.carRoot.visible=true;this.panel.classList.add('hidden');this.hud.classList.add('hidden');document.getElementById('dqScreen').classList.add('hidden');document.body.classList.remove('disqualified-scene','podium-scene');document.body.classList.remove('immersive-mode','immersive-stage');this.brand.innerHTML=this.baseBrand;this.controls.innerHTML=this.baseControls;document.title=this.baseTitle;this.lastPhase='off';}
+ disable(){this.state.disable();this.visual.restoreCamera();this.visual.root.visible=this.visual.damage.visible=false;this.carRoot.visible=true;this.panel.classList.add('hidden');this.hud.classList.add('hidden');document.getElementById('dqScreen').classList.add('hidden');document.body.classList.remove('disqualified-scene','podium-scene','tow-scene');document.body.classList.remove('immersive-mode','immersive-stage');this.brand.innerHTML=this.baseBrand;this.controls.innerHTML=this.baseControls;document.title=this.baseTitle;this.lastPhase='off';}
  sync(){
   const s=this.state;if(s.phase===this.lastPhase)return;this.lastPhase=s.phase;this.lastUI='';
   document.body.classList.toggle('immersive-mode',s.active);document.body.classList.toggle('immersive-stage',['crowd','podium'].includes(s.phase));
@@ -48,7 +48,7 @@ export class ImmersiveMode {
   if(s.phase==='inspection'){
    this.resetVehicle();this.placeCar(trackPoint(this.data,35,-2));this.stop();
   }
-  document.body.classList.toggle('podium-scene',s.phase==='podium');document.body.classList.toggle('disqualified-scene',s.phase==='disqualified');if(['podium','complete','disqualified'].includes(s.phase))this.save();
+  document.body.classList.toggle('tow-scene',['tow','broken','snag'].includes(s.phase));document.body.classList.toggle('podium-scene',s.phase==='podium');document.body.classList.toggle('disqualified-scene',s.phase==='disqualified');if(['podium','complete','disqualified'].includes(s.phase))this.save();
  }
  stop(){this.car.vx=this.car.vy=this.car.yaw=0;this.car.burnout=this.car.rearSlipSpeed=0;}
  placeCar(p){const c=this.car;c.x=p.x;c.y=-p.z;c.heading=p.heading;c.index=p.index;c.surface=c.sample(c.x,c.y);}
@@ -112,10 +112,15 @@ export class ImmersiveMode {
   }
   if(this.projectile){this.projectile.age+=dt;if(this.projectile.age>=this.projectile.duration){const target=this.projectile.end,fx=c.x+Math.cos(c.heading)*.45,fy=-c.y-Math.sin(c.heading)*.45;if(Math.hypot(target.x-fx,target.z-fy)<1.35)s.hitDebris();else s.emitSound('debrisMiss');this.projectile=null;}}
  }
- resetField(){this.freeFuel=12;this.field.reset(this.car.surface.s);this.rivals=this.field.rivals;this.parts.reset();}
+ resetField(){this.freeFuel=12;this.freeFinished=false;this.freePosition=6;this.freePlayerProgress=0;this.freeLastS=this.car.surface.s;this.field.reset(this.car.surface.s);this.rivals=this.field.rivals;this.parts.reset();}
  wallImpact(speed){this.parts.burst({speed,point:[this.car.x+Math.cos(this.car.heading)*2,this.car.y+Math.sin(this.car.heading)*2]},this.car);}
  contacts(hits){for(const hit of hits){this.parts.burst(hit,this.car);if(hit.player&&this.active)this.state.hitCar(Math.min(1.5,hit.speed/10));else{const dx=hit.point[0]-this.car.x,dy=hit.point[1]-this.car.y,d=Math.hypot(dx,dy);if(d<65)this.state.emitSound('collision',{strength:Math.min(1.5,hit.speed/10)*(1-d/65),pan:clamp((-dx*Math.sin(this.car.heading)+dy*Math.cos(this.car.heading))/Math.max(1,d),-1,1)});}}}
- stepFree(dt,input={}){const previous=this.freeFuel;this.freeFuel=Math.max(0,this.freeFuel-dt*(.002+Math.hypot(this.car.vx,this.car.vy)*.00045+(input.throttle||0)*.005+(this.car.rearSlipSpeed||0)*.0023));if(previous>=1&&this.freeFuel<1)this.state.emitSound('reserve');if(previous>0&&this.freeFuel===0)this.state.emitSound('fuelEmpty');this.contacts(this.field.step(this.car,dt));}
+ stepFree(dt,input={}){const previous=this.freeFuel;this.freeFuel=Math.max(0,this.freeFuel-dt*(.002+Math.hypot(this.car.vx,this.car.vy)*.00045+(input.throttle||0)*.005+(this.car.rearSlipSpeed||0)*.0023));if(previous>=1&&this.freeFuel<1)this.state.emitSound('reserve');if(previous>0&&this.freeFuel===0)this.state.emitSound('fuelEmpty');this.contacts(this.field.step(this.car,dt,this.freeTotalLaps));
+  const L=this.data.meta.reconstructed_xy_m;let advance=this.car.surface.s-(this.freeLastS??0);if(advance<-L/2)advance+=L;if(advance>L/2)advance-=L;this.freePlayerProgress+=advance;this.freeLastS=this.car.surface.s;
+  const progress=Math.min(this.freePlayerProgress,this.car.laps*L+this.car.surface.s);
+  this.freePosition=1+this.rivals.filter(r=>r.progress>progress).length;
+  if(this.car.laps>=this.freeTotalLaps&&!this.freeFinished){this.freeFinished=true;this.freePosition=1+this.rivals.filter(r=>r.finished).length;this.state.emitSound(this.freePosition===1?'podiumWin':'podiumLoss');}
+ }
  audioScene(){const s=this.state,c=this.car;return {phase:s.active?s.phase:'free',starter:s.phase==='starting'&&s.crank>0,pressure:s.pressure,crank:s.crank,truckSpeed:s.phase==='tow'?s.truckSpeed:0,towGap:s.towGap,tankDetached:s.active&&s.tankDetached,fuel:s.fuel,won:s.result?.position===1&&s.result?.status!=='Desclassificado',driving:!s.active||s.phase==='race',rivals:!s.active||['prepare','starting','grid','race'].includes(s.phase)?this.rivals.filter(r=>!r.finished).map(r=>{const p={x:r.car.x,z:-r.car.y},dx=p.x-c.x,dy=-p.z-c.y,distance=Math.hypot(dx,dy);return {distance,speed:['prepare','starting','grid'].includes(s.phase)?10+6*Math.sin(this.visual.time*3+r.progress):Math.hypot(r.car.vx,r.car.vy),pan:clamp((-dx*Math.sin(c.heading)+dy*Math.cos(c.heading))/Math.max(1,distance),-1,1)};}).sort((a,b)=>a.distance-b.distance).slice(0,2):[]};}
  audioCommand(input){return this.active?{...input,throttle:['race','grid'].includes(this.state.phase)?input.throttle:0,engineOff:!['race','grid','inspection'].includes(this.state.phase)||!!this.state.reason}:{...input,engineOff:this.freeFuel<=0};}
  update(dt,camera){this.camera=camera;this.parts.update(dt,this.car);if(!this.active){this.visual.updateFree(this.rivals,dt);return;}this.sync();this.visual.update(this.state,this.car,dt,this.rivals,this.projectile,this.towOrigin);this.visual.camera(camera,this.state,dt);this.ui();this.positionDialogue();}
@@ -126,7 +131,7 @@ export class ImmersiveMode {
   const names={crowd:'VAQUINHA',prepare:'INSCRIÇÃO',starting:'PARTIDA',grid:'LARGADA',race:'1 VOLTA',broken:'SOCORRO',tow:'REBOQUE',snag:'FITA ENROSCADA',inspection:'PÓS-CORRIDA',podium:'SEXTO, SEMPRE',complete:'ATÉ A PRÓXIMA',disqualified:'A FOTO FICOU'};
   document.getElementById('dqScreen').classList.toggle('hidden',s.phase!=='disqualified');document.getElementById('dqCountdown').textContent='Nova vaquinha em '+Math.max(1,Math.ceil(s.disqualifiedTime))+' s';
   document.getElementById('immPhase').textContent=names[s.phase];document.getElementById('immFuel').textContent=s.fuel.toFixed(1)+' L';document.getElementById('immHealth').textContent=Math.ceil(s.health*100)+'%';document.getElementById('immGlass').textContent=Math.round((1-s.glass)*100)+'%';document.getElementById('immPosition').textContent=s.phase==='podium'?'6º no pódio':s.position+'º / 6';
-  document.getElementById('immAlert').textContent=s.phase==='race'?(s.alertTime>0?s.alert:s.tankDetached?'Tanque solto · combustível vazando':s.fuel<1?'Reserva! A gasolina está acabando.':'Guarde distância: o carro da frente pode soltar peças.'):s.phase==='tow'?(s.towGap<3?'FREIE COM S · NÃO PASSE POR CIMA DA FITA':'Controle o freio quando o caminhão diminuir.'):'';
+  document.getElementById('immAlert').textContent=s.phase==='race'?(s.alertTime>0?s.alert:s.tankDetached?'Tanque solto · combustível vazando':s.fuel<1?'Reserva! A gasolina está acabando.':'Guarde distância: o carro da frente pode soltar peças.'):s.phase==='tow'?(s.towGap<3?'FREIE · FITA FROUXA':'Controle o freio quando o caminhão diminuir.'):'';
   const key=[s.phase,s.revision,this.near,s.fan].join(':');
   if(key!==this.lastUI){this.lastUI=key;let body='';
    if(s.phase==='crowd'){
@@ -149,5 +154,5 @@ export class ImmersiveMode {
   if(s.phase==='tow'){this.panel.querySelector('#immTowGap').value=s.towGap;this.panel.querySelector('#immTowText').textContent=`Folga útil: ${s.towGap.toFixed(1)} m · resgate ${Math.min(100,Math.floor(s.towDistance/105*100))}%`;}
   if(s.phase==='inspection'&&s.judging)this.panel.querySelector('#immInspection').value=s.inspection;
  }
- info(){return {...this.state.info(),freeFuel:this.freeFuel,nearFan:this.near,hero:this.visual.hero.position.toArray(),rivals:this.rivals.map(({car,...r})=>({...r,x:car.x,y:car.y})),field:this.field.info(),parts:this.parts.info(),projectile:!!this.projectile};}
+ info(){return {...this.state.info(),freeFuel:this.freeFuel,freeTotalLaps:this.freeTotalLaps,freeFinished:this.freeFinished,freePosition:this.freePosition,nearFan:this.near,hero:this.visual.hero.position.toArray(),rivals:this.rivals.map(({car,...r})=>({...r,x:car.x,y:car.y})),field:this.field.info(),parts:this.parts.info(),projectile:!!this.projectile};}
 }
