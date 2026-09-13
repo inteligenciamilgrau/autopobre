@@ -15,8 +15,9 @@ with sync_playwright() as p:
  def info():return page.evaluate('interlagos.audioInfo()')
  def speed(kmh,reset=False):page.evaluate('([v,reset])=>{if(reset)interlagos.reposition(600);const c=interlagos.car;c.vx=Math.cos(c.heading)*v/3.6;c.vy=Math.sin(c.heading)*v/3.6;}',[kmh,reset])
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle',timeout=120000);wait_js(page,'window.interlagos?.ready',timeout=120000);page.uncheck("#immersiveMode")
+  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle',timeout=120000);wait_js(page,'window.interlagos?.ready',timeout=120000)
   check('silent_before_user_gesture',info()['context']=='locked')
+  page.click('#settingsButton');page.uncheck('#immersiveMode');page.click('#settingsBack')
   page.screenshot(path=str(ROOT/'renders/audio_opcoes.png'))
   page.click('#start');page.keyboard.down('KeyS');wait_js(page,"interlagos.audioInfo().context==='running'&&interlagos.audioInfo().rms>.001")
   check('engine_outputs_audio_after_start',info()['rpm']==950 and info()['rms']>.001)
@@ -31,7 +32,8 @@ with sync_playwright() as p:
   page.keyboard.up('Space');page.keyboard.up('KeyA');page.keyboard.press('KeyM');wait_js(page,'interlagos.audioInfo().rms<.00001')
   check('mute_silences_output',info()['muted']);page.keyboard.press('KeyM');wait_js(page,'interlagos.audioInfo().rms>.001')
   check('unmute_restores_output',not info()['muted'])
-  page.keyboard.press('KeyP');wait_js(page,'interlagos.audioInfo().rms<.00001');check('pause_silences_output',info()['paused'])
+  page.keyboard.press('KeyP');wait_js(page,"interlagos.audioInfo().paused&&interlagos.audioInfo().worldGain<.00001&&interlagos.audioInfo().music.theme==='menu'");check('pause_silences_car_keeps_menu_music',info()['paused'] and info()['music']['theme']=='menu')
+  page.click('#settingsButton');page.click('#tab-audio')
   page.locator('#volume').fill('30');check('volume_control',abs(info()['volume']-.3)<1e-6)
   # Render the actual Web Audio graph offline: verifies nonzero, distinct and unclipped waveforms.
   report['offline']=page.evaluate('''async()=>{
@@ -48,7 +50,7 @@ with sync_playwright() as p:
   sounds=report['offline'];check('audio_graph_has_signal_without_clipping',all(.001<s['rms']<.5 and s['peak']<.99 for s in sounds.values()))
   check('engine_pitch_rises_with_rpm',sounds['engine']['crossings']>sounds['idle']['crossings']*2)
   check('skid_adds_distinct_high_frequency_sound',sounds['skid']['crossings']>sounds['engine']['crossings'])
-  page.reload(wait_until='networkidle');wait_js(page,'window.interlagos?.ready',timeout=120000);page.uncheck("#immersiveMode")
+  page.reload(wait_until='networkidle');wait_js(page,'window.interlagos?.ready',timeout=120000);page.click('#settingsButton');page.uncheck('#immersiveMode');page.click('#settingsBack')
   check('volume_persists',abs(info()['volume']-.3)<1e-6)
   check('no_browser_audio_errors',not report['errors'] and not info()['error']);report['passed']=True
  finally:

@@ -1,0 +1,9 @@
+import * as THREE from 'three';
+// Reusable fragments: body sheet, bumper strips and headlamp shards.
+export class CrashParts {
+ constructor(scene){this.root=new THREE.Group();scene.add(this.root);this.cursor=0;this.total=0;this.parts=Array.from({length:60},(_,i)=>{const mesh=new THREE.Mesh(new THREE.BoxGeometry(1,1,1),new THREE.MeshStandardMaterial({color:[0xb35d47,0x8c959a,0xdddcc3,0x252c30][i%4],metalness:.55,roughness:.5}));mesh.visible=false;this.root.add(mesh);return {mesh,life:0,v:new THREE.Vector3(),spin:new THREE.Vector3()};});}
+ burst(hit,car){if(hit.speed<3)return;const count=Math.min(12,2+Math.floor(hit.speed*.6));for(let i=0;i<count;i++){const p=this.parts[this.cursor++%this.parts.length],t=this.cursor*2.39996,power=Math.min(10,hit.speed*.35);p.life=5+i*.15;p.mesh.visible=true;p.mesh.position.set(hit.point[0],car.sample(hit.point[0],hit.point[1]).z+.7,-hit.point[1]);p.mesh.scale.set(i===0&&hit.speed>8?.8:.1+(i%3)*.1,.025,.06+(i%4)*.045);p.v.set(Math.cos(t)*power+car.vx*.25,2+(i%4)*.65,-Math.sin(t)*power-car.vy*.25);p.spin.set(Math.sin(t)*8,Math.cos(t)*9,5);this.total++;}}
+ update(dt,car){for(const p of this.parts){if(p.life<=0)continue;p.life-=dt;if(p.life<=0){p.mesh.visible=false;continue;}p.v.y-=9.81*dt;p.mesh.position.addScaledVector(p.v,dt);p.mesh.rotation.x+=p.spin.x*dt;p.mesh.rotation.y+=p.spin.y*dt;p.mesh.rotation.z+=p.spin.z*dt;const ground=car.sample(p.mesh.position.x,-p.mesh.position.z).z+.035;if(p.mesh.position.y<ground){p.mesh.position.y=ground;p.v.y=Math.abs(p.v.y)*.28;p.v.x*=Math.exp(-dt*7);p.v.z*=Math.exp(-dt*7);p.spin.multiplyScalar(Math.exp(-dt*5));}if(p.life<.5)p.mesh.scale.multiplyScalar(Math.exp(-dt*5));}}
+ reset(){for(const p of this.parts){p.life=0;p.mesh.visible=false;}this.total=0;}
+ info(){return {active:this.parts.filter(p=>p.life>0).length,total:this.total,capacity:this.parts.length};}
+}

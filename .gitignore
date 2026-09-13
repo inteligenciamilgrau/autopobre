@@ -42,6 +42,7 @@ desktop.ini
 
 # Generated web release and local checks
 /dist/
+/audios_originais/
 /.audit-local/
 /pista_interlagos/renders/
 /pista_interlagos/versoes_anteriores/

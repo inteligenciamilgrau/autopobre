@@ -19,8 +19,8 @@ with sync_playwright() as p:
   check('immersive_selected_without_autostart',not info()['active'] and page.is_checked('#immersiveMode'))
   # Capture the running instance for controlled incident fixtures, without shipping a debug mutation API.
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
-  page.check('#immersiveMode');page.click('#start');check('crowd_phase',info()['phase']=='crowd');shot('torcida')
-  before=info()['hero'];page.keyboard.down('KeyA');wait_js(page,'interlagos.immersiveInfo().nearFan>=0');page.keyboard.up('KeyA');check('walk_to_supporter',info()['hero']!=before)
+  page.click('#start');check('crowd_phase',info()['phase']=='crowd');shot('torcida')
+  before=info()['hero'];page.keyboard.down('KeyW');wait_js(page,'interlagos.immersiveInfo().nearFan>=0');page.keyboard.up('KeyW');check('walk_to_supporter',info()['hero']!=before)
   page.keyboard.press('KeyE');page.wait_for_selector('[data-action="joke:0"]');fan=info()['nearFan'];topics=['família','oficina','corrida'];tastes=['família','oficina','corrida','família','oficina','corrida'];correct=topics.index(tastes[fan])
   page.click(f'[data-action="joke:{(correct+1)%3}"]');check('bad_joke_no_donation',info()['cash']==0)
   page.click(f'[data-action="joke:{correct}"]');check('laugh_pays_donation',info()['cash']>0);shot('piada')
@@ -35,11 +35,11 @@ with sync_playwright() as p:
   page.evaluate('''()=>{for(let i=0;i<400&&fixtureMode.state.phase==='broken';i++)fixtureMode.step({},1/120);}''');check('tow_arrived',info()['phase']=='tow')
   page.click('#orbitButton');shot('reboque')
   page.evaluate('''()=>{for(let i=0;i<2400&&fixtureMode.state.phase==='tow';i++)fixtureMode.step({brake:0,left:0,right:0},1/120);}''');check('strap_snags_without_braking',info()['phase']=='snag');shot('fita_enroscada')
-  page.click('[data-action="untangle"]');page.evaluate('''()=>{for(let i=0;i<15000&&fixtureMode.state.phase==='tow';i++)fixtureMode.step({brake:1,left:0,right:0},1/120);}''');check('braking_completes_rescue',info()['phase']=='inspection');shot('vistoria')
-  page.click('[data-action="inspect"]');page.evaluate('''()=>{for(let i=0;i<1100&&fixtureMode.state.phase==='inspection';i++)fixtureMode.step({},1/120);}''');check('dnf_podium_always_sixth',info()['phase']=='podium' and info()['podiumPlace']==6);shot('podio_quebra')
+  page.click('[data-action="untangle"]');page.evaluate('''()=>{for(let i=0;i<15000&&fixtureMode.state.phase==='tow';i++)fixtureMode.step({brake:1,left:0,right:0},1/120);}''');check('braking_completes_rescue',info()['phase']=='podium');shot('podio_quebra');page.click('[data-action="afterPodium"]');shot('vistoria')
+  page.click('[data-action="inspect"]');page.evaluate('''()=>{for(let i=0;i<1100&&fixtureMode.state.phase==='inspection';i++)fixtureMode.step({},1/120);}''');check('dnf_podium_always_sixth',info()['phase']=='complete' and info()['podiumPlace']==6);shot('podio_quebra')
   # Winner and disqualification fixtures verify both endings through real UI actions.
-  page.evaluate("()=>{const m=fixtureMode;m.start();m.state.phase='race';m.state.finish(1);m.sync();}");frame();page.click('[data-action="box"]');check('winner_disqualified_for_box',info()['result']['status']=='Desclassificado' and info()['prize']==0 and info()['podiumPlace']==6);shot('desclassificado')
-  page.evaluate("()=>{const m=fixtureMode;m.start();m.state.phase='race';m.state.finish(1);m.sync();}");frame();page.click('[data-action="inspect"]');page.evaluate('''()=>{for(let i=0;i<1100&&fixtureMode.state.phase==='inspection';i++)fixtureMode.step({},1/120);}''');check('winner_gets_prize_but_sixth_podium',info()['result']['position']==1 and info()['podiumPlace']==6 and info()['prize']==600);shot('podio_vitoria')
+  page.evaluate("()=>{const m=fixtureMode;m.start();m.state.phase='race';m.state.finish(1);m.sync();}");frame();page.click('[data-action="afterPodium"]');page.click('[data-action="box"]');check('winner_disqualified_for_box',info()['result']['status']=='Desclassificado' and info()['prize']==0 and info()['podiumPlace']==6);shot('desclassificado')
+  page.evaluate("()=>{const m=fixtureMode;m.start();m.state.phase='race';m.state.finish(1);m.sync();}");frame();page.click('[data-action="afterPodium"]');page.click('[data-action="inspect"]');page.evaluate('''()=>{for(let i=0;i<1100&&fixtureMode.state.phase==='inspection';i++)fixtureMode.step({},1/120);}''');check('winner_gets_prize_but_sixth_podium',info()['result']['position']==1 and info()['podiumPlace']==6 and info()['prize']==600);shot('podio_vitoria')
   page.evaluate('()=>{fixtureMode.state.profile.fund=900;fixtureMode.state.touch();}');frame();page.click('[data-action="blazer"]');check('blazer_released',info()['profile']['released']);shot('blazer_livre')
   page.click('[data-action="normal"]');check('normal_mode_restored',not info()['active']);page.reload(wait_until='networkidle');wait_js(page,'window.interlagos?.ready');check('garage_progress_persists',info()['profile']['released'] and not info()['active'])
   check('no_browser_errors',not report['errors']);report['passed']=True

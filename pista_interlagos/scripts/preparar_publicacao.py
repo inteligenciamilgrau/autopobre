@@ -3,7 +3,7 @@ import hashlib
 import json
 from pathlib import Path
 import re
-from publicacao import ROOT, PUBLIC_FILES, contained_file, content_policy, security_headers
+from publicacao import ROOT, PUBLIC_FILES, OPTIONAL_AUDIO, audio_manifest, contained_file, content_policy, security_headers
 
 
 def build():
@@ -11,7 +11,8 @@ def build():
     # A previous build may be replaced, but unexpected files are never published or deleted.
     if dist.is_symlink() or (hasattr(dist, 'is_junction') and dist.is_junction()):
         raise ValueError('dist must be a regular directory')
-    expected = set(PUBLIC_FILES) | {'_headers', '.nojekyll'}
+    retired_audio = {'assets/audio/race2.mp3'}
+    expected = set(PUBLIC_FILES) | set(OPTIONAL_AUDIO) | retired_audio | {'assets/audio/tracks.json', '_headers', '.nojekyll'}
     if dist.exists():
         for p in dist.rglob('*'):
             if p.is_symlink() or (hasattr(p, 'is_junction') and p.is_junction()):
@@ -19,6 +20,11 @@ def build():
             if p.is_file() and p.relative_to(dist).as_posix() not in expected:
                 raise ValueError('dist contains an unexpected file; inspect it before building')
     payload = {out: contained_file(ROOT, src).read_bytes() for out, src in PUBLIC_FILES.items()}
+    tracks = audio_manifest()
+    payload['assets/audio/tracks.json'] = json.dumps(tracks).encode('utf-8')
+    for name in tracks:
+        target = 'assets/audio/' + name
+        payload[target] = contained_file(ROOT, OPTIONAL_AUDIO[target]).read_bytes()
     html = payload['index.html'].decode('utf-8').replace('./node_modules/three/', './vendor/three/')
     policy = content_policy(html)
     html = html.replace('<link rel="icon"', '<meta http-equiv="Content-Security-Policy" content="' + policy + '">\n<meta name="referrer" content="no-referrer">\n<link rel="icon"', 1)
@@ -32,6 +38,10 @@ def build():
         if Path(name).suffix in {'.js', '.json', '.html', '.css', '.svg'} and private.search(data):
             raise ValueError('Private data candidate in public file: ' + name)
     dist.mkdir(exist_ok=True)
+    # Remove only known optional songs that the owner removed from the source folder.
+    for name in set(OPTIONAL_AUDIO) | retired_audio:
+        if name not in payload and (dist / name).is_file():
+            contained_file(dist, name).unlink()
     for name, data in payload.items():
         p = dist / name
         p.parent.mkdir(parents=True, exist_ok=True)

@@ -7,6 +7,7 @@ import re
 ROOT = Path(__file__).resolve().parents[2]
 GAME = 'pista_interlagos/teste/'
 MODULES = (
+    "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'cockpit.js',
     'driver.js', 'driver-rig.js', 'driver-helmet.js', 'family-phone.js',
     'immersive-mode.js', 'immersive-state.js', 'immersive-visuals.js',
@@ -16,7 +17,7 @@ MODULES = (
 )
 ASSETS = (
     'opala99_assinaturas_omp.glb', 'opala99_seiva_danilo.glb',
-    'abertura/abertura_stevan_opala99.png', 'abertura/logo_auto_pobre_racing.png',
+    'abertura/desclassificado_v1.png', 'abertura/abertura_stevan_opala99.png', 'abertura/logo_auto_pobre_racing.png',
     'piloto/capacete_publico.jpg', 'piloto/referencia_frente.png',
     'texturas/asfalto_base_v1.png', 'texturas/cockpit_faixa_invent.png',
 )
@@ -33,6 +34,18 @@ PUBLIC_FILES.update({
     'dados/pista.json': 'pista_interlagos/dados/pista.json',
     'exports/interlagos_pista.glb': 'pista_interlagos/exports/interlagos_pista.glb',
 })
+AUDIO_NAMES = ('intro.mp3', 'race.mp3', 'patrocinio.mp3', 'turbo.mp3', 'hojenaodeu.mp3', 'energia.mp3')
+OPTIONAL_AUDIO = {'assets/audio/' + name: GAME + 'assets/audio/' + name for name in AUDIO_NAMES}
+
+
+def audio_manifest():
+    files = []
+    for name in AUDIO_NAMES:
+        path = ROOT / GAME / 'assets/audio' / name
+        if path.exists():
+            contained_file(ROOT, GAME + 'assets/audio/' + name)
+            files.append(name)
+    return files
 
 
 def contained_file(root, relative):

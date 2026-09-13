@@ -18,11 +18,11 @@ def browser_executable():
     return None
 
 
-def wait_js(page, expression, timeout=120000):
+def wait_js(page, expression, timeout=120000, arg=None):
     """Poll through DevTools; Playwright's in-page string eval is blocked by CSP."""
     deadline = monotonic() + timeout / 1000
     while monotonic() < deadline:
-        result = page.evaluate(expression)
+        result = page.evaluate(expression, arg)
         if result:
             return result
         page.wait_for_timeout(50)

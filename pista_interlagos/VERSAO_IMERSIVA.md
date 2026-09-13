@@ -6,14 +6,14 @@ A abertura ilustrada com Stevan, o Opala OMP e a torcida brasileira aparece nos 
 
 ## Da vaquinha ao sexto lugar
 
-1. **Torcida:** Stevan começa a pé. Use W/A/S/D para se aproximar de um dos seis torcedores e E para conversar. Cada pessoa dá uma pista sobre o tipo de piada de que gosta. Escolha com os botões ou 1/2/3; uma risada rende contribuição, uma piada que não funciona não paga. Cada torcedor contribui uma vez por tentativa, e é possível tentar outra piada.
+1. **Torcida:** Stevan começa a pé nos boxes. Toque ou clique na pessoa para se aproximar e conversar, depois na fala para enviá-la. Quem ainda não doou tem um `$`; receber dinheiro encerra o diálogo. Use W/A/S/D para se aproximar de um dos seis torcedores e E para conversar. Cada pessoa dá uma pista sobre o tipo de piada de que gosta. Escolha com os botões ou 1/2/3; uma risada rende contribuição, uma piada que não funciona não paga. Cada torcedor contribui uma vez por tentativa, e é possível tentar outra piada.
 2. **Preparação:** a inscrição custa R$ 100; o combustível, R$ 6,50/L. Com R$ 126 na vaquinha, abre-se a preparação. Escolha de 2 a 12 L; a recomendação é reservar 3–4 L para uma volta, além de margem para patinagem e vazamentos. A proteção extra do vidro custa R$ 30 e reduz o dano por impacto.
 3. **Partida:** dê toques em W para manter o acelerador na faixa verde, de 22% a 65%. I ou o botão de partida aciona o motor de arranque. É preciso sustentar a faixa por pouco mais de 0,7 s. Excesso de acelerador durante a partida afoga; insistir por quatro segundos sem conseguir ligar esgota a bateria. Ambos chamam o reboque.
 4. **Corrida:** uma volta completa contra cinco adversários fictícios. Eles percorrem o traçado e reduzem nas curvas. As carrocerias compartilham a geometria refinada do Opala, com cores e identificadores próprios. O HUD mostra a posição na pista, gasolina, condição do carro e do vidro.
 5. **Avarias:** sair bastante dos limites em velocidade desgasta os suportes do tanque. Ao cederem, ele cai sob a traseira, arrasta pelas cintas, deixa um rastro e perde combustível. Impactos e excursões também danificam o carro. Peças visíveis podem se desprender de um adversário próximo à frente; há aviso e tempo para mudar de trajetória. Acumular impactos estilhaça o para-brisa, que recebe trincas visíveis nas câmeras internas e externas.
 6. **Resgate:** motor afogado, bateria esgotada, pane, vidro estilhaçado ou falta de gasolina interrompem a corrida. O reboque chega automaticamente. A fita tem comprimento fixo de 5 m: quando o caminhão reduz, use S para frear o Opala e impedir que ele avance sobre a folga. A fita pode enroscar na roda dianteira. Desenroscar permite continuar, com desconto de R$ 25 no prêmio. R solicita resgate e abandona a volta neste modo.
-7. **Vistoria:** ao terminar a corrida ou voltar de reboque, o carro é levado ao parque fechado. Pare e aguarde os oito segundos de revisão do juiz. O botão de levar ao box antes da revisão, ou dirigir até a zona dos boxes antes da liberação, causa desclassificação — inclusive após uma vitória.
-8. **Pódio:** Stevan aparece fisicamente no degrau **6**, sempre. O resultado distingue sua posição real na corrida, a situação da vistoria e o sexto lugar da foto. Ganhar, quebrar, ficar sem gasolina e até ser desclassificado levam ao mesmo degrau.
+7. **Pódio:** vem logo depois da chegada ou do resgate. Stevan está sempre no degrau **6**. O primeiro fica no centro, os pares à esquerda e os ímpares à direita, em degraus descendentes. O prêmio e a sobra da vaquinha entram no saldo uma única vez.
+8. **Vistoria:** depois da foto, escolha entre aguardar oito segundos com o juiz ou ir aos boxes. A interface não antecipa a penalidade: ir ao box antes da revisão desclassifica. A imagem de encerramento brinca que a foto no pódio fica para a história, aparece por seis segundos e volta à vaquinha. O prêmio atual é retirado, preservando o saldo anterior e a sobra. Com a vistoria concluída, fica disponível pagar o mecânico.
 
 ## O sonho da Blazer
 
@@ -46,3 +46,6 @@ O reconhecimento automático é uma opção da sessão livre. As duas pinturas d
 - `scripts/verificar_imersivo.py`: navegação inicial real e piadas pela interface, depois cenários controlados de avarias e resultados para conferir a integração e as cenas. Não representa uma corrida inteira conduzida manualmente.
 - `scripts/conferir_imersivo_final.py`: volta com a física real e controlador de reconhecimento em cenário de teste com adversários atrás, chegada/vistoria, geometria da fita e retorno à sessão original.
 - `dados/validacao_imersivo*.json` e `renders/imersivo_*.png`: resultados e capturas.
+
+
+No celular, jogue na horizontal usando os botões de toque. Direção e pedais aceitam múltiplos dedos. Menus, diálogos e indicadores se adaptam à tela; girar para a vertical pausa a sessão. `scripts/verificar_mobile.py` confere controles, orientação e o encerramento após o pódio em navegador com toque emulado.

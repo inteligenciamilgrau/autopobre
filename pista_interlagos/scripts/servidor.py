@@ -3,9 +3,11 @@ from http.server import ThreadingHTTPServer, SimpleHTTPRequestHandler
 import argparse
 import socket
 import webbrowser
+import io
+import json
 from urllib.parse import urlsplit, unquote
 from urllib.request import urlopen
-from publicacao import ROOT, GAME, PUBLIC_FILES, contained_file, security_headers
+from publicacao import ROOT, GAME, PUBLIC_FILES, OPTIONAL_AUDIO, audio_manifest, contained_file, security_headers
 
 
 class Handler(SimpleHTTPRequestHandler):
@@ -33,7 +35,18 @@ class Handler(SimpleHTTPRequestHandler):
             return None
         if path == '/' + GAME:
             path += 'index.html'
-        allowed = {'/' + src for src in PUBLIC_FILES.values()}
+        if path == '/' + GAME + 'assets/audio/tracks.json':
+            try:
+                data = json.dumps(audio_manifest()).encode('utf-8')
+            except (ValueError, OSError):
+                self.send_error(404, 'Not found')
+                return None
+            self.send_response(200)
+            self.send_header('Content-Type', 'application/json')
+            self.send_header('Content-Length', str(len(data)))
+            self.end_headers()
+            return io.BytesIO(data)
+        allowed = {'/' + src for src in [*PUBLIC_FILES.values(), *OPTIONAL_AUDIO.values()]}
         if path not in allowed:
             self.send_error(404, 'Not found')
             return None

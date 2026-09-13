@@ -10,9 +10,12 @@ import {createDriver} from './driver.js?v=20260913-inward';
 import {SkidMarks} from './skid-marks.js?v=20260913-burnout';
 import {TyreSmoke} from './tyre-smoke.js';
 import {ImmersiveMode} from './immersive-mode.js';
+import {MobileControls} from './mobile-controls.js';
+import {setupSettings} from './settings.js';
 import {CarAudio} from './car-audio.js?v=20260913-immersive';
 import {PlayerPreferences,CAMERA_MODES} from './player-preferences.js';
 const $=id=>document.getElementById(id);
+const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;let mobile;
 const preferences=new PlayerPreferences();
 $('immersiveMode').checked=preferences.values.immersive;
 $('livery').value=preferences.values.livery;
@@ -24,7 +27,7 @@ function chooseImmersive(value){
 }
 $('immersiveMode').onchange=()=>chooseImmersive($('immersiveMode').checked);
 const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');scene.fog=new THREE.Fog('#a8c8dd',700,2100);
-const renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:true});renderer.setPixelRatio(Math.min(devicePixelRatio,1.5));renderer.setSize(innerWidth,innerHeight);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;
+const renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:!touchDevice});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;
 const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,6500);
 const orbit=new OrbitControls(camera,$('view'));
 orbit.enabled=false;orbit.enablePan=false;orbit.minDistance=3.2;orbit.maxDistance=45;
@@ -39,17 +42,23 @@ const headLook={yaw:0,pitch:0};
 let pointerLocked=false,lockPending=false,lockUnavailable=!$('view').requestPointerLock;
 const isInside=()=>mode==='cockpit'||mode==='hood';
 scene.add(new THREE.HemisphereLight('#d9edff','#60643c',2.4));
-const sun=new THREE.DirectionalLight('#fff2d5',3);sun.castShadow=true;sun.shadow.mapSize.set(2048,2048);Object.assign(sun.shadow.camera,{left:-45,right:45,top:45,bottom:-45,near:1,far:250});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;scene.add(sun,sun.target);
+const sun=new THREE.DirectionalLight('#fff2d5',3);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:2048,touchDevice?1024:2048);Object.assign(sun.shadow.camera,{left:-45,right:45,top:45,bottom:-45,near:1,far:250});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;scene.add(sun,sun.target);
 const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
-const cockpit=createCockpit();carRoot.add(cockpit.root);
+const cockpit=createCockpit();carRoot.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,96);
 const skidMarks=new SkidMarks();scene.add(skidMarks.mesh);
 const tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
 const carAudio=new CarAudio();
-function audioControls(){ $('volume').value=Math.round(carAudio.volume*100);$('volumeValue').textContent=`${Math.round(carAudio.volume*100)}%`;$('mute').textContent=carAudio.muted?'Ativar som (M)':'Silenciar (M)';$('mute').setAttribute('aria-pressed',String(carAudio.muted)); }
+function audioControls(){ for(const key of ['musicVolume','effectsVolume']){$(key).value=Math.round(carAudio[key]*100);$(key+'Value').textContent=`${Math.round(carAudio[key]*100)}%`;} $('volume').value=Math.round(carAudio.volume*100);$('volumeValue').textContent=`${Math.round(carAudio.volume*100)}%`;$('mute').textContent=carAudio.muted?'Ativar som (M)':'Silenciar (M)';$('mute').setAttribute('aria-pressed',String(carAudio.muted)); }
 audioControls();
+for(const key of ['musicVolume','effectsVolume'])$(key).oninput=e=>{carAudio[key==='musicVolume'?'setMusicVolume':'setEffectsVolume'](Number(e.target.value)/100);carAudio.unlock();if(key==='effectsVolume')carAudio.previewEffects();audioControls();};
+document.addEventListener('pointerdown',()=>carAudio.unlock(),{once:true});
+document.addEventListener('keydown',()=>carAudio.unlock(),{once:true});
+document.addEventListener('click',e=>{if(e.target.closest('button')&&!e.target.closest('button').disabled)carAudio.uiClick();});
 $('volume').oninput=e=>{carAudio.setVolume(Number(e.target.value)/100);audioControls();};
 $('mute').onclick=()=>{carAudio.toggleMute();carAudio.unlock();audioControls();};
 let immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
+const gridPreview=()=>immersive?.active&&['prepare','starting','grid'].includes(immersive.state.phase);
+let wasGridPreview=false;
 const keys=new Set(),clock=new THREE.Clock(),matrix=new THREE.Matrix4(),forward=new THREE.Vector3(),up=new THREE.Vector3(),right=new THREE.Vector3(),desired=new THREE.Vector3(),look=new THREE.Vector3();
 const wheelForward=new THREE.Vector3(),wheelUp=new THREE.Vector3(0,1,0),wheelAxle=new THREE.Vector3(),wheelMatrix=new THREE.Matrix4(),wheelTurn=new THREE.Quaternion(),wheelSpin=new THREE.Quaternion(),axleAxis=new THREE.Vector3(0,0,1);
 function status(text){$('status').textContent=text;$('status').classList.toggle('hidden',!text);}
@@ -92,7 +101,7 @@ async function setLivery(value){
  model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
  for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
  carRoot.add(model,carStructure);model.visible=mode!=='cockpit';activeLivery=value;status('');
- preferences.update({livery:value});
+ preferences.update({livery:value});if(ready)carAudio.effect('paint');
  }finally{
   if(token===loadToken){
    $('skinButton').disabled=!ready;$('livery').disabled=false;
@@ -107,7 +116,7 @@ async function cycleLivery(){
  try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
-function reset(nearest=false){car.reset(nearest?car.index:0);driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();automatic=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
+function reset(nearest=false){car.reset(nearest?car.index:0);if(immersive&&!immersive.active)immersive.resetField();driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();automatic=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
 function location(s){let name=names[0][1];for(const [d,n] of names)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
@@ -115,10 +124,12 @@ function drawMap(){
  const ctx=$('map').getContext('2d'),w=260,h=300;ctx.clearRect(0,0,w,h);
  const xy=p=>[130+p[1]*.23,156-p[2]*.23];
  ctx.beginPath();data.samples.forEach((p,i)=>{const [x,y]=xy(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.lineWidth=8;ctx.strokeStyle='#ffffff16';ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle='#b6c5b5';ctx.stroke();
+ if(immersive&&(!immersive.active||['prepare','starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const x=130+r.car.x*.23,y=156-r.car.y*.23;ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle=['#d87558','#7e9fff','#f0cf68','#82c8a9','#e0e5e6'][i];ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
  const [sx,sy]=xy(data.samples[0]);ctx.fillStyle='#ffffff';ctx.fillRect(sx-3,sy-3,6,6);
  const x=130+car.x*.23,y=156-car.y*.23;ctx.save();ctx.translate(x,y);ctx.rotate(-car.heading);ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(-5,-4);ctx.lineTo(-3,0);ctx.lineTo(-5,4);ctx.closePath();ctx.fillStyle='#e2fb57';ctx.shadowBlur=10;ctx.shadowColor='#d6fa4b';ctx.fill();ctx.restore();
 }
 function updateCar(dt){
+ cockpit.root.visible=mode==='cockpit'&&!gridPreview();if(model)model.visible=!cockpit.root.visible;
  const p=car.surface,c=Math.cos(car.heading),s=Math.sin(car.heading);
  carRoot.position.set(car.x,p.z,-car.y);
  forward.set(c,p.gx*c+p.gy*s,-s).normalize();up.set(-p.gx,1,p.gy).normalize();right.crossVectors(forward,up).normalize();up.crossVectors(right,forward).normalize();
@@ -195,7 +206,10 @@ window.addEventListener('pointerup',()=>$('view').classList.remove('dragging'));
 $('view').addEventListener('pointercancel',()=>$('view').classList.remove('dragging'));
 $('view').addEventListener('wheel',e=>{if(ready&&!paused){if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}if(mode!=='orbit')setCameraMode('orbit');cameraReturn.manual(performance.now());}},{capture:true,passive:true});
 function updateCamera(dt){
+ if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  const p=carRoot.position,vel=Math.hypot(car.vx,car.vy);
+ if(gridPreview()){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
+ if(wasGridPreview){wasGridPreview=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
  const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
  if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
  if(mode==='cockpit'){
@@ -229,11 +243,13 @@ function updateCamera(dt){
  }
  sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();
 }
-function input(){return {ignition:keys.has('KeyI')?1:0,throttle:keys.has('KeyW')||keys.has('ArrowUp')?1:0,brake:keys.has('KeyS')||keys.has('ArrowDown')?1:0,left:keys.has('KeyA')||keys.has('ArrowLeft')?1:0,right:keys.has('KeyD')||keys.has('ArrowRight')?1:0,reverse:keys.has('KeyQ')?1:0,handbrake:keys.has('Space')?1:0};}
+const pressed=code=>keys.has(code)||mobile?.pressed.has(code);
+function input(){return {ignition:pressed('KeyI')?1:0,throttle:pressed('KeyW')||pressed('ArrowUp')?1:0,brake:pressed('KeyS')||pressed('ArrowDown')?1:0,left:pressed('KeyA')||pressed('ArrowLeft')?1:0,right:pressed('KeyD')||pressed('ArrowRight')?1:0,reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};}
 function pilot(){
  return recognitionInput(car);
 }
-function hud(){const p=car.surface,speed=Math.hypot(car.vx,car.vy)*3.6;
+function hud(){
+ const fuel=immersive?.active?immersive.state.fuel:immersive?.freeFuel??12,staged=immersive?.active&&['crowd','podium'].includes(immersive.state.phase);$('fuelGauge').classList.toggle('hidden',!!staged);$('fuelGauge').classList.toggle('reserve',fuel<1);$('fuelVolume').textContent=fuel.toFixed(1)+' L';$('fuelBar').value=fuel;$('fuelStatus').textContent=fuel<=0?(immersive?.active?'TANQUE VAZIO':'VAZIO · R PARA REABASTECER'):fuel<1?'RESERVA':immersive?.active&&immersive.state.tankDetached?'VAZAMENTO':'COMBUSTÍVEL';const p=car.surface,speed=Math.hypot(car.vx,car.vy)*3.6;
  $('speed').textContent=Math.round(speed);$('gear').textContent=carAudio.state.gear;$('rev').style.width=`${carAudio.state.rpm/7400*100}%`;
  $('grade').textContent=`${(p.grade*100).toFixed(1).replace('.',',')}%`;$('bank').textContent=`${(p.bank*100).toFixed(1).replace('.',',')}%`;$('alt').textContent=`${(p.z+720).toFixed(1)} m`;
  $('lap').textContent=String(car.laps+1).padStart(2,'0');$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);$('valid').textContent=car.lapValid?'Volta válida':'Volta inválida · fora dos limites';$('valid').style.color=car.lapValid?'#e2fb57':'#ffb789';
@@ -241,17 +257,18 @@ function hud(){const p=car.surface,speed=Math.hypot(car.vx,car.vy)*3.6;
 }
 let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0;
 function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);if(!ready)return;
- renderedFrame++;
- if(!paused){accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(!immersive?.step(command,1/120))car.step(command,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;}}
+ renderedFrame++;mobile?.update(paused,immersive?.active?immersive.state.phase:'race');
+ if(!paused){accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0){command.throttle=0;command.reverse=0;}if(!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=before-Math.hypot(car.vx,car.vy);if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);}immersive?.stepFree(1/120,command);}skidMarks.update(car,command,1/120);accumulator-=1/120;}}
  skidMarks.flush();
  tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  carAudio.update(car,immersive?.audioCommand(automatic?pilot():input())??input(),skid,paused,mode);
+ carAudio.updateScene({...immersive?.audioScene(),speed:Math.hypot(car.vx,car.vy),onRoad:car.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  updateCar(dt);updateCamera(Math.min(rawDt,.25));if(cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  immersive?.update(paused?0:dt,camera);
  // Render the reflection from this frame's car pose before displaying the cockpit.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
- if(mode==='cockpit'){
+ if(mode==='cockpit'&&!gridPreview()){
   cockpit.root.visible=false;driver.root.visible=false;carStructure.visible=false;
   cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carRoot.matrixWorld);
   look.set(-30,1.14,0).applyMatrix4(carRoot.matrixWorld);
@@ -265,11 +282,15 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  }
  renderer.render(scene,camera);
 }
-function menu(show){paused=show;carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
+function menu(show){paused=show;carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();mobile?.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
+const openSettings=setupSettings(()=>menu(true));
+$('settingsButton').onclick=openSettings;
+mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(cameraModes[(cameraModes.indexOf(mode)+1)%cameraModes.length]);},onSkin:cycleLivery,onReset:()=>{if(ready){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
 document.addEventListener('keydown',e=>{
+ if($('settings').open){if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}return;}
  if(['INPUT','SELECT'].includes(e.target.tagName)&&!['Escape','KeyP'].includes(e.code))return;
  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat||!ready)return;
- if(immersive?.handleKey(e.code))return;
+ if(!paused&&immersive?.handleKey(e.code))return;
  if(e.code==='KeyC')setCameraMode(cameraModes[(cameraModes.indexOf(mode)+1)%cameraModes.length]);
  if(e.code==='KeyR')reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
@@ -277,23 +298,23 @@ document.addEventListener('keydown',e=>{
  if(e.code==='KeyP')menu(!paused);
  if(e.code==='Escape')menu(true);
  if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){automatic=false;status('');}
-});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('blur',()=>{keys.clear();if(ready)menu(true);});
-document.addEventListener('visibilitychange',()=>{if(document.hidden&&ready)menu(true);});
-window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight);});
+});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(false);keys.clear();mobile?.clear();if(ready)menu(true);});
+document.addEventListener('visibilitychange',()=>{carAudio.setFocused(!document.hidden&&document.hasFocus());if(document.hidden&&ready)menu(true);});
+window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer.setSize(innerWidth,innerHeight,false);mobile?.clear();if(touchDevice&&innerHeight>innerWidth&&ready)menu(true);});
 $('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit');};
 $('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit');};
 $('skinButton').onclick=cycleLivery;
-$('start').onclick=()=>{automatic=false;if($('immersiveMode').checked){if(!immersive.active)immersive.start();}else if(immersive.active){immersive.disable();reset();}menu(false);};$('tour').onclick=()=>{if(!ready||$('immersiveMode').checked)return;if(immersive?.active)immersive.disable();reset();automatic=true;menu(false);};$('menuButton').onclick=()=>menu(true);$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{try{await setLivery(e.target.value);}catch(err){status('Falha ao carregar a pintura. Abra o teste pelo INICIAR_TESTE.cmd.');console.error(err);}};
+$('start').onclick=()=>{automatic=false;if($('immersiveMode').checked){if(!immersive.active)immersive.start();}else if(immersive.active){immersive.disable();reset();}menu(false);};$('tour').onclick=()=>{if(!ready||$('immersiveMode').checked)return;if(immersive?.active)immersive.disable();reset();automatic=true;menu(false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{try{await setLivery(e.target.value);}catch(err){status('Falha ao carregar a pintura. Abra o teste pelo INICIAR_TESTE.cmd.');console.error(err);}};
 try{
  data=await (await fetch('../dados/pista.json')).json();car=new TestCar(data);
  roadSurface=await createTrackSurface(renderer,data);
  driver=await createDriver(cockpit.wheel,cockpit.wheelTurn);carRoot.add(driver.root);
  const track=await loader.loadAsync('../exports/interlagos_pista.glb');flattenStatic(track.scene);await setLivery($('livery').value);
- immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
+ immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
  ready=true;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;$('start').textContent='Entrar na pista →';
  window.interlagos={ready:true,car,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),
-  audioInfo:()=>carAudio.info(),
+  audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),
   skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
   driverInfo:()=>driver.info(),

@@ -1,0 +1,43 @@
+"""Landscape touch controls and post-podium flow in a touch-enabled browser."""
+from pathlib import Path
+import json
+from playwright.sync_api import sync_playwright
+from browser_config import browser_executable, wait_js
+ROOT=Path(__file__).resolve().parents[1]
+report={'checks':{},'errors':[]}
+def check(name,value):
+ report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
+with sync_playwright() as p:
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ context=browser.new_context(viewport={'width':844,'height':390},is_mobile=True,has_touch=True,device_scale_factor=2)
+ page=context.new_page();page.set_default_timeout(90000);page.on('pageerror',lambda e:report['errors'].append(str(e)))
+ def shot(name):page.screenshot(path=str(ROOT/'renders'/f'mobile_{name}.png'))
+ def center(selector):
+  b=page.locator(selector).bounding_box();return {'x':b['x']+b['width']/2,'y':b['y']+b['height']/2}
+ try:
+  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
+  check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio===1'));shot('abertura')
+  page.tap('#settingsButton');check('settings_fit_landscape',page.evaluate("()=>{const r=document.querySelector('#settings').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.right<=innerWidth}"));shot('config')
+  page.uncheck('#immersiveMode');page.tap('#settingsBack');page.tap('#start');wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
+  session=context.new_cdp_session(page);points=[dict(center('[data-key="KeyW"]'),id=1),dict(center('[data-key="KeyA"]'),id=2)]
+  session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':points});wait_js(page,"interlagos.mobileInfo().pressed.includes('KeyW')&&interlagos.mobileInfo().pressed.includes('KeyA')")
+  wait_js(page,'Math.hypot(interlagos.car.vx,interlagos.car.vy)>1');check('simultaneous_gas_and_steering',True);shot('corrida')
+  session.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]});check('touch_release_clears_controls',page.evaluate('interlagos.mobileInfo().pressed.length')==0)
+  session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[dict(center('#touchHandbrake'),id=3)]});check('handbrake_held',page.evaluate("interlagos.mobileInfo().pressed.includes('Space')"));session.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
+  page.tap('#touchCamera');check('camera_button_works',page.evaluate('interlagos.state.mode')!='chase')
+  page.set_viewport_size({'width':390,'height':844});wait_js(page,'interlagos.state.paused');check('portrait_prompt_pauses_game',page.is_visible('#rotatePhone'));shot('girar')
+  page.set_viewport_size({'width':667,'height':375});page.tap('#settingsButton');page.check('#immersiveMode');page.tap('#settingsBack');page.tap('#start')
+  page.evaluate("async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}")
+  wait_js(page,"fixtureMode.visual.followPosition!=null");check('viewport_fills_after_rotation',page.evaluate("()=>{const r=document.querySelector('#touchControls').getBoundingClientRect();return Math.abs(r.width-innerWidth)<2&&Math.abs(r.height-innerHeight)<2&&Math.abs(visualViewport.width-innerWidth)<2}"));shot('boxes')
+  page.evaluate("()=>{fixtureMode.state.talk(0);fixtureMode.ui();}");wait_js(page,"document.querySelector('[data-action=\"joke:0\"]')");page.tap('[data-action="joke:0"]');check('touch_dialogue_donates_and_closes',page.evaluate('fixtureMode.state.fan===null&&fixtureMode.state.donors.includes(0)'))
+  page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.action('prepare')}");page.tap('[data-action="buy"]');check('touch_fuel_purchase',page.evaluate("fixtureMode.state.phase==='starting'&&fixtureMode.state.fuel>0"));shot('partida')
+  page.evaluate("()=>{const m=fixtureMode;m.state.cash=37.5;m.state.profile.fund=275;m.state.phase='race';m.state.finish(1);m.sync();}");wait_js(page,"document.querySelector('[data-action=\"afterPodium\"]')");check('podium_precedes_inspection',page.evaluate("fixtureMode.state.phase==='podium'&&!fixtureMode.state.inspected"));shot('podio')
+  check('podium_even_ranks_left_and_first_highest',page.evaluate("()=>{const v=fixtureMode.visual,points=[1,2,3,4,5,6].map(n=>{const o=v.podium.getObjectByName('Podio_'+n);return {x:o.getWorldPosition(o.position.clone()).project(fixtureMode.camera).x,h:o.geometry.parameters.height}});return [1,3,5].every(i=>points[i].x<points[0].x)&&[2,4].every(i=>points[i].x>points[0].x)&&points.every(p=>p.h<=points[0].h)}"))
+  page.tap('[data-action="afterPodium"]');check('no_disqualification_warning',not any(w in page.inner_text('#immersivePanel').lower() for w in ['desclassific','perder prêmio','perder o prêmio']))
+  page.tap('[data-action="box"]');wait_js(page,"fixtureMode.state.phase==='disqualified'");check('disqualification_keeps_prior_money_and_leftover',page.evaluate('fixtureMode.state.profile.fund')==312.5);check('ending_image_loaded',page.evaluate("document.querySelector('#dqScreen img').naturalWidth>0"));shot('desclassificado')
+  check('ending_covers_viewport',page.evaluate("()=>{const r=document.querySelector('#dqScreen').getBoundingClientRect();return r.width===innerWidth&&r.height===innerHeight}"))
+  wait_js(page,"fixtureMode.state.phase==='crowd'");check('ending_returns_to_fundraising',True)
+  page.evaluate("()=>{const m=fixtureMode;m.state.phase='race';m.state.finish(1);m.sync();}");page.tap('[data-action="afterPodium"]');page.tap('[data-action="inspect"]');page.evaluate('fixtureMode.state.inspectionStep(8)');wait_js(page,"fixtureMode.state.phase==='complete'");check('inspection_after_podium_completes_race',page.evaluate('fixtureMode.state.inspected'))
+  check('no_browser_errors',not report['errors']);report['passed']=True
+ finally:
+  report.setdefault('passed',False);(ROOT/'dados/validacao_mobile.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2),flush=True);browser.close()

@@ -4,7 +4,21 @@ Jogo de corrida para navegador com Opala 99 em Interlagos, duas pinturas e vers�
 
 Na primeira visita, a versão imersiva vem selecionada. Depois, o jogo lembra a última escolha de modo, pintura e câmera, inclusive alterações feitas pelos botões e atalhos durante a sessão. Volume e silêncio também são lembrados. As preferências ficam neste navegador, por endereço do site; limpar os dados do site restaura os padrões. O menu continua aparecendo antes de iniciar a sessão.
 
+O celular funciona na horizontal, com direção, acelerador, freio, ré e freio de mão por toque simultâneo. Os botões de câmera, pintura, resgate e configurações ficam na tela; as conversas aceitam toque direto. Ao girar para a vertical, a partida pausa e pede para virar o aparelho. A resolução e as sombras são reduzidas automaticamente em dispositivos de toque.
+
+O pódio vem antes da vistoria, com o primeiro no centro e os pares à esquerda. Levar o carro ao box antes da revisão mostra por seis segundos a cena “Desclassificado. Mas a foto no pódio fica pra história”, depois recomeça a vaquinha. Apenas o prêmio dessa corrida é retirado; o saldo anterior e a sobra ficam guardados.
+
 ## Preparar e publicar
+
+**Configurações** abre uma tela com Corrida, Áudio e Controles. Volume global, música e efeitos são independentes e ficam salvos. O controle de efeitos toca uma prévia. A música começa depois da primeira interação, muda conforme a cena e silencia ao sair da aba.
+
+As faixas ficam em [`pista_interlagos/teste/assets/audio/`](pista_interlagos/teste/assets/audio/README.md): `intro.mp3` na abertura, `patrocinio.mp3` na vaquinha, `race.mp3` na corrida, `turbo.mp3` na vitória e `hojenaodeu.mp3` na derrota. `energia.mp3` toca nos menus e substitui qualquer faixa ausente. Se também faltar, há cinco composições originais sintetizadas no navegador. O build descobre e copia somente os nomes permitidos. As cópias otimizadas usam 128 kbps estéreo; `audios_originais/` preserva os originais fora da publicação e do Git.
+
+Os dois modos têm cinco adversários, contato entre carrocerias com reação à velocidade e ao ângulo da batida, e fragmentos que saltam e caem na pista. No modo imersivo, a vaquinha acontece a pé nos boxes, com câmera atrás do piloto e carros estacionados. Clique no torcedor para se aproximar e conversar; clique na fala para enviá-la, com o balão junto da pessoa. W/S anda, A/D gira o piloto, e braços e pernas alternam. Na compra de gasolina, a câmera já fica atrás do Opala com os adversários aquecendo os motores à frente. Partida, torcida, impactos, vidro, combustível, reboque, juiz e resultados têm efeitos próprios; motor, pneus e marchas continuam acompanhando a condução.
+
+Quem ainda não contribuiu tem um `$` sobre a cabeça. Ao receber a doação, o diálogo fecha e o piloto fica livre para procurar outra pessoa. A sobra da vaquinha é transferida ao saldo acumulado no resultado, inclusive em derrota ou desclassificação. O medidor de combustível mostra litros e reserva nos dois modos; no modo normal, R reposiciona e reabastece. O minimapa mostra o 99 e os cinco adversários, que têm ritmo mais forte e procuram espaço para ultrapassar.
+
+Validação: `testar_eventos_audio.mjs`, `testar_colisoes.mjs`, `testar_saldo.mjs`, `verificar_trilha.py`, `verificar_mp3.py` e `verificar_corrida_boxes.py` e `verificar_mobile.py`, em `pista_interlagos/scripts/`. Os testes do navegador precisam de Playwright e do servidor local iniciado.
 
 ### GitHub Pages
 
