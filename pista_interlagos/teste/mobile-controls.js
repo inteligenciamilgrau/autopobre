@@ -1,6 +1,6 @@
 export class MobileControls {
  constructor({enabled,onMenu,onCamera,onSkin,onReset,onUnlock}){
-  this.enabled=enabled;this.pressed=new Set();this.pointers=new Map();this.phase='';this.handbrake=false;this.steering=0;this.steerPointer=null;
+  this.enabled=enabled;this.pressed=new Set();this.pointers=new Map();this.phase='';this.handbrake=false;this.steering=0;this.steeringPosition=0;this.steerPointer=null;
   document.body.classList.toggle('touch-device',enabled);
   this.root=document.getElementById('touchControls');
   this.steerPad=document.getElementById('touchSteering');this.steerThumb=document.getElementById('steeringThumb');
@@ -9,7 +9,7 @@ export class MobileControls {
   this.steerPad.addEventListener('pointermove',event=>{if(event.pointerId===this.steerPointer){event.preventDefault();steerAt(event);}});
   const releaseSteering=event=>{if(event.pointerId!==this.steerPointer)return;this.steerPointer=null;this.steerPad.classList.remove('active');this.setSteering(0);};
   for(const type of ['pointerup','pointercancel','lostpointercapture'])this.steerPad.addEventListener(type,releaseSteering);
-  this.steerPad.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home'].includes(event.key)){event.preventDefault();event.stopPropagation();this.setSteering(event.key==='Home'?0:Math.max(-1,Math.min(1,this.steering+(event.key==='ArrowLeft'?-.1:.1))));}});
+  this.steerPad.addEventListener('keydown',event=>{if(['ArrowLeft','ArrowRight','Home'].includes(event.key)){event.preventDefault();event.stopPropagation();this.setSteering(event.key==='Home'?0:this.steeringPosition+(event.key==='ArrowLeft'?-.1:.1));}});
   this.steerPad.addEventListener('keyup',event=>{if(['ArrowLeft','ArrowRight'].includes(event.key))this.setSteering(0);});
   for(const button of this.root.querySelectorAll('[data-key]')){
    button.addEventListener('pointerdown',event=>{event.preventDefault();event.stopPropagation();if(!enabled||button.disabled)return;onUnlock();button.setPointerCapture(event.pointerId);if(button.dataset.key==='Space'){this.setHandbrake(!this.handbrake);return;}this.pointers.set(event.pointerId,{key:button.dataset.key,button});this.pressed.add(button.dataset.key);button.classList.add('held');});
@@ -25,7 +25,14 @@ export class MobileControls {
   window.addEventListener('blur',()=>this.clear());document.addEventListener('visibilitychange',()=>{if(document.hidden)this.clear();});
  }
  setHandbrake(value){this.handbrake=value;if(value)this.pressed.add('Space');else this.pressed.delete('Space');const button=document.getElementById('touchHandbrake');button.classList.toggle('held',value);button.setAttribute('aria-pressed',String(value));button.textContent=value?'SOLTAR FREIO DE MÃO':'FREIO DE MÃO';}
- setSteering(value){this.steering=Math.abs(value)<.035?0:value;this.steerPad.setAttribute('aria-valuenow',String(Math.round(this.steering*100)));this.steerThumb.style.left=`${50+this.steering*(50-2200/Math.max(44,this.steerPad.clientWidth||174))}%`;}
+ setSteering(value){
+  this.steeringPosition=Math.max(-1,Math.min(1,value));
+  // Keep the thumb under the finger; soften the steering response near the center.
+  const amount=Math.max(0,(Math.abs(this.steeringPosition)-.035)/.965);
+  this.steering=Math.sign(this.steeringPosition)*amount*amount;
+  this.steerPad.setAttribute('aria-valuenow',String(Math.round(this.steeringPosition*100)));
+  this.steerThumb.style.left=`${50+this.steeringPosition*(50-2200/Math.max(44,this.steerPad.clientWidth||174))}%`;
+ }
  clear(){this.pressed.clear();for(const {button} of this.pointers.values())button.classList.remove('held');this.pointers.clear();this.steerPointer=null;this.steerPad.classList.remove('active');this.setSteering(0);this.setHandbrake(this.handbrake);}
  update(paused,phase){this.root.classList.toggle('hidden',!this.enabled||paused||['podium','complete','disqualified'].includes(phase));if(phase===this.phase)return;this.phase=phase;const walking=phase==='crowd';if(walking||['podium','complete','disqualified'].includes(phase))this.setHandbrake(false);document.getElementById('touchGasLabel').textContent=walking?'ANDAR':'ACELERAR';document.getElementById('touchBrakeLabel').textContent=walking?'VOLTAR':'FREAR';document.getElementById('touchHandbrake').hidden=walking;document.getElementById('touchReverse').hidden=walking;document.getElementById('touchReset').hidden=walking;}
 }
