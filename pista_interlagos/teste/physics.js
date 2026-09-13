@@ -2,6 +2,7 @@
 // Nao e simulacao homologada de pneus/suspensao do Old Stock.
 export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
+export const MAX_STEER=.60;
 export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.reset();}
  reset(index=0){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.surface=this.sample(this.x,this.y);}
@@ -32,14 +33,14 @@ export class TestCar {
  step(input,dt){
   const p=this.surface,oldX=this.x,oldY=this.y;
   const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
-  const mu=p.onRoad?.99:.35,steerTarget=(input.left-input.right)*.52/(1+speed/28);
+  const mu=p.onRoad?.99:.35,steerTarget=(input.left-input.right)*MAX_STEER/(1+speed/28);
   this.steer+=(steerTarget-this.steer)*Math.min(1,dt*7);
   // Deliberate low-speed stunt assist: hold + throttle spins the driven rear
   // tyres; steering allows a tight powered circle. Ordinary driving is unchanged.
   const burning=!!(input.handbrake&&input.throttle&&!input.reverse&&p.onRoad&&speed<12);
   this.burnout=(this.burnout??0)+((burning?input.throttle:0)-(this.burnout??0))*(1-Math.exp(-dt*(burning?3:input.throttle?2:7)));
   this.rearSlipSpeed=this.burnout*20;
-  const turn=clamp(this.steer/.52,-1,1);
+  const turn=clamp(this.steer/MAX_STEER,-1,1);
   let targetYaw=v/2.667*Math.tan(this.steer);
   targetYaw=clamp(targetYaw,-mu*9.81/Math.max(speed,3),mu*9.81/Math.max(speed,3));
   if(burning)targetYaw=input.brake?0:turn*1.35*this.burnout;
@@ -107,7 +108,7 @@ export class TestCar {
 export function recognitionInput(car,{maxSpeed=33,cornerGrip=3.3,braking=3.5}={}){
  const data=car.data,speed=Math.hypot(car.vx,car.vy),la=9+speed*.6,target=data.samples[(car.index+Math.round(la/2))%car.n],dx=target[1]-car.x,dy=target[2]-car.y;
  const alpha=wrap(Math.atan2(dy,dx)-car.heading),steer=Math.atan2(2*2.667*Math.sin(alpha),Math.hypot(dx,dy));
- const command=clamp(steer/(.52/(1+speed/28)),-1,1);
+ const command=clamp(steer/(MAX_STEER/(1+speed/28)),-1,1);
  let desiredSpeed=maxSpeed;
  for(let j=0;j<(maxSpeed>35?85:40);j+=5){const a=data.samples[(car.index+j+car.n-3)%car.n],b=data.samples[(car.index+j+3)%car.n];const curvature=Math.abs(wrap(Math.atan2(b[8],b[7])-Math.atan2(a[8],a[7])))/12;const corner=Math.sqrt(cornerGrip/Math.max(curvature,.0001));desiredSpeed=Math.min(desiredSpeed,Math.sqrt(corner*corner+2*braking*j*2));}
  return {left:Math.max(0,command),right:Math.max(0,-command),throttle:clamp((desiredSpeed-speed)*.5,0,1),brake:clamp((speed-desiredSpeed)*.6,0,1),reverse:0,handbrake:0};

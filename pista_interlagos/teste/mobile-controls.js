@@ -5,6 +5,15 @@ export class MobileControls {
   this.root=document.getElementById('touchControls');
   this.cameraGuards=[...this.root.querySelectorAll('.touch-steering,.touch-pedals,#touchHandbrake,#touchReverse,.touch-toolbar')];
   this.steerPad=document.getElementById('touchSteering');this.steerThumb=document.getElementById('steeringThumb');
+  this.pedalPad=document.getElementById('touchPedals');this.pedalThumb=document.getElementById('pedalThumb');this.pedalPointer=null;this.throttle=this.brake=0;this.pedalPosition=.65;
+  const pedalAt=event=>{const rect=this.pedalPad.getBoundingClientRect();this.setPedals((event.clientY-rect.top-22)/(rect.height-44));};
+  this.pedalPad.addEventListener('pointerdown',event=>{if(!enabled||this.pedalPointer!==null)return;event.preventDefault();event.stopPropagation();onUnlock();this.pedalPointer=event.pointerId;this.pedalPad.setPointerCapture(event.pointerId);this.pedalPad.classList.add('active');pedalAt(event);});
+  this.pedalPad.addEventListener('pointermove',event=>{if(event.pointerId===this.pedalPointer){event.preventDefault();pedalAt(event);}});
+  const releasePedals=event=>{if(event.pointerId!==this.pedalPointer)return;this.pedalPointer=null;this.pedalPad.classList.remove('active');this.setPedals(.65);};
+  for(const type of ['pointerup','pointercancel','lostpointercapture'])this.pedalPad.addEventListener(type,releasePedals);
+  this.pedalPad.addEventListener('keydown',event=>{if(['ArrowUp','ArrowDown','Home'].includes(event.key)){event.preventDefault();event.stopPropagation();this.setPedals(event.key==='Home'?.65:this.pedalPosition+(event.key==='ArrowUp'?-.05:.05));}});
+  this.pedalPad.addEventListener('keyup',event=>{if(['ArrowUp','ArrowDown'].includes(event.key))this.setPedals(.65);});
+  this.setPedals(.65);
   const steerAt=event=>{const rect=this.steerPad.getBoundingClientRect(),value=(event.clientX-rect.left-rect.width/2)/(rect.width/2-22);this.setSteering(Math.max(-1,Math.min(1,value)));};
   this.steerPad.addEventListener('pointerdown',event=>{if(!enabled||this.steerPointer!==null)return;event.preventDefault();event.stopPropagation();onUnlock();this.steerPointer=event.pointerId;this.steerPad.setPointerCapture(event.pointerId);this.steerPad.classList.add('active');steerAt(event);});
   this.steerPad.addEventListener('pointermove',event=>{if(event.pointerId===this.steerPointer){event.preventDefault();steerAt(event);}});
@@ -27,7 +36,7 @@ export class MobileControls {
  }
  blocksCameraGesture(event){
   if(!this.enabled||this.root.classList.contains('hidden'))return false;
-  if(this.steerPointer!==null||this.pointers.size)return true;
+  if(this.steerPointer!==null||this.pedalPointer!==null||this.pointers.size)return true;
   return this.cameraGuards.some(element=>{
    const rect=element.getBoundingClientRect(),margin=32;
    return rect.width>0&&rect.height>0&&event.clientX>=rect.left-margin&&event.clientX<=rect.right+margin&&event.clientY>=rect.top-margin&&event.clientY<=rect.bottom+margin;
@@ -42,6 +51,19 @@ export class MobileControls {
   this.steerPad.setAttribute('aria-valuenow',String(Math.round(this.steeringPosition*100)));
   this.steerThumb.style.left=`${50+this.steeringPosition*(50-2200/Math.max(44,this.steerPad.clientWidth||210))}%`;
  }
- clear(){this.pressed.clear();for(const {button} of this.pointers.values())button.classList.remove('held');this.pointers.clear();this.steerPointer=null;this.steerPad.classList.remove('active');this.setSteering(0);this.setHandbrake(this.handbrake);}
+ setPedals(position){
+  this.pedalPosition=Math.max(0,Math.min(1,position));
+  // Top 60% accelerates, middle 10% coasts, bottom 30% brakes.
+  this.throttle=(Math.max(0,.60-this.pedalPosition)/.60)**2.2;
+  this.brake=(Math.max(0,this.pedalPosition-.70)/.30)**2.2;
+  this.brake=Math.min(1,this.brake);
+  const percent=Math.round((this.throttle||this.brake)*100);
+  this.pedalPad.setAttribute('aria-valuenow',String(Math.round((this.throttle-this.brake)*100)));
+  this.pedalPad.setAttribute('aria-valuetext',this.throttle?`Acelerar ${percent}%`:this.brake?`Frear ${percent}%`:'Neutro');
+  this.pedalPad.classList.toggle('braking',this.brake>0);
+  this.pedalThumb.textContent=percent?String(percent):'•';
+  this.pedalThumb.style.top=`${22+this.pedalPosition*Math.max(1,(this.pedalPad.clientHeight||148)-44)}px`;
+ }
+ clear(){this.pressed.clear();for(const {button} of this.pointers.values())button.classList.remove('held');this.pointers.clear();this.steerPointer=this.pedalPointer=null;this.steerPad.classList.remove('active');this.pedalPad.classList.remove('active');this.setSteering(0);this.setPedals(.65);this.setHandbrake(this.handbrake);}
  update(paused,phase){this.root.classList.toggle('hidden',!this.enabled||paused||['podium','complete','disqualified'].includes(phase));if(phase===this.phase)return;this.phase=phase;const walking=phase==='crowd';if(walking||['podium','complete','disqualified'].includes(phase))this.setHandbrake(false);document.getElementById('touchGasLabel').textContent=walking?'ANDAR':'ACELERAR';document.getElementById('touchBrakeLabel').textContent=walking?'VOLTAR':'FREAR';document.getElementById('touchHandbrake').hidden=walking;document.getElementById('touchReverse').hidden=walking;document.getElementById('touchReset').hidden=walking;}
 }
