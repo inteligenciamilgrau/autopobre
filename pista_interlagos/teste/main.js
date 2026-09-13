@@ -34,6 +34,7 @@ orbit.enabled=false;orbit.enablePan=false;orbit.minDistance=3.2;orbit.maxDistanc
 orbit.minPolarAngle=.015;orbit.maxPolarAngle=Math.PI/2;
 orbit.rotateSpeed=.8;orbit.zoomSpeed=.8;
 const orbitTarget=new THREE.Vector3(),orbitDelta=new THREE.Vector3();
+const hoodEye=new THREE.Vector3(1.1,1.25,0),followOffset=new THREE.Vector3();let followInitialized=false;
 const cameraObstacles=[],cameraRay=new THREE.Raycaster(),cameraRayDirection=new THREE.Vector3();
 const obstacleMaterial=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});
 const cameraModes=CAMERA_MODES;
@@ -117,7 +118,7 @@ async function cycleLivery(){
  try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
-function reset(nearest=false){mobile?.setHandbrake(false);car.reset(nearest?car.index:0);if(immersive&&!immersive.active)immersive.resetField();driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();automatic=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
+function reset(nearest=false){mobile?.setHandbrake(false);car.reset(nearest?car.index:0);if(immersive&&!immersive.active)immersive.resetField();driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
 function location(s){let name=names[0][1];for(const [d,n] of names)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
@@ -134,7 +135,9 @@ function updateCar(dt){
  const p=car.surface,c=Math.cos(car.heading),s=Math.sin(car.heading);
  carRoot.position.set(car.x,p.z,-car.y);
  forward.set(c,p.gx*c+p.gy*s,-s).normalize();up.set(-p.gx,1,p.gy).normalize();right.crossVectors(forward,up).normalize();up.crossVectors(right,forward).normalize();
- matrix.makeBasis(forward,up,right);const q=new THREE.Quaternion().setFromRotationMatrix(matrix);carRoot.quaternion.slerp(q,Math.min(1,dt*15));
+ matrix.makeBasis(forward,up,right);const q=new THREE.Quaternion().setFromRotationMatrix(matrix);carRoot.quaternion.slerp(q,dt>=1?1:1-Math.exp(-dt*15));
+ // Cameras and bodywork must use the same rendered orientation.
+ forward.set(1,0,0).applyQuaternion(carRoot.quaternion);up.set(0,1,0).applyQuaternion(carRoot.quaternion);right.set(0,0,1).applyQuaternion(carRoot.quaternion);
  for(const w of wheels){
   // Fisica: angulo positivo aponta para a esquerda. No GLB: frente +X,
   // cima +Y e esquerda -Z. Construir o eixo de rodagem evita inverter
@@ -149,7 +152,7 @@ function updateCar(dt){
 }
 function setCameraMode(value){
  if(!cameraModes.includes(value))return;
- const previous=mode;mode=value;orbit.enabled=value==='orbit';$('camera').value=value;
+ const previous=mode;mode=value;followInitialized=false;orbit.enabled=value==='orbit';$('camera').value=value;
  preferences.update({camera:value});
  orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;
  cockpit.root.visible=value==='cockpit';if(model)model.visible=value!=='cockpit';
@@ -225,13 +228,14 @@ function updateCamera(dt){
  if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  const p=carRoot.position,vel=Math.hypot(car.vx,car.vy);
  if(gridPreview()&&!(phase==='prepare'&&previewOrbit)){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
- if(wasGridPreview){wasGridPreview=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
+ if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
  const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
  if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
- if(mode==='cockpit'){
-  // Rigid attachment prevents the camera crossing the dashboard under acceleration.
-  carRoot.updateMatrixWorld(true);camera.position.copy(cockpit.eye).applyMatrix4(carRoot.matrixWorld);
-  look.set(Math.cos(headLook.pitch)*Math.cos(headLook.yaw)*20,Math.sin(headLook.pitch)*20-.20,Math.cos(headLook.pitch)*Math.sin(headLook.yaw)*20).add(cockpit.eye).applyMatrix4(carRoot.matrixWorld);
+ if(mode==='cockpit'||mode==='hood'){
+  // Fixed local mount keeps the hood/dashboard still relative to the camera.
+  const eye=mode==='hood'?hoodEye:cockpit.eye;
+  carRoot.updateMatrixWorld(true);camera.position.copy(eye).applyMatrix4(carRoot.matrixWorld);
+  look.set(Math.cos(headLook.pitch)*Math.cos(headLook.yaw)*20,Math.sin(headLook.pitch)*20-.20,Math.cos(headLook.pitch)*Math.sin(headLook.yaw)*20).add(eye).applyMatrix4(carRoot.matrixWorld);
   camera.up.set(0,1,0).transformDirection(carRoot.matrixWorld);camera.lookAt(look);
  } else if(mode==='orbit'){
   orbitTarget.copy(p).add(new THREE.Vector3(0,.85,0));
@@ -252,10 +256,12 @@ function updateCamera(dt){
   if(obstruction)camera.position.copy(orbit.target).addScaledVector(cameraRayDirection,Math.max(.2,obstruction.distance-.3));
   camera.lookAt(orbit.target);
  } else {
- if(mode==='hood'){desired.copy(p).addScaledVector(forward,1.1).addScaledVector(up,1.25);look.copy(desired).addScaledVector(forward,35*Math.cos(headLook.pitch)*Math.cos(headLook.yaw)).addScaledVector(right,35*Math.cos(headLook.pitch)*Math.sin(headLook.yaw)).addScaledVector(up,35*Math.sin(headLook.pitch)-.25);}
- else if(mode==='aerial'){desired.copy(p).addScaledVector(forward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(forward,22);}
+ if(mode==='aerial'){desired.copy(p).addScaledVector(forward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(forward,22);}
  else{desired.copy(p).addScaledVector(forward,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(forward,13).add(new THREE.Vector3(0,1,0));}
- camera.position.lerp(desired,Math.min(1,dt*(mode==='hood'?30:5)));camera.up.set(0,1,0);camera.lookAt(look);
+ // Smooth the offset, not the world position: frame-rate changes must not
+ // make the car surge back and forth relative to its following camera.
+ desired.sub(p);if(!followInitialized){followOffset.copy(desired);followInitialized=true;}else followOffset.lerp(desired,1-Math.exp(-dt*5));
+ camera.position.copy(p).add(followOffset);camera.up.set(0,1,0);camera.lookAt(look);
  }
  sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();
 }
@@ -280,7 +286,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  carAudio.update(car,immersive?.audioCommand(automatic?pilot():input())??input(),skid,paused,mode);
  carAudio.updateScene({...immersive?.audioScene(),speed:Math.hypot(car.vx,car.vy),onRoad:car.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
- updateCar(dt);updateCamera(Math.min(rawDt,.25));if(cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ updateCar(dt);updateCamera(dt);if(cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  immersive?.update(paused?0:dt,camera);
  // Render the reflection from this frame's car pose before displaying the cockpit.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.

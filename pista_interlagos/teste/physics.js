@@ -2,7 +2,7 @@
 // Nao e simulacao homologada de pneus/suspensao do Old Stock.
 export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
-export const MAX_STEER=.60;
+export const MAX_STEER=.72;
 export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.reset();}
  reset(index=0){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.surface=this.sample(this.x,this.y);}

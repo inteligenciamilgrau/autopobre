@@ -35,12 +35,12 @@ export class RaceField {
  constructor(data){this.data=data;this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
  reset(startS=0){
   this.time=0;this.collisions=0;this.cooldowns.clear();
-  this.rivals=[43,45,42,46,44].map((pace,i)=>{const progress=startS+10+i*8,L=this.data.meta.reconstructed_xy_m,s=((progress%L)+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;const car=new TestCar(this.data);car.reset(index);const lane=[-2,2,0,-2,2][i];car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);return {car,pace,lane,targetLane:lane,maneuverCooldown:0,progress:10+i*8,lastS:car.surface.s,finished:false,stun:0};});
+  this.rivals=[48,50,47,51,49].map((pace,i)=>{const progress=startS+10+i*8,L=this.data.meta.reconstructed_xy_m,s=((progress%L)+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;const car=new TestCar(this.data);car.reset(index);const lane=[-2,2,0,-2,2][i];car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);return {car,pace,lane,targetLane:lane,maneuverCooldown:0,progress:10+i*8,lastS:car.surface.s,finished:false,stun:0};});
  }
  step(player,dt,totalLaps=0){
   this.time+=dt;const impacts=[],L=this.data.meta.reconstructed_xy_m;
   for(const r of this.rivals){
-   const c=r.car,input=recognitionInput(c,{maxSpeed:r.pace,cornerGrip:6.2,braking:5.4}),speed=Math.hypot(c.vx,c.vy),look=9+speed*.6,p=this.data.samples[(c.index+Math.round(look/2))%c.n];
+   const c=r.car,input=recognitionInput(c,{maxSpeed:r.pace,cornerGrip:6.8,braking:6.1}),speed=Math.hypot(c.vx,c.vy),look=9+speed*.6,p=this.data.samples[(c.index+Math.round(look/2))%c.n];
    r.maneuverCooldown=Math.max(0,r.maneuverCooldown-dt);r.lane+=clamp(r.targetLane-r.lane,-dt*1.5,dt*1.5);
    const dx=p[1]-p[8]*r.lane-c.x,dy=p[2]+p[7]*r.lane-c.y;
    const steer=Math.atan2(2*2.667*Math.sin(wrap(Math.atan2(dy,dx)-c.heading)),Math.hypot(dx,dy));
