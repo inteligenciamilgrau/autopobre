@@ -28,10 +28,10 @@ export class MobileControls {
    button.addEventListener('contextmenu',event=>event.preventDefault());
   }
   document.getElementById('touchMenu').onclick=onMenu;document.getElementById('touchCamera').onclick=onCamera;document.getElementById('touchSkin').onclick=onSkin;document.getElementById('touchReset').onclick=onReset;
-  const full=document.getElementById('touchFullscreen'),openingFull=document.getElementById('startFullscreen'),canFullscreen=!!document.documentElement.requestFullscreen;
-  full.hidden=!canFullscreen;openingFull.hidden=!enabled;openingFull.disabled=!canFullscreen;if(!canFullscreen)openingFull.textContent='Tela cheia indisponível';
-  const fullscreen=async()=>{try{if(document.fullscreenElement){await document.exitFullscreen();return;}await document.documentElement.requestFullscreen();try{await screen.orientation?.lock?.('landscape');}catch{}}catch{openingFull.textContent='Tentar tela cheia novamente';}};
-  full.onclick=fullscreen;openingFull.onclick=fullscreen;document.addEventListener('fullscreenchange',()=>{const label=document.fullscreenElement?'Sair da tela cheia':'Tela cheia';full.textContent=openingFull.textContent=label;});
+  const full=document.getElementById('touchFullscreen'),openingFull=document.getElementById('startFullscreen'),openingFullLabel=document.getElementById('startFullscreenLabel'),canFullscreen=!!document.documentElement.requestFullscreen;
+  full.hidden=!canFullscreen;openingFull.hidden=!enabled;openingFull.disabled=!canFullscreen;if(!canFullscreen)openingFullLabel.textContent='Sem suporte';
+  const fullscreen=async()=>{try{if(document.fullscreenElement){await document.exitFullscreen();return;}await document.documentElement.requestFullscreen();try{await screen.orientation?.lock?.('landscape');}catch{}}catch{openingFullLabel.textContent='Tentar de novo';}};
+  full.onclick=fullscreen;openingFull.onclick=fullscreen;document.addEventListener('fullscreenchange',()=>{const label=document.fullscreenElement?'Sair da tela cheia':'Tela cheia';full.textContent=label;openingFullLabel.textContent=document.fullscreenElement?'Restaurar':'Tela cheia';openingFull.setAttribute('aria-label',label);});
   window.addEventListener('blur',()=>this.clear());document.addEventListener('visibilitychange',()=>{if(document.hidden)this.clear();});
  }
  blocksCameraGesture(event){

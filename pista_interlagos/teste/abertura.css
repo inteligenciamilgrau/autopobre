@@ -56,3 +56,27 @@
 @media(orientation:landscape) and (max-height:500px){#circuitPicker{margin-bottom:8px}.circuit-options svg{float:right;width:58px;height:30px;margin:0}.circuit-options b{font-size:11px}.circuit-options span{font-size:9px}#menu .circuit-options button{padding:7px}.circuit-options{gap:6px}#circuitDescription{font-size:10px}}
 
 #raceCountdown[hidden]{display:none!important}#raceCountdown{position:fixed;inset:0;z-index:65;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none;color:#ffe265;text-shadow:0 5px 0 #193d30,0 8px 30px #000a}#countdownNumber{font-size:clamp(90px,18vh,180px);font-weight:950;line-height:1;letter-spacing:-.06em}#countdownCaption{margin-top:14px;font-size:clamp(12px,2.5vh,20px);font-weight:900;letter-spacing:.18em;color:white}
+.menu-tools{display:contents}.menu-tool-icon,.menu-tool-short{display:none}
+@media(orientation:landscape){
+ .touch-device #menu{padding:8px max(20px,env(safe-area-inset-right)) 8px max(20px,env(safe-area-inset-left));align-items:center}
+ .touch-device #menu article{width:min(410px,54vw);max-height:100%;margin:0}
+ .touch-device #menu .opening-brand{display:flex;align-items:center;gap:12px;width:100%;height:42px;margin:0 0 8px}
+ .touch-device #menu .opening-brand>img:not(.old-stock-opening){width:auto;max-width:calc(100% - 60px);height:42px;object-fit:contain}
+ .touch-device #menu .old-stock-opening{position:static;width:48px;height:32px;flex-shrink:0;margin:0;padding:2px;border-radius:3px}
+ .touch-device #menu .opening-brand figcaption,.touch-device #circuitDescription{display:none}
+ .touch-device #pilotPicker{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:4px 6px;margin:0 0 8px}
+ .touch-device #pilotLabel{font-size:11px;margin:0}.touch-device .pilot-fields{flex-wrap:nowrap;gap:5px;min-width:0}
+ .touch-device #pilotName,.touch-device #pilotSelect{min-width:0;flex:1;width:100%;min-height:38px;height:38px;padding:6px 8px;font-size:16px}
+ .touch-device #pilotMessage{grid-column:2;font-size:9px;line-height:1.2;margin:0}
+ .touch-device #circuitPicker{margin:0 0 8px}.touch-device #circuitPicker legend{font-size:9px;letter-spacing:.1em;margin-bottom:4px}
+ .touch-device #menu .circuit-options{gap:6px}.touch-device #menu .circuit-options button{min-height:48px;margin:0;padding:6px 7px}
+ .touch-device #menu .circuit-options svg{float:right;width:30px;height:27px;margin:2px 0 0 3px}.touch-device #menu .circuit-options b{font-size:11px;white-space:nowrap}.touch-device #menu .circuit-options span{font-size:8px;margin-top:4px;white-space:nowrap}
+ .touch-device #menu #start,.touch-device #menu #restartRace{min-height:40px;padding:9px 12px;margin:0 0 8px;font-size:13px}
+ .touch-device #menu #start::before{content:'▶';margin-right:8px;font-size:11px}
+ .touch-device #menu .menu-tools{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+ .touch-device #menu .menu-tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:46px;width:100%;margin:0;padding:5px 3px;font-size:10px;line-height:1.1;background:#102b27e8;border-color:#8eaa865c;border-radius:7px}
+ .touch-device #menu .menu-tools .menu-tool-icon{display:block;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:#efd377}
+ .touch-device #menu .menu-tool-label{display:none}.touch-device #menu .menu-tool-short{display:inline}
+ .touch-device #menu #tour:disabled{display:flex;opacity:.4;cursor:default}
+ .touch-device #menu.race-finished .menu-tools{grid-template-columns:repeat(2,minmax(0,1fr))}.touch-device #menu.race-finished .menu-tools #tour{display:none}
+}
