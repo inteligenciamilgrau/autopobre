@@ -60,9 +60,9 @@
 @media(orientation:landscape){
  .touch-device #menu{padding:8px max(20px,env(safe-area-inset-right)) 8px max(20px,env(safe-area-inset-left));align-items:center;background-image:linear-gradient(90deg,#060f0ff0,#060f0fb8 18%,#060f0f38 34%,transparent 52%),url('./assets/abertura/abertura_stevan_opala99.png')}
  .touch-device #menu article{width:min(280px,42vw);max-height:100%;margin:0}
- .touch-device #menu .opening-brand{display:flex;align-items:center;gap:10px;width:100%;height:76px;margin:0 0 6px}
- .touch-device #menu .opening-brand>img:not(.old-stock-opening){width:auto;max-width:calc(100% - 54px);height:76px;object-fit:contain}
- .touch-device #menu .old-stock-opening{position:static;width:44px;height:30px;flex-shrink:0;margin:0;padding:2px;border-radius:3px}
+ .touch-device #menu .opening-brand{position:relative;display:flex;align-items:center;gap:10px;width:100%;height:76px;margin:0 0 6px}
+ .touch-device #menu .opening-brand>img:not(.old-stock-opening){position:absolute;left:0;top:-14px;width:calc(100% + 20px);max-width:none;height:104px;object-fit:cover;pointer-events:none}
+ .touch-device #menu .old-stock-opening{position:absolute;left:calc(100% + 30px);top:23px;width:44px;height:30px;flex-shrink:0;margin:0;padding:2px;border-radius:3px}
  .touch-device #menu .opening-brand figcaption,.touch-device #circuitDescription{display:none}
  .touch-device #pilotPicker{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:4px 6px;margin:0 0 6px}
  .touch-device #pilotLabel{font-size:11px;margin:0}.touch-device .pilot-fields{flex-wrap:nowrap;gap:5px;min-width:0}
