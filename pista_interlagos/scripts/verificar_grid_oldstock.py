@@ -35,7 +35,7 @@ with sync_playwright() as p:
   wait_js(page,'interlagos.state.paused&&fixtureMode.freeFinished')
   assert '15º de 15' in page.inner_text('#raceResult') and page.locator('#finishingOrder li').count()==15
   page.screenshot(path=str(ROOT/f'renders/oldstock_resultado_{mobile}.png'))
-  page.click('#settingsButton');page.check('#immersiveMode');page.click('#settingsBack');page.click('#start')
+  page.click('#resultsSettings');page.check('#immersiveMode');page.click('#settingsBack');page.click('#resultsContinue')
   page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.state.phase='prepare';fixtureMode.sync();}")
   assert len(page.evaluate('fixtureMode.rivals'))==14
   page.evaluate("()=>{fixtureMode.state.phase='race';fixtureMode.state.finish(15);fixtureMode.sync();}")

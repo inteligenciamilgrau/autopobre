@@ -49,7 +49,7 @@ with sync_playwright() as p:
   page.evaluate("async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}")
   page.evaluate('interlagos.car.laps=2');wait_js(page,"document.querySelector('#lap').textContent==='3 / 3'");check('third_lap_not_finished_early',not page.evaluate('fixtureMode.freeFinished'))
   page.evaluate('interlagos.car.laps=3');wait_js(page,'interlagos.state.paused&&fixtureMode.freeFinished');check('third_lap_finishes_with_result',page.is_visible('#raceResult') and '3 voltas' in page.inner_text('#raceResult'))
-  page.tap('#start');wait_js(page,'!interlagos.state.paused');check('new_race_resets_laps',page.evaluate('interlagos.car.laps')==0 and not page.evaluate('fixtureMode.freeFinished'))
+  page.tap('#resultsContinue');wait_js(page,'!interlagos.state.paused');check('new_race_resets_laps',page.evaluate('interlagos.car.laps')==0 and not page.evaluate('fixtureMode.freeFinished'))
   page.evaluate('interlagos.car.laps=1');page.tap('#touchMenu');page.tap('#settingsBack');page.tap('#restartRace');check('explicit_restart_resets_race',page.evaluate("interlagos.car.laps===0&&interlagos.car.clock<.5&&interlagos.state.mode==='chase'"))
   page.tap('#touchMenu');page.check('#immersiveMode');page.tap('#settingsBack');page.tap('#start')
   page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.action('prepare')}");page.wait_for_selector('#immLitres');page.wait_for_timeout(250);camera_before=page.evaluate('interlagos.cameraSnapshot().position')

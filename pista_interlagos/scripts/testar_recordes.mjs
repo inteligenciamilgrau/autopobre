@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {readRecords,saveRecord} from '../teste/lap-records.js';
+import {resultRows,formatTime} from '../teste/race-results.js';
+const values=new Map(),storage={getItem:k=>values.get(k),setItem:(k,v)=>values.set(k,v)};
+const candidate={name:'Stevan',mode:'normal',bestLap:150.25,bestRace:480.75};
+saveRecord(storage,candidate);saveRecord(storage,{...candidate,name:'STEVAN',bestLap:155,bestRace:479});
+let records=readRecords(storage);assert.equal(records.length,1);assert.equal(records[0].bestLap,150.25);assert.equal(records[0].bestRace,479);
+saveRecord(storage,{...candidate,mode:'immersive',bestLap:151,bestRace:152});assert.equal(readRecords(storage).length,2,'modes stay separate');
+assert.throws(()=>saveRecord(storage,{...candidate,bestLap:NaN}));assert.throws(()=>saveRecord(storage,{...candidate,name:'  '}));assert.throws(()=>saveRecord(storage,{...candidate,bestLap:500}));
+assert.throws(()=>saveRecord({getItem:()=>null,setItem(){throw Error('quota')}},candidate),/Não foi possível salvar/);
+assert.deepEqual(readRecords({getItem:()=>'{broken'}),[]);assert.deepEqual(readRecords({getItem:()=>JSON.stringify([{...candidate,name:{}}])}),[]);
+const mode={freeOrder:[{number:'70',name:'Kleber Eletric',bestLap:149,totalTime:460,finished:true},{number:'73',name:'Konrad Viehmann',bestLap:null,totalTime:null,finished:false}],finishPosition:2,finishTime:470,finishBest:150};
+const rows=resultRows(mode);assert.deepEqual(rows.map(r=>r.number),['70','99','73']);assert.equal(rows[1].bestLap,150);assert.equal(rows[2].totalTime,null);assert.equal(formatTime(150.25),'02:30.250');assert.equal(formatTime(null),'—');
+console.log('Records persist, preserve personal bests, separate modes, reject invalid data and display actual result times.');
