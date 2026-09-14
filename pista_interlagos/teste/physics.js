@@ -37,8 +37,10 @@ export class TestCar {
   this.wallImpactSpeed=0;
   const p=this.surface,oldX=this.x,oldY=this.y;
   const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
-  const mu=p.onRoad?.99:.62,steerTarget=(input.left-input.right)*MAX_STEER/(1+speed/28);
-  this.steer+=(steerTarget-this.steer)*Math.min(1,dt*7);
+  const mu=p.onRoad?(input.handbrake?.99:1.24):.62,steerTarget=(input.left-input.right)*MAX_STEER/(1+speed/28);
+  // Remove the long change-of-direction delay without amplifying small inputs.
+  const steerResponse=steerTarget*this.steer<0?18:12;
+  this.steer+=(steerTarget-this.steer)*(1-Math.exp(-dt*steerResponse));
   // Deliberate low-speed stunt assist: hold + throttle spins the driven rear
   // tyres; steering allows a tight powered circle. Ordinary driving is unchanged.
   const burning=!!(input.handbrake&&input.throttle&&!input.reverse&&p.onRoad&&speed<12);
@@ -46,9 +48,13 @@ export class TestCar {
   this.rearSlipSpeed=this.burnout*20;
   const turn=clamp(this.steer/MAX_STEER,-1,1);
   let targetYaw=v/2.667*Math.tan(this.steer);
-  targetYaw=clamp(targetYaw,-mu*9.81/Math.max(speed,3),mu*9.81/Math.max(speed,3));
+  // Reserve some tyre force for correcting sideways motion on corner entry.
+  // Handbrake stunts retain their previous grip budget.
+  const yawLimit=mu*9.81*(p.onRoad&&!input.handbrake?.94:1)/Math.max(speed,3);
+  targetYaw=clamp(targetYaw,-yawLimit,yawLimit);
   if(burning)targetYaw=input.brake?0:turn*1.35*this.burnout;
-  this.yaw+=(targetYaw-this.yaw)*Math.min(1,dt*6);
+  const yawResponse=burning?6:targetYaw*this.yaw<0?16:12;
+  this.yaw+=(targetYaw-this.yaw)*(1-Math.exp(-dt*yawResponse));
   this.heading=wrap(this.heading+this.yaw*dt);
   let drive=input.throttle*(this.engineScale??1)*Math.min(5.8,190/Math.max(Math.abs(v),7));
   if(input.reverse)drive-=3;
