@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE,guardrailClearance} from './physics.js';
+import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE,guardrailClearance,guardrailSections} from './physics.js';
 import {pitLane} from './pit-lane.js';
 
 export async function createTrackBranding(data){
@@ -49,27 +49,33 @@ export function createCurbs(data){
  return root;
 }
 
-// Game safety barrier, following both closed track edges and the terrain height.
+// Each rendered strip is independent: no faces or posts bridge the run-off gaps.
 export function createGuardrails(data){
- const root=new THREE.Group();root.name='Guardrail_circuito_completo';
- const probe=new TestCar(data),nodes=data.samples.filter((_,i)=>i%2===0),positions=[],indices=[];
+ const root=new THREE.Group(),closed=data.meta.id==='curvelo';root.name=closed?'Guardrail_circuito_completo':'Guardrails_trechos_Interlagos';
+ const probe=new TestCar(data),nodes=data.samples.filter((_,i)=>i%2===0),positions=[],indices=[],postPoints=[],a=data.samples,L=data.meta.reconstructed_xy_m;
  const profile=[[.34,0],[.44,.10],[.56,0],[.68,.10],[.8,0],[.91,.06]];
  const metal=new THREE.MeshStandardMaterial({color:0xa3aeb8,metalness:.65,roughness:.48,side:THREE.DoubleSide});
- const posts=new THREE.InstancedMesh(new THREE.BoxGeometry(.12,1.05,.14),metal,nodes.length*2),matrix=new THREE.Matrix4(),q=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
- let post=0;
- for(const side of [-1,1]){
-  const base=positions.length/3;
-  for(let i=0;i<=nodes.length;i++){
-   const p=nodes[i%nodes.length],offset=side*(p[4]/2+guardrailClearance(data,p[0],side)),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
-   probe.index=data.samples.indexOf(p);const ground=probe.sample(x,y).z;
+ let segments=0,coverage=0,sections=0;
+ function point(s){
+  if(s>=L)return a[0];let lo=0,hi=a.length-1;while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(a[mid][0]<=s)lo=mid;else hi=mid-1;}
+  const p=a[lo],q=a[(lo+1)%a.length],u=(s-p[0])/((lo===a.length-1?L:q[0])-p[0]);return p.map((value,k)=>k===0?s:value+(q[k]-value)*u);
+ }
+ for(const side of [-1,1])for(const [from,end] of guardrailSections(data,side)){
+  const to=Math.min(end,L);if(from>=to)continue;coverage+=to-from;sections++;
+  const strip=[point(from),...nodes.filter(p=>p[0]>from&&p[0]<to),point(to)],base=positions.length/3;
+  for(let i=0;i<strip.length;i++){
+   const p=strip[i],offset=side*(p[4]/2+guardrailClearance(data,p[0],side)),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
+   probe.index=Math.min(a.length-1,Math.floor(p[0]/L*a.length));const surface=probe.sample(x,y);probe.index=surface.i;const ground=surface.z;
    for(const [height,ridge] of profile)positions.push(x+p[8]*side*ridge,ground+height,-y+p[7]*side*ridge);
-   if(i<nodes.length){q.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.atan2(p[8],p[7]));matrix.compose(new THREE.Vector3(x,ground+.475,-y),q,scale);posts.setMatrixAt(post++,matrix);}
-   if(i>0)for(let j=0;j<profile.length-1;j++){const a=base+(i-1)*profile.length+j,b=a+profile.length;indices.push(a,b,a+1,b,b+1,a+1);}
+   if(!(to===L&&i===strip.length-1))postPoints.push({x,y:ground+.475,z:-y,heading:Math.atan2(p[8],p[7])});
+   if(i>0){segments++;for(let j=0;j<profile.length-1;j++){const k=base+(i-1)*profile.length+j,b=k+profile.length;indices.push(k,b,k+1,b,b+1,k+1);}}
   }
  }
+ const posts=new THREE.InstancedMesh(new THREE.BoxGeometry(.12,1.05,.14),metal,postPoints.length),matrix=new THREE.Matrix4(),q=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
+ postPoints.forEach((p,i)=>{q.setFromAxisAngle(new THREE.Vector3(0,1,0),p.heading);matrix.compose(new THREE.Vector3(p.x,p.y,p.z),q,scale);posts.setMatrixAt(i,matrix);});
  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();geometry.computeBoundingSphere();
- const rails=new THREE.Mesh(geometry,metal);rails.name='Guardrail_continuo';rails.castShadow=rails.receiveShadow=true;posts.name='Postes_guardrail';posts.castShadow=posts.receiveShadow=true;posts.computeBoundingSphere();root.add(rails,posts);
- return {root,rails,stats:{sides:2,closed:true,segments:nodes.length*2,clearance:GUARDRAIL_CLEARANCE}};
+ const rails=new THREE.Mesh(geometry,metal);rails.name=closed?'Guardrail_continuo':'Guardrail_por_trechos';rails.castShadow=rails.receiveShadow=true;posts.name='Postes_guardrail';posts.castShadow=posts.receiveShadow=true;posts.computeBoundingSphere();root.add(rails,posts);
+ return {root,rails,stats:{sides:2,closed,segments,sections,coverageMetres:coverage,coverageRatio:coverage/(L*2),clearance:GUARDRAIL_CLEARANCE}};
 }
 
 // Metres throughout: the road detail stays attached to the measured surface.

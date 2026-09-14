@@ -6,8 +6,23 @@ export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 export const MAX_STEER=.72;
 export const GUARDRAIL_CLEARANCE=5;
+// Game-art selection from the GeoSampa overview, not a surveyed barrier inventory.
+// Open the run-offs and infield; retain selected straight and boundary sections.
+const INTERLAGOS_RAILS={
+ '-1':[[0,160],[700,1300],[1780,1980],[2260,2420],[2610,2780],[3310,Infinity]],
+ '1':[[0,180],[780,1200],[1950,2180],[3490,Infinity]]
+};
+const FULL_RAIL=[[0,Infinity]];
+export function guardrailSections(data,side){return data.meta.id==='curvelo'?FULL_RAIL:INTERLAGOS_RAILS[side<0?'-1':'1'];}
+export function guardrailPresent(data,s,side){const L=data.meta.reconstructed_xy_m,t=((s%L)+L)%L;return guardrailSections(data,side).some(([from,to])=>t>=from&&t<=to);}
 export function guardrailClearance(data,s,side){
- if(data.meta.id!=='curvelo')return GUARDRAIL_CLEARANCE;
+ if(data.meta.id!=='curvelo'){
+  const L=data.meta.reconstructed_xy_m,t=((s%L)+L)%L,section=guardrailSections(data,side).find(([from,to])=>t>=from&&t<=to);
+  if(!section)return GUARDRAIL_CLEARANCE;
+  // Flare exposed ends away from the driving line; the timing-line seam stays joined.
+  const edge=Math.min(section[0]===0?Infinity:t-section[0],section[1]>=L?Infinity:section[1]-t),u=clamp(edge/24,0,1);
+  return GUARDRAIL_CLEARANCE+5*(1-u*u*(3-2*u));
+ }
  if(side>=0){const lane=pitLane(data,s);return lane?Math.max(5,lane.offset*1.8+lane.halfWidth+2-7):5;}
  const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
  return 5+30*smooth((s-770)/100)*(1-smooth((s-1110)/95));
@@ -95,12 +110,12 @@ export class TestCar {
   if(input.handbrake&&!burning&&speed<.3){this.vx=0;this.vy=0;}
   this.x+=this.vx*dt;this.y+=this.vy*dt;
   this.surface=this.sample(this.x,this.y);this.index=this.surface.i;
-  // The continuous rendered rail and contact share the same shoulder clearance.
+  // Visible sections and collision share the same openings and shoulder clearance.
   const r=this.surface,side=Math.sign(r.d),angle=wrap(this.heading-Math.atan2(r.ty,r.tx));
   const extent=.93*Math.abs(Math.cos(angle))+2.38*Math.abs(Math.sin(angle));
   const wall=r.width/2+guardrailClearance(this.data,r.s,side)-.12-extent;
   const crossed=Math.abs(p.d)<=p.width/2+guardrailClearance(this.data,p.s,side)-.12-extent;
-  if(Math.abs(r.d)>wall&&(crossed||Math.abs(r.d)<wall+5)){
+  if(guardrailPresent(this.data,r.s,side)&&Math.abs(r.d)>wall&&(crossed||Math.abs(r.d)<wall+5)){
    const correction=r.d-side*wall;this.x-=r.lx*correction;this.y-=r.ly*correction;
    const outward=(this.vx*r.lx+this.vy*r.ly)*side,tangent=this.vx*r.tx+this.vy*r.ty;
    if(outward>0){

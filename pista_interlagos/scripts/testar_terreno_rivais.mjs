@@ -1,7 +1,7 @@
 import {RIVAL_ROSTER} from '../teste/race-roster.js';
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
-import {TestCar,GUARDRAIL_CLEARANCE,recognitionInput} from '../teste/physics.js';
+import {TestCar,GUARDRAIL_CLEARANCE,guardrailPresent,guardrailClearance,recognitionInput} from '../teste/physics.js';
 import {RaceField,DRIVER_STYLES} from '../teste/race-field.js';
 import {createGuardrails,createCurbs} from '../teste/track-surface.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));
@@ -23,19 +23,28 @@ const recover=flat(false);for(let i=0;i<600;i++)recover.step({...idle,throttle:1
 assert(recover.vx>5&&recover.vx<25,'driver can accelerate back from grass without matching asphalt pace');
 let contacts=0;
 for(let index=0;index<data.samples.length;index+=37)for(const side of [-1,1]){
- const c=new TestCar(data);c.reset(index);const p=c.surface,offset=side*(p.width/2+GUARDRAIL_CLEARANCE-.93-.2);
+ const c=new TestCar(data);c.reset(index);const p=c.surface;if(!guardrailPresent(data,p.s,side)||guardrailClearance(data,p.s,side)>5.001||!guardrailPresent(data,p.s+12,side))continue;const offset=side*(p.width/2+guardrailClearance(data,p.s,side)-.93-.2);
  c.x+=p.lx*offset;c.y+=p.ly*offset;c.surface=c.sample(c.x,c.y);
  c.vx=p.tx*25+p.lx*side*8;c.vy=p.ty*25+p.ly*side*8;const initial=Math.hypot(c.vx,c.vy);
  let hit=false;for(let i=0;i<15;i++){c.step(idle,1/120);if(c.wallImpactSpeed>0){hit=true;const r=c.surface;assert((c.vx*r.lx+c.vy*r.ly)*side<.1,'rail rebounds inward');assert(Math.hypot(c.vx,c.vy)<=initial+.1,'rail adds no energy');assert(c.vx*r.tx+c.vy*r.ty>17,'glancing contact retains forward motion');break;}}
- assert(hit,`continuous collision at track sample ${index}, side ${side}`);contacts++;
+ assert(hit,`collision at retained track sample ${index}, side ${side}`);contacts++;
 }
 const rails=createGuardrails(data),pos=rails.rails.geometry.attributes.position;
-assert.equal(rails.stats.sides,2);assert(pos.count>10000);assert([...pos.array].every(Number.isFinite));
-const half=pos.count/2;
+assert.equal(rails.stats.sides,2);assert.equal(rails.stats.closed,false);assert(rails.stats.coverageRatio>.35&&rails.stats.coverageRatio<.5);assert(pos.count>3000);assert([...pos.array].every(Number.isFinite));
 const curbs=createCurbs(data);assert.equal(curbs.children.length,2);
 assert.equal(curbs.children.reduce((n,m)=>n+m.geometry.attributes.position.count,0),data.samples.length*24,'both curb edges cover every track segment');
 assert(curbs.children.every(m=>[...m.geometry.attributes.position.array].every(Number.isFinite)));
-for(const base of [0,half])for(let j=0;j<6;j++)for(let axis=0;axis<3;axis++)assert.equal(pos.array[(base+j)*3+axis],pos.array[(base+half-6+j)*3+axis],'guardrail closes without a finish-line gap');
+// Open run-offs must also be open in the physics, for both car and AI.
+for(const s of [300,550,1550,2500,2900,3150])for(const side of [-1,1]){
+ assert(!guardrailPresent(data,s,side));const c=new TestCar(data);c.reset(data.samples.findIndex(p=>p[0]>=s));const p=c.surface,offset=side*(p.width/2+GUARDRAIL_CLEARANCE-.93-.2);
+ c.x+=p.lx*offset;c.y+=p.ly*offset;c.surface=c.sample(c.x,c.y);c.vx=p.tx*10+p.lx*side*8;c.vy=p.ty*10+p.ly*side*8;
+ for(let i=0;i<24;i++){c.step(idle,1/120);assert.equal(c.wallImpactSpeed,0,'no invisible barrier in a removed section');}
+ assert(Math.abs(c.surface.d)>Math.abs(offset)+.25,'car can cross the former guardrail position');
+}
+const indices=rails.rails.geometry.index,probeGeometry=new TestCar(data);
+for(let i=0;i<indices.count;i+=3){const points=[0,1,2].map(j=>indices.getX(i+j)),x=points.reduce((v,k)=>v+pos.getX(k),0)/3,y=-points.reduce((v,k)=>v+pos.getZ(k),0)/3;probeGeometry.index=probeGeometry.nearest(x,y,true).i;const p=probeGeometry.sample(x,y);assert(guardrailPresent(data,p.s,Math.sign(p.d)),'no rendered face spans an opening');}
+for(const side of [-1,1]){assert(guardrailPresent(data,0,side));assert(guardrailPresent(data,data.meta.reconstructed_xy_m-.01,side));assert.equal(guardrailClearance(data,0,side),5,'retained rails still join over the timing line');}
+
 // All personalities face identical corners at the same speed: commands must differ.
 const signals=DRIVER_STYLES.map(()=>[]),probe=new TestCar(data);
 for(let i=0;i<data.samples.length;i+=5){probe.reset(i);probe.vx=probe.surface.tx*35;probe.vy=probe.surface.ty*35;DRIVER_STYLES.forEach((style,j)=>signals[j].push(recognitionInput(probe,style).brake));}
@@ -43,4 +52,4 @@ for(let i=0;i<5;i++)for(let j=i+1;j<5;j++)assert(signals[i].filter((v,k)=>Math.a
 const field=new RaceField(data),player=new TestCar(data),laps=Array(RIVAL_ROSTER.length).fill(null);player.x+=10000;let peak=0,maxOutside=0;
 for(let frame=0;frame<180*120;frame++){field.step(player,1/120);for(const [i,r] of field.rivals.entries()){peak=Math.max(peak,Math.hypot(r.car.vx,r.car.vy)*3.6);maxOutside=Math.max(maxOutside,Math.abs(r.car.surface.d)-r.car.surface.width/2);if(laps[i]===null&&r.progress>=data.meta.reconstructed_xy_m)laps[i]=frame/120;}}
 assert(laps.every(t=>t!==null&&t<176),'all fourteen rivals maintain a competitive complete lap');assert(Math.max(...laps)-Math.min(...laps)>3,'different styles produce different lap times');assert(peak>168&&maxOutside<3,'faster rivals stay within the run-off margin');
-console.log(JSON.stringify({passed:true,grassCoastingKmh:grass.vx*3.6,grassRecoveryKmh:recover.vx*3.6,railContacts:contacts,laps,peakKmh:peak,maxOutside},null,2));
+console.log(JSON.stringify({passed:true,grassCoastingKmh:grass.vx*3.6,grassRecoveryKmh:recover.vx*3.6,railContacts:contacts,railCoverage:rails.stats.coverageRatio,laps,peakKmh:peak,maxOutside},null,2));

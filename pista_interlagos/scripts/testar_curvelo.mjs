@@ -6,6 +6,7 @@ import {RaceField} from '../teste/race-field.js';
 import {ImmersiveMode} from '../teste/immersive-mode.js';
 import {ImmersiveState} from '../teste/immersive-state.js';
 import {createCurveloScene} from '../teste/curvelo-scene.js';
+import {createGuardrails} from '../teste/track-surface.js';
 import * as THREE from '../teste/node_modules/three/build/three.module.js';
 const data=createCurveloData(),a=data.samples,L=data.meta.reconstructed_xy_m;
 assert.equal(L,1250);assert.equal(CIRCUITS.curvelo.length,L);
@@ -20,6 +21,9 @@ assert(Math.abs(Math.min(...a.map(p=>p[5]))+.16)<1e-8);assert.equal(a.find(p=>p[
 const c=new TestCar(data),i=a.findIndex(p=>p[0]>350);c.reset(i);const p=a[i];
 assert(c.sample(p[1]-p[9]*6,p[2]-p[10]*6).z>c.sample(p[1]+p[9]*6,p[2]+p[10]*6).z,'outside of banked left turn is higher');
 assert(guardrailClearance(data,980,-1)>30);assert.equal(guardrailClearance(data,980,1),5);
+const guardrails=createGuardrails(data),railPoints=guardrails.rails.geometry.attributes.position,railHalf=railPoints.count/2;
+assert.equal(guardrails.stats.closed,true);assert.equal(guardrails.stats.coverageRatio,1,'Curvelo keeps its complete protection');
+for(const base of [0,railHalf])for(let j=0;j<6;j++)for(let axis=0;axis<3;axis++)assert.equal(railPoints.array[(base+j)*3+axis],railPoints.array[(base+railHalf-6+j)*3+axis],'Curvelo rail still closes at the timing line');
 const project=mapProjection(a);assert(a.every(p=>{const [x,y]=project(p[1],p[2]);return x>=15&&x<=245&&y>=17&&y<=283;}));
 assert.equal(selectedCircuit('curvelo').id,'curvelo');assert.equal(selectedCircuit('interlagos','?circuito=curvelo').id,'curvelo');assert.equal(selectedCircuit('curvelo','?circuito=../../private').id,'interlagos');
 globalThis.document={createElement:()=>({getContext:()=>({fillRect(){},fillText(){}})})};
