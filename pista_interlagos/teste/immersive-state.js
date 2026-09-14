@@ -56,16 +56,16 @@ export class ImmersiveState {
  startRace(){if(this.phase!=='grid')return;this.emitSound('raceGo');this.phase='race';this.raceTime=0;this.touch();}
  warn(text){this.alert=text;this.alertTime=4;}
  hitDebris(){if(this.phase!=='race')return;this.glass=clamp(this.glass+(this.film?.23:.42),0,1);this.emitSound(this.glass>=1?'glassBreak':'glassHit');this.warn('Impacto no para-brisa! Saia de trás do carro da frente.');if(this.glass>=1)this.fail('Para-brisa estilhaçado');}
- hitCar(strength=1){if(this.phase!=='race')return;strength=clamp(strength,.1,1.5);this.emitSound('collision',{strength});this.health=Math.max(0,this.health-.23*strength);this.warn('Batida! O motor e os suportes sentiram o impacto.');if(this.health<=0)this.fail('O carro quebrou depois da batida');}
+ hitCar(strength=1){if(this.phase!=='race')return;strength=clamp(strength,.1,1.5);this.emitSound('collision',{strength});this.health=this.condition?this.condition.health:Math.max(0,this.health-.23*strength);this.warn('Batida! O motor e os suportes sentiram o impacto.');if(this.health<=0)this.fail('O carro quebrou depois da batida');}
  raceStep(sensor,dt){
   if(this.phase!=='race')return;
   this.raceTime+=dt;this.alertTime=Math.max(0,this.alertTime-dt);
-  const previousFuel=this.fuel;this.fuel=Math.max(0,this.fuel-dt*(.002+sensor.speed*.00045+sensor.throttle*.005+(sensor.wheelspin||0)*.0023+(this.tankDetached?.35:0)));
+  const previousFuel=this.fuel;this.fuel=Math.max(0,this.fuel-dt*(.002+sensor.speed*.00045+sensor.throttle*.005+(sensor.wheelspin||0)*.0023+(this.tankDetached?.35:0)+(this.condition?.factors.leak??0)));
   if(previousFuel>=1&&this.fuel<1&&this.fuel>0)this.emitSound('reserve');
   const depth=Math.max(0,sensor.offTrack||0);
   if(depth>2.5&&sensor.speed>7)this.tankWear+=dt*(depth-2.5)*.24;
-  if(!this.tankDetached&&this.tankWear>=1){this.tankDetached=true;this.emitSound('tankDrop');this.warn('O suporte cedeu! Tanque arrastando e vazando combustível.');this.touch();}
-  this.health=Math.max(0,this.health-dt*(depth>2?depth*sensor.speed*.0008:0)-(this.tankDetached?dt*.018:0));
+  if(!this.tankDetached&&this.tankWear>=1){this.tankDetached=true;this.condition?.damage('tanque',.75);this.emitSound('tankDrop');this.warn('O suporte cedeu! Tanque arrastando e vazando combustível.');this.touch();}
+  this.health=this.condition?this.condition.health:Math.max(0,this.health-dt*(depth>2?depth*sensor.speed*.0008:0)-(this.tankDetached?dt*.018:0));
   if(sensor.collision)this.hitCar();
   if(this.phase!=='race')return;
   if(this.fuel<=0)this.fail(this.tankDetached?'Combustível acabou após o vazamento':'Acabou a gasolina no meio da volta','fuelEmpty');

@@ -44,6 +44,11 @@ Terreno, vegetação de cerrado, boxes, torre, arquibancadas e anúncios são ce
 aproximado para o jogo. Não se importaram os 4,4 km e o desnível do circuito misto:
 ele é uma pista diferente dentro do mesmo complexo.
 
+O acesso ao pitstop, Box 99 e Lanchonete da Tia no interior da reta principal
+são extensões fictícias de jogabilidade. O ramal se liga progressivamente à pista
+e atravessa a mesma linha de cronometragem; entrar no box não invalida a volta.
+Ele não pretende representar a posição ou as dimensões dos boxes reais de Curvelo.
+
 Geometria e cenário são gerados pelos módulos `teste/curvelo-data.js` e
 `teste/curvelo-scene.js`, sem carregar imagens de terceiros durante o jogo.
 As fotografias de pesquisa permanecem fora do pacote público.

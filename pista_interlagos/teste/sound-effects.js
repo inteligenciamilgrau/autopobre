@@ -20,7 +20,7 @@ export class Synth {
  stop(tag=null,fade=.025){const t=this.ctx.currentTime;for(const v of this.voices){if(tag&&v.tag!==tag)continue;v.level.gain.cancelScheduledValues(t);v.level.gain.setTargetAtTime(0,t,fade/3);try{v.source.stop(t+fade);}catch{}}}
 }
 
-export const EFFECT_NAMES=Object.freeze(['click','paint','crowdWelcome','talk','donation','badJoke','noDonation','paper','fuelFill','denied','ignition','engineCatch','countdown','raceGo','flooded','batteryDead','fuelEmpty','breakdown','collision','debrisFly','debrisMiss','glassHit','glassBreak','tankDrop','towArrive','towBrake','strapSnag','strapFree','towWarning','finish','judgeStart','judgeCheck','judgeApprove','disqualified','podiumWin','podiumLoss','blazer','footstep','reserve']);
+export const EFFECT_NAMES=Object.freeze(['pitRepair','pitCoffee','click','paint','crowdWelcome','talk','donation','badJoke','noDonation','paper','fuelFill','denied','ignition','engineCatch','countdown','raceGo','flooded','batteryDead','fuelEmpty','breakdown','collision','debrisFly','debrisMiss','glassHit','glassBreak','tankDrop','towArrive','towBrake','strapSnag','strapFree','towWarning','finish','judgeStart','judgeCheck','judgeApprove','disqualified','podiumWin','podiumLoss','blazer','footstep','reserve']);
 
 export class SoundEffects {
  constructor(ctx,world,ui,noise){
@@ -46,6 +46,8 @@ export class SoundEffects {
   const whistle=(delay=0)=>{note(2350,.25,.065,'sine',delay,2100);noise(.2,.035,2600,delay);};
   const cheer=(duration=1.2)=>{for(let i=0;i<8;i++){const d=i*.07,p=(i%3-1)*.65;noise(duration-i*.045,.09,550+i*85,d,p);note(210+i*21,.55,.015,'sawtooth',d,330+i*20,800,p);}whistle(.3);};
   switch(name){
+   case 'pitRepair':noise(.1,.14,2300);note(680,.13,.06,'square',.1,310,1800);metal(.07);break;
+   case 'pitCoffee':noise(.8,.045,700);chime([440,554,659],.04);break;
    case 'click':note(820,.07,.045,'triangle',0,520);break;
    case 'paint':noise(.3,.065,3000);chime([660,990],.045);break;
    case 'crowdWelcome':cheer(1.3);break;

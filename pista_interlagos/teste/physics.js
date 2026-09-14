@@ -1,12 +1,14 @@
 // Modelo de teste: bicicleta, aderencia limitada, gravidade no plano medido.
 // Nao e simulacao homologada de pneus/suspensao do Old Stock.
 import {GRID_START_BACK} from './race-roster.js';
+import {pitLane} from './pit-lane.js';
 export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 export const MAX_STEER=.72;
 export const GUARDRAIL_CLEARANCE=5;
 export function guardrailClearance(data,s,side){
- if(data.meta.id!=='curvelo'||side>=0)return GUARDRAIL_CLEARANCE;
+ if(data.meta.id!=='curvelo')return GUARDRAIL_CLEARANCE;
+ if(side>=0){const lane=pitLane(data,s);return lane?Math.max(5,lane.offset*1.8+lane.halfWidth+2-7):5;}
  const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
  return 5+30*smooth((s-770)/100)*(1-smooth((s-1110)/95));
 }
@@ -34,15 +36,17 @@ export class TestCar {
   const tx=mix(7),ty=mix(8),lx=-ty,ly=tx,d=q.ex*lx+q.ey*ly,bank=mix(5),grade=mix(6),width=mix(4);
   const gx=tx*grade+lx*bank,gy=ty*grade+ly*bank;
   const roadz=mix(3)+bank*d,blend=clamp((Math.abs(d)-width/2)/3,0,1);
-  const z=roadz*(1-blend)+this.terrain(x,y)*blend+.055;
   const s=(a[0]+q.u*Math.hypot(b[1]-a[1],b[2]-a[2]))%this.data.meta.reconstructed_xy_m;
-  return {i:q.i,u:q.u,s:s>this.data.meta.reconstructed_xy_m-.01?0:s,d,z,width,bank,grade,gx,gy,tx,ty,lx,ly,onRoad:Math.abs(d)<width/2};
+  const lane=pitLane(this.data,s),pit=!!lane&&Math.abs(d-lane.offset)<=lane.halfWidth&&d>width/2;
+  const z=pit?3.055:roadz*(1-blend)+this.terrain(x,y)*blend+.055;
+  return {i:q.i,u:q.u,s:s>this.data.meta.reconstructed_xy_m-.01?0:s,d,z,width,bank:pit?0:bank,grade:pit?0:grade,gx:pit?0:gx,gy:pit?0:gy,tx,ty,lx,ly,pit,onRoad:pit||Math.abs(d)<width/2};
  }
  step(input,dt){
   this.wallImpactSpeed=0;
   const p=this.surface,oldX=this.x,oldY=this.y;
   const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
-  const mu=p.onRoad?(input.handbrake?.99:1.24):.62,steerTarget=(input.left-input.right)*MAX_STEER/(1+speed/28);
+  const condition=this.condition?.factors;
+  const mu=(p.onRoad?(input.handbrake?.99:1.24):.62)*(condition?.grip??1),steerTarget=(input.left-input.right)*MAX_STEER*(condition?.steering??1)/(1+speed/28);
   // Remove the long change-of-direction delay without amplifying small inputs.
   const steerResponse=steerTarget*this.steer<0?18:12;
   this.steer+=(steerTarget-this.steer)*(1-Math.exp(-dt*steerResponse));
@@ -61,19 +65,19 @@ export class TestCar {
   const yawResponse=burning?6:targetYaw*this.yaw<0?16:12;
   this.yaw+=(targetYaw-this.yaw)*(1-Math.exp(-dt*yawResponse));
   this.heading=wrap(this.heading+this.yaw*dt);
-  let drive=input.throttle*(this.engineScale??1)*Math.min(5.8,190/Math.max(Math.abs(v),7));
-  if(input.reverse)drive-=3;
+  let drive=input.throttle*(this.engineScale??1)*(condition?.power??1)*Math.min(5.8,190/Math.max(Math.abs(v),7));
+  if(input.reverse)drive-=3*(condition?.power??1);
   // Grass grips the tyres more firmly but costs speed through rolling resistance.
   const rolling=p.onRoad?.16:1.9+.085*Math.abs(v);
   const drag=.00145*v*Math.abs(v)+Math.sign(v)*Math.min(rolling,Math.abs(v)/dt);
-  const braking=Math.max(input.brake*11,input.handbrake&&!burning?7:0)*Math.min(1,Math.abs(v)/Math.max(dt*11,.001))*Math.sign(v);
+  const braking=Math.max(input.brake*11*(condition?.brakes??1),input.handbrake&&!burning?7:0)*Math.min(1,Math.abs(v)/Math.max(dt*11,.001))*Math.sign(v);
   const gx=-9.81*p.gx,gy=-9.81*p.gy;
   // The car origin is 1.117 m ahead of the rear axle. In a gripping turn its
   // lateral velocity is yaw * rearOffset; damping it toward zero made the rear slide.
   const lateralLimit=mu*9.81*(input.handbrake?.45:1);
   const turnAcross=clamp(v*this.yaw,-lateralLimit,lateralLimit);
   const rollingLateral=this.yaw*1.117,gravityAcross=-gx*s+gy*c;
-  const across=clamp(turnAcross+(rollingLateral-lat)*(input.handbrake?1.5:12)-gravityAcross,-lateralLimit,lateralLimit);
+  const across=clamp(turnAcross+(rollingLateral-lat)*(input.handbrake?1.5:12)*(condition?.stability??1)-gravityAcross,-lateralLimit,lateralLimit);
   // The turning force is perpendicular to travel, rather than adding free speed.
   const along=drive-drag-braking-(Math.abs(v)>.5?turnAcross*lat/v:0);
   this.vx+=(along*c-across*s+gx)*dt;this.vy+=(along*s+across*c+gy)*dt;
@@ -118,7 +122,7 @@ export class TestCar {
    if(previous.s>L-16&&current.s<16&&advance>0&&forwardSpeed>1){this.awaitingStart=false;this.checkpoints=new Set([0]);this.nextCheckpoint=1;this.excursion=null;}
    return;
   }
-  const outside=p=>Math.abs(p.d)>p.width/2+1;
+  const outside=p=>!p.pit&&Math.abs(p.d)>p.width/2+1;
   if(!this.excursion&&(outside(previous)||outside(current)))this.excursion={advance:0,distance:0};
   if(this.excursion){this.excursion.advance+=advance;this.excursion.distance+=distance;}
   const finish=previous.s>L-16&&current.s<16&&advance>0&&forwardSpeed>1;

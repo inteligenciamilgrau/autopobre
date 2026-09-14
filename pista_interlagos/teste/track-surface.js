@@ -1,5 +1,6 @@
 import * as THREE from 'three';
 import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE,guardrailClearance} from './physics.js';
+import {pitLane} from './pit-lane.js';
 
 export async function createTrackBranding(data){
  const loader=new THREE.TextureLoader(),[oldStock,game]=await Promise.all([
@@ -37,6 +38,7 @@ export function createCurbs(data){
  }
  for(const side of [-1,1])for(let i=0;i<data.samples.length;i++){
   const j=(i+1)%data.samples.length,p=data.samples[i],q=data.samples[j],out=batches[Math.floor(p[0]/4)%2];
+  const lane=pitLane(data,p[0]);if(side===1&&lane&&(lane.entry||lane.exit))continue;
   const a=profile.map(v=>vertex(p,i,side,v)),b=profile.map(v=>vertex(q,j,side,v));
   for(let k=0;k<2;k++)out.push(...a[k],...b[k],...a[k+1],...b[k],...b[k+1],...a[k+1]);
  }
