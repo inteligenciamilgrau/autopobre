@@ -366,7 +366,7 @@ function updateMenuLabels(){pilotPicker.root.hidden=sessionStarted;$('circuitPic
 function resumeRace(){if(!sessionStarted||(!immersive.active&&immersive.freeResultReady))return;$('settings').close();menu(false);}
 $('settingsResume').onclick=resumeRace;
 function menu(show){if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();mobile?.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
-const openSettings=setupSettings(()=>menu(true));
+const openSettings=setupSettings(()=>menu(true),returnToMainMenu);
 const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({onRestart:()=>beginRace(true),onSettings:openSettings,onRecords:mode=>lapRecords.open(mode),onMainMenu:returnToMainMenu});
 const pilotPicker=new PilotPicker(),automaticRecords=new AutomaticRecords(pilotStorage()),automaticAIRecords=new AutomaticAIRecords(pilotStorage());
 $('recordsButton').onclick=()=>{lapRecords.circuit=circuit.id;lapRecords.open();};
@@ -408,7 +408,8 @@ async function beginRace(restart=false,tour=false){
 }
 function returnToMainMenu(){
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
- pitstop?.reset();$('settings').close();lapRecords.dialog.close();immersive.disable();reset();
+ pitstop?.reset();$('settings').close();lapRecords.dialog.close();
+ if(ready){immersive.disable();reset();}
  sessionStarted=false;automatic=false;raceResults.root.hidden=true;menu(true);showCircuitSelection();
 }
 $('start').onclick=()=>beginRace();$('restartRace').onclick=()=>beginRace(true);
