@@ -11,8 +11,8 @@ with sync_playwright() as p:
   context.add_init_script("localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'curvelo',immersive:false}));")
   page=context.new_page();page.set_default_timeout(120000);page.on('pageerror',lambda e:(errors.append(str(e)),print(str(e),flush=True)))
   page.on('console',lambda m:errors.append(m.text) if m.type=='error' else None)
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/?circuito=curvelo',wait_until='domcontentloaded');wait_js(page,'window.interlagos?.ready')
-  page.click('#start')
+  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/?circuito=curvelo',wait_until='domcontentloaded');wait_js(page,"!document.querySelector('#start').disabled")
+  page.click('#start');wait_js(page,'window.interlagos?.ready')
   page.evaluate("""async()=>{const {PitStop}=await import('./pitstop.js');const old=PitStop.prototype.info;PitStop.prototype.info=function(){window.pit=this;return old.call(this)};interlagos.pitInfo();window.park=()=>{const c=interlagos.car;const i=c.a.findIndex(p=>p[0]>=20),p=c.a[i];c.reset(i);c.x=p[1]+p[9]*20;c.y=p[2]+p[10]*20;c.surface=c.sample(c.x,c.y);};park();pit.condition.damage('motor',.6);pit.condition.damage('freios',.5);window.advance=n=>{for(let i=0;i<n;i++)pit.beforeStep({throttle:0,brake:0,left:0,right:0},1/120);};}""")
   wait_js(page,'pit.opened');wait_js(page,"!document.querySelector('#pitPanel').hidden")
   assert page.locator('.pit-parts article').count()==6

@@ -17,11 +17,12 @@ export class ImmersiveMode {
   this.controls=document.querySelector('footer>div');this.baseControls=this.controls.innerHTML;
   this.panel=document.createElement('section');this.panel.id='immersivePanel';this.panel.className='hidden';this.panel.setAttribute('aria-label','Auto-Pobre Racing');document.body.append(this.panel);
   this.hud=document.createElement('section');this.hud.id='immersiveHud';this.hud.className='hidden';this.hud.innerHTML='<div class="imm-brand">AUTO-POBRE RACING <span id="immPhase"></span></div><div class="imm-meters"><span>GASOLINA <b id="immFuel"></b></span><span>CARRO <b id="immHealth"></b></span><span>VIDRO <b id="immGlass"></b></span><span>NA PISTA <b id="immPosition"></b></span></div><div id="immAlert" role="status"></div>';document.body.append(this.hud);
-  document.getElementById('view').addEventListener('pointerdown',e=>this.pickFan(e));
+  this.onPickFan=e=>this.pickFan(e);document.getElementById('view').addEventListener('pointerdown',this.onPickFan);
   document.getElementById('dqContinue').onclick=()=>{if(this.state.phase==='disqualified')this.start();};
   this.panel.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b&&!b.disabled)this.action(b.dataset.action);});
   this.panel.addEventListener('input',e=>{if(e.target.id==='immLitres'){this.prepLitres=Number(e.target.value);this.prepCost();}if(e.target.id==='immFilm'){this.prepFilm=e.target.checked;this.prepCost();}});
  }
+ dispose(){this.disable();document.getElementById('view').removeEventListener('pointerdown',this.onPickFan);this.panel.remove();this.hud.remove();document.getElementById('dqContinue').onclick=null;}
  pickFan(event){
   if(event.button!==0||!this.active||this.state.phase!=='crowd'||!this.camera)return;
   const rect=event.currentTarget.getBoundingClientRect(),pointer=new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,1-(event.clientY-rect.top)/rect.height*2),ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera);
