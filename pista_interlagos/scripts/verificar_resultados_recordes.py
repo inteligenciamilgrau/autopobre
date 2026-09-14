@@ -36,7 +36,7 @@ with sync_playwright() as p:
   page.click('#settingsButton');page.locator('#immersiveMode').set_checked(not immersive);page.click('#settingsBack');page.click('#start')
   wait_js(page,'fixture.active' if not immersive else '!fixture.active')
   assert not page.evaluate('interlagos.state.paused')
-  page.reload(wait_until='domcontentloaded');page.wait_for_selector('#lapRecords',state='attached');page.click('#recordsButton');page.select_option('#recordsMode','immersive' if immersive else 'normal')
+  page.reload(wait_until='domcontentloaded');page.wait_for_selector('#lapRecords',state='attached');page.click('#recordsButton');page.locator('[data-records-mode="immersive"]' if immersive else '[data-records-mode="normal"]').click()
   assert page.locator('#lapRecords tbody tr').count()==1 and '02:30.250' in page.inner_text('#lapRecords tbody')
   print(json.dumps({'mobile':mobile,'immersive':immersive,'tableAndRecords':True}),flush=True);context.close()
  browser.close()
