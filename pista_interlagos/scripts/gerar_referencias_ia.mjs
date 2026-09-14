@@ -1,0 +1,16 @@
+﻿// Rebuild AI reference times from the game's current physics and driver styles.
+import {readFileSync,writeFileSync} from 'node:fs';
+import {createCurveloData} from '../teste/curvelo-data.js';
+import {TestCar} from '../teste/physics.js';
+import {RaceField} from '../teste/race-field.js';
+const rows=[];
+for(const id of ['interlagos','curvelo']){
+ const data=id==='curvelo'?createCurveloData():JSON.parse(readFileSync(new URL('../dados/pista.json',import.meta.url)));data.meta.id=id;
+ for(const [mode,laps] of [['normal',3],['immersive',1]]){
+  const player=new TestCar(data);player.resetGrid();const field=new RaceField(data);field.reset(player.surface.s,{grid:true});player.x=10000;player.y=10000;player.surface=player.sample(player.x,player.y);
+  for(let i=0;i<120*900&&field.rivals.some(r=>!r.finished);i++)field.step(player,1/120,laps);
+  for(const r of field.rivals){if(!r.finished||!r.car.best)throw Error('Missing valid AI finish: '+id+' '+r.entry.number);rows.push({circuit:id,mode,number:r.entry.number,bestLap:Math.round(r.car.best*1000)/1000,bestRace:Math.round(r.finishTime*1000)/1000});}
+  console.log(id,mode,Math.min(...field.rivals.map(r=>r.car.best)),Math.max(...field.rivals.map(r=>r.finishTime)));
+ }
+}
+writeFileSync(new URL('../teste/ai-record-references.js',import.meta.url),'// Simulated in-game times, not real-world driver records. Rebuild with gerar_referencias_ia.mjs.\nexport const AI_REFERENCE_TIMES='+JSON.stringify(rows,null,1)+';\n');

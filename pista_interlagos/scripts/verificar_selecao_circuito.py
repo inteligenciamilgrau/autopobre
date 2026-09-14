@@ -27,11 +27,11 @@ with sync_playwright() as p:
  assert page.evaluate('song===mediaPlayers.find(p=>!p.paused)&&song.src===songSrc&&song.currentTime>songTime')
  assert not heavy(),heavy();assert page.evaluate('gpuContexts')==0
  assert page.evaluate("JSON.parse(localStorage.getItem('opala99-preferences-v1')).circuit")=='curvelo'
- page.click('#recordsButton');assert page.input_value('#recordsCircuit')=='curvelo';page.click('#recordsClose')
+ page.click('#recordsButton');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-pressed')=='true';page.click('#recordsClose')
  page.click('#settingsButton');page.select_option('#camera','hood');page.select_option('#livery','seiva_danilo');page.click('#settingsBack')
  assert not heavy(),heavy()
  print(json.dumps({'selectionNoReload':True,'sameSongContinues':True,'noRaceAssetsOrGPU':True,'settingsBeforeRace':True}),flush=True)
- page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
+ page.fill('#pilotName','Piloto selecao');page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
  assert heavy();assert page.evaluate('gpuContexts')==1
  page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();fixture.onMainMenu();}""")
  count=len(heavy());page.click('[data-circuit="interlagos"]');page.wait_for_timeout(250)

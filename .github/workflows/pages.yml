@@ -52,6 +52,7 @@ jobs:
           node pista_interlagos/scripts/testar_direcao.mjs
           node pista_interlagos/scripts/testar_bandeirada.mjs
           node pista_interlagos/scripts/testar_recordes.mjs
+          node pista_interlagos/scripts/testar_pilotos_largada.mjs
           node pista_interlagos/scripts/testar_curvelo.mjs
           node pista_interlagos/scripts/testar_pitstop.mjs
       - name: Gerar somente os arquivos publicos
