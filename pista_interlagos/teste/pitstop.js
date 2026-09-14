@@ -94,10 +94,10 @@ export class PitStop {
   // The café is inside the pit complex, on the infield side of the service lane.
   box([0,.1,-12],[14,.3,9],0xaf9875);box([0,1.7,-15],[14,3.4,.25],0xb8764b);box([0,3.6,-12],[15,.25,9],0x974b32);
   for(const x of [-6.5,6.5])box([x,1.8,-8],[.2,3.6,.2],0xd5b898);
-  box([0,1,-10],[8,1.3,1.2],0xe0c89a);sign('LANCHONETE DA TIA',[0,3,-14.8],11,.8,'#ffe2a0','#754627');sign('CAFÉ · PÃO DE QUEIJO · DOCE DE LEITE',[0,2.2,-14.8],8,.38,'#fff','#8b5434');
+  box([0,.7,-10],[8,.9,1.2],0xe0c89a);sign('LANCHONETE DA TIA',[0,3,-14.8],11,.8,'#ffe2a0','#754627');sign('CAFÉ · PÃO DE QUEIJO · DOCE DE LEITE',[0,2.2,-14.8],8,.38,'#fff','#8b5434');
   const tia=this.tia=v.human(0xe5b269);tia.position.set(1,.25,-11.2);tia.rotation.y=Math.PI/2;this.station.add(tia);v.box(tia,[.18,1.03,0],[.03,.48,.36],0xf2ecdc);v.tag(tia,'TIA',[0,2.05,0],.8,.3);
-  for(let i=0;i<5;i++){const bread=new THREE.Mesh(new THREE.SphereGeometry(.16,10,6),new THREE.MeshStandardMaterial({color:0xe8bb62,roughness:.9}));bread.position.set(-1.6+i*.32,1.83,-9.7);this.station.add(bread);}
-  for(const [x,color] of [[1,0x815031],[2,0xeee9dc]]){const jar=new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.45,12),new THREE.MeshStandardMaterial({color}));jar.position.set(x,1.9,-9.7);this.station.add(jar);}
+  for(let i=0;i<5;i++){const bread=new THREE.Mesh(new THREE.SphereGeometry(.16,10,6),new THREE.MeshStandardMaterial({color:0xe8bb62,roughness:.9}));bread.position.set(-1.6+i*.32,1.33,-9.7);this.station.add(bread);}
+  for(const [x,color] of [[1,0x815031],[2,0xeee9dc]]){const jar=new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.45,12),new THREE.MeshStandardMaterial({color}));jar.position.set(x,1.4,-9.7);this.station.add(jar);}
   this.hero=v.human(0xd82125);v.tag(this.hero,'99',[.19,1.15,0],.3,.25);const helmet=this.driver.root.getObjectByName('Capacete_preto_vermelho_balaclava');if(helmet){this.hero.userData.head.visible=false;const copy=helmet.clone();copy.position.set(0,1.62,0);this.hero.add(copy);}this.hero.visible=false;this.root.add(this.hero);
   this.cup=new THREE.Mesh(new THREE.CylinderGeometry(.075,.055,.13,10),new THREE.MeshStandardMaterial({color:0xf5edd8}));this.cup.position.set(.09,-.5,0);this.hero.getObjectByName('Membro_braco_-1').add(this.cup);this.cup.visible=false;
   this.station.updateMatrixWorld(true);this.cafeSeat=this.station.localToWorld(new THREE.Vector3(-1,.25,-8.2));
