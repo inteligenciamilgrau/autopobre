@@ -7,6 +7,14 @@ saveRecord(storage,candidate);saveRecord(storage,{...candidate,name:'STEVAN',bes
 let records=readRecords(storage);assert.equal(records.length,1);assert.equal(records[0].bestLap,150.25);assert.equal(records[0].bestRace,479);
 saveRecord(storage,{...candidate,mode:'immersive',bestLap:151,bestRace:152});assert.equal(readRecords(storage).length,2,'modes stay separate');
 assert.throws(()=>saveRecord(storage,{...candidate,bestLap:NaN}));assert.throws(()=>saveRecord(storage,{...candidate,name:'  '}));assert.throws(()=>saveRecord(storage,{...candidate,bestLap:500}));
+saveRecord(storage,{...candidate,circuit:'curvelo',bestLap:40,bestRace:130});
+assert.equal(readRecords(storage).length,3,'same player can record both circuits');
+assert.equal(readRecords(storage).find(r=>r.circuit==='interlagos'&&r.mode==='normal').bestLap,150.25);
+assert.equal(readRecords({getItem:()=>JSON.stringify([candidate])})[0].circuit,'interlagos','legacy records migrate to original circuit');
+assert.throws(()=>saveRecord(storage,{...candidate,circuit:'../../private'}));
+for(let i=0;i<55;i++)saveRecord(storage,{...candidate,circuit:'curvelo',name:'Curvelo '+i,bestLap:35-i*.01,bestRace:110});
+assert.equal(readRecords(storage).filter(r=>r.circuit==='curvelo').length,50);
+assert.equal(readRecords(storage).filter(r=>r.circuit==='interlagos').length,2,'short oval times never evict Interlagos records');
 assert.throws(()=>saveRecord({getItem:()=>null,setItem(){throw Error('quota')}},candidate),/Não foi possível salvar/);
 assert.deepEqual(readRecords({getItem:()=>'{broken'}),[]);assert.deepEqual(readRecords({getItem:()=>JSON.stringify([{...candidate,name:{}}])}),[]);
 const mode={freeOrder:[{number:'70',name:'Kleber Eletric',bestLap:149,totalTime:460,finished:true},{number:'73',name:'Konrad Viehmann',bestLap:null,totalTime:null,finished:false}],finishPosition:2,finishTime:470,finishBest:150};

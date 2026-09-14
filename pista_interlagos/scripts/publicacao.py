@@ -7,6 +7,7 @@ import re
 ROOT = Path(__file__).resolve().parents[2]
 GAME = 'pista_interlagos/teste/'
 MODULES = (
+    'circuits.js', 'curvelo-data.js', 'curvelo-scene.js',
     'race-results.js', 'race-results.css', 'lap-records.js',
     'race-roster.js',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",

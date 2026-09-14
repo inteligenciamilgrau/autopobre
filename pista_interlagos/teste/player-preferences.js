@@ -1,3 +1,4 @@
+import {circuitId} from './circuits.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
 export const CAMERA_MODES=Object.freeze(['chase','hood','cockpit','aerial','orbit']);
 const liveries=['assinaturas_omp','seiva_danilo'];
@@ -6,7 +7,8 @@ export function normalizePreferences(value){
  return {
   immersive:typeof source.immersive==='boolean'?source.immersive:true,
   livery:liveries.includes(source.livery)?source.livery:'assinaturas_omp',
-  camera:CAMERA_MODES.includes(source.camera)?source.camera:'chase'
+  camera:CAMERA_MODES.includes(source.camera)?source.camera:'chase',
+  circuit:circuitId(source.circuit)
  };
 }
 function browserStorage(){try{return globalThis.localStorage;}catch{return null;}}

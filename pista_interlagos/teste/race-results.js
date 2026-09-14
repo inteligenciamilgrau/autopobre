@@ -1,3 +1,4 @@
+import {CIRCUITS,circuitId} from './circuits.js';
 import {PLAYER_ENTRY} from './race-roster.js';
 export const formatTime=value=>Number.isFinite(value)&&value>0?`${String(Math.floor(value/60)).padStart(2,'0')}:${(value%60).toFixed(3).padStart(6,'0')}`:'—';
 export function resultRows(mode){
@@ -8,7 +9,7 @@ export function resultRows(mode){
 export class RaceResults {
  constructor({onRestart,onSettings,onRecords,onMainMenu}){
   this.root=document.createElement('section');this.root.id='raceResults';this.root.hidden=true;this.root.setAttribute('aria-label','Resultado Auto-Pobre Racing');
-  this.root.innerHTML=`<div class="results-sheet"><div class="results-top"><div><span class="results-kicker">AUTO-POBRE RACING</span><h1>RESULTADO DA CORRIDA</h1><p class="results-circuit">INTERLAGOS <span id="resultsMode"></span></p></div><img src="./assets/abertura/logo_auto_pobre_racing.png" alt="Auto-Pobre Racing" width="1774" height="887"></div><div class="results-summary"><strong id="resultsPlace"></strong><span id="resultsTime"></span><span id="resultsFastest"></span></div><div class="results-scroll"><table class="results-table"><thead><tr><th scope="col">POS</th><th scope="col">Nº</th><th scope="col">PILOTO / DUPLA</th><th scope="col">MELHOR VOLTA</th><th scope="col">TEMPO TOTAL</th></tr></thead><tbody></tbody></table></div><p class="results-footnote">Tempos registrados na sua bandeirada. — indica que ainda não houve volta válida; “na pista” indica quem ainda não terminou.</p><div class="results-actions"><button id="resultsContinue" class="results-primary">Correr novamente →</button><button id="resultsRecords">Recordes de tempo</button><button id="resultsSettings">Configurações</button></div><div id="resultsRecordsPanel" hidden></div></div>`;
+  this.root.innerHTML=`<div class="results-sheet"><div class="results-top"><div><span class="results-kicker">AUTO-POBRE RACING</span><h1>RESULTADO DA CORRIDA</h1><p class="results-circuit"><b id="resultsCircuit">INTERLAGOS</b> <span id="resultsMode"></span></p></div><img src="./assets/abertura/logo_auto_pobre_racing.png" alt="Auto-Pobre Racing" width="1774" height="887"></div><div class="results-summary"><strong id="resultsPlace"></strong><span id="resultsTime"></span><span id="resultsFastest"></span></div><div class="results-scroll"><table class="results-table"><thead><tr><th scope="col">POS</th><th scope="col">Nº</th><th scope="col">PILOTO / DUPLA</th><th scope="col">MELHOR VOLTA</th><th scope="col">TEMPO TOTAL</th></tr></thead><tbody></tbody></table></div><p class="results-footnote">Tempos registrados na sua bandeirada. — indica que ainda não houve volta válida; “na pista” indica quem ainda não terminou.</p><div class="results-actions"><button id="resultsContinue" class="results-primary">Correr novamente →</button><button id="resultsRecords">Recordes de tempo</button><button id="resultsSettings">Configurações</button></div><div id="resultsRecordsPanel" hidden></div></div>`;
   const mainMenu=document.createElement('button');mainMenu.id='resultsMainMenu';mainMenu.textContent='Voltar ao menu principal';mainMenu.onclick=onMainMenu;this.root.querySelector('.results-actions').insertBefore(mainMenu,this.root.querySelector('#resultsRecords'));
   document.body.append(this.root);this.root.querySelector('#resultsContinue').onclick=()=>{if(this.mode.active){this.dismissed=true;this.root.hidden=true;}else onRestart();};this.root.querySelector('#resultsSettings').onclick=onSettings;this.root.querySelector('#resultsRecords').onclick=()=>onRecords(this.mode);
  }
@@ -22,6 +23,7 @@ export class RaceResults {
  render(mode){
   const rows=resultRows(mode),best=rows.filter(r=>Number.isFinite(r.bestLap)&&r.bestLap>0).sort((a,b)=>a.bestLap-b.bestLap)[0];this.rows=rows;
   const $=id=>this.root.querySelector('#'+id);
+  $('resultsCircuit').textContent=CIRCUITS[circuitId(mode.data?.meta.id)].name.toUpperCase();
   $('resultsMode').textContent=`/ ${mode.active?'IMERSIVA · 1 VOLTA':'CORRIDA · 3 VOLTAS'}`;
   $('resultsPlace').textContent=`VOCÊ CHEGOU EM ${mode.finishPosition}º / ${rows.length}`;
   $('resultsTime').textContent=`TOTAL ${formatTime(mode.finishTime)}`;

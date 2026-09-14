@@ -5,6 +5,11 @@ export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 export const MAX_STEER=.72;
 export const GUARDRAIL_CLEARANCE=5;
+export function guardrailClearance(data,s,side){
+ if(data.meta.id!=='curvelo'||side>=0)return GUARDRAIL_CLEARANCE;
+ const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+ return 5+30*smooth((s-770)/100)*(1-smooth((s-1110)/95));
+}
 export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.reset();}
  resetGrid(){const target=this.data.meta.reconstructed_xy_m-GRID_START_BACK;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));this.awaitingStart=true;}
@@ -89,8 +94,8 @@ export class TestCar {
   // The continuous rendered rail and contact share the same shoulder clearance.
   const r=this.surface,side=Math.sign(r.d),angle=wrap(this.heading-Math.atan2(r.ty,r.tx));
   const extent=.93*Math.abs(Math.cos(angle))+2.38*Math.abs(Math.sin(angle));
-  const wall=r.width/2+GUARDRAIL_CLEARANCE-.12-extent;
-  const crossed=Math.abs(p.d)<=p.width/2+GUARDRAIL_CLEARANCE-.12-extent;
+  const wall=r.width/2+guardrailClearance(this.data,r.s,side)-.12-extent;
+  const crossed=Math.abs(p.d)<=p.width/2+guardrailClearance(this.data,p.s,side)-.12-extent;
   if(Math.abs(r.d)>wall&&(crossed||Math.abs(r.d)<wall+5)){
    const correction=r.d-side*wall;this.x-=r.lx*correction;this.y-=r.ly*correction;
    const outward=(this.vx*r.lx+this.vy*r.ly)*side,tangent=this.vx*r.tx+this.vy*r.ty;

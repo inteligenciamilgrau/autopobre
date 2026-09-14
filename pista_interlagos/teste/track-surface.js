@@ -1,5 +1,5 @@
 import * as THREE from 'three';
-import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE} from './physics.js';
+import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE,guardrailClearance} from './physics.js';
 
 export async function createTrackBranding(data){
  const loader=new THREE.TextureLoader(),[oldStock,game]=await Promise.all([
@@ -14,7 +14,7 @@ export async function createTrackBranding(data){
  const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
  for(let i=0;i<16;i++){
   const s=i===0?length-30:i===1?70:230+(i-2)*(length-480)/14;
-  const index=Math.max(0,data.samples.findIndex(p=>p[0]>=s)),p=data.samples[index],side=i%2?1:-1,offset=side*(p[4]/2+GUARDRAIL_CLEARANCE+5);
+  const index=Math.max(0,data.samples.findIndex(p=>p[0]>=s)),p=data.samples[index],side=i%2?1:-1,offset=side*(p[4]/2+guardrailClearance(data,p[0],side)+5);
   const x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;probe.index=index;const ground=probe.sample(x,y).z;
   const board=new THREE.Group();board.name=i%2?'Outdoor_AutoPobre':'Outdoor_OldStock';board.position.set(x,ground,-y);
   // Face the approaching driver, rather than presenting the edge of the sign.
@@ -58,7 +58,7 @@ export function createGuardrails(data){
  for(const side of [-1,1]){
   const base=positions.length/3;
   for(let i=0;i<=nodes.length;i++){
-   const p=nodes[i%nodes.length],offset=side*(p[4]/2+GUARDRAIL_CLEARANCE),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
+   const p=nodes[i%nodes.length],offset=side*(p[4]/2+guardrailClearance(data,p[0],side)),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
    probe.index=data.samples.indexOf(p);const ground=probe.sample(x,y).z;
    for(const [height,ridge] of profile)positions.push(x+p[8]*side*ridge,ground+height,-y+p[7]*side*ridge);
    if(i<nodes.length){q.setFromAxisAngle(new THREE.Vector3(0,1,0),Math.atan2(p[8],p[7]));matrix.compose(new THREE.Vector3(x,ground+.475,-y),q,scale);posts.setMatrixAt(post++,matrix);}
@@ -101,7 +101,7 @@ float macro=roadNoise(vMapUv*.18)*.65+roadNoise(vMapUv*.047)*.35;
 float detailFade=1.0-smoothstep(.08,.45,length(fwidth(vMapUv*3.4)));
 float weathered=.72+.40*roadNoise(vMapUv*3.4)+.16*roadNoise(vMapUv*13.0);
 float wear=mix(.74,1.22,macro)*mix(1.0,weathered,detailFade);
-float brake=clamp(brakeZone(s,160.0,345.0)+brakeZone(s,1380.0,1590.0)+brakeZone(s,2320.0,2460.0)+brakeZone(s,2950.0,3160.0),0.0,1.0);
+float brake=clamp(${data.meta.id==='curvelo'?'brakeZone(s,135.0,280.0)+brakeZone(s,760.0,960.0)':'brakeZone(s,160.0,345.0)+brakeZone(s,1380.0,1590.0)+brakeZone(s,2320.0,2460.0)+brakeZone(s,2950.0,3160.0)'},0.0,1.0);
 float path=vRoad.w+(roadNoise(vec2(s*.012,5.3))-.5)*.8;
 float lateral=d-path;
 float rubber=exp(-pow(lateral/1.8,2.0))*(.13+.18*brake);
@@ -132,7 +132,7 @@ asphaltN.xy*=normalScale;
 normal=normalize(tbn*asphaltN);
 `);
  };
- material.customProgramCacheKey=()=> 'opala-track-asphalt-rustic-v3';
+ material.customProgramCacheKey=()=> 'opala-track-asphalt-rustic-v3-'+(data.meta.id||'interlagos');
  const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
  const stats={texture:'assets/texturas/asfalto_diff_v2.jpg',normal:'assets/texturas/asfalto_nor_gl_v2.jpg',roughness:'assets/texturas/asfalto_rough_v2.jpg',resolution:2048,tileMetres:2.1,coarseTileMetres:7,anisotropy:texture.anisotropy,vertices:0,wear:'decorative',pbr:true};
  function geometry(source){
