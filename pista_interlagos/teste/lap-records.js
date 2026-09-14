@@ -7,7 +7,7 @@ export function readRecords(storage){
  try{const data=JSON.parse(storage.getItem(KEY)||'[]');return Array.isArray(data)?data.filter(r=>r&&typeof r.name==='string'&&['normal','immersive'].includes(r.mode)&&cleanName(r.name)&&validTime(r.bestLap)&&validTime(r.bestRace)&&r.bestLap<=r.bestRace).slice(0,200).map(r=>({circuit:circuitId(r.circuit),name:cleanName(r.name),mode:r.mode,bestLap:r.bestLap,bestRace:r.bestRace,date:typeof r.date==='string'?r.date:''})):[];}catch{return [];}
 }
 export function saveRecord(storage,{name,mode,bestLap,bestRace,circuit='interlagos'}){
- if(!Object.hasOwn(CIRCUITS,circuit))throw new Error('Circuito inválido.');
+ if(typeof circuit!=='string'||!Object.hasOwn(CIRCUITS,circuit))throw new Error('Circuito inválido.');
  name=cleanName(name);if(!name||!['normal','immersive'].includes(mode)||!validTime(bestLap)||!validTime(bestRace)||bestLap>bestRace)throw new Error('Preencha seu nome e conclua uma corrida com volta válida.');
  const rows=readRecords(storage),existing=rows.find(r=>r.circuit===circuit&&r.mode===mode&&r.name.toLocaleLowerCase('pt-BR')===name.toLocaleLowerCase('pt-BR'));
  if(existing){existing.bestLap=Math.min(existing.bestLap,bestLap);existing.bestRace=Math.min(existing.bestRace,bestRace);existing.date=new Date().toISOString();}

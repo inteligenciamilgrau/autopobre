@@ -13,7 +13,7 @@ assert.equal(new PlayerPreferences(storage).values.circuit,'interlagos');
 preferences.update({immersive:true});
 assert.equal(new PlayerPreferences(storage).values.immersive,true);
 assert.equal(new PlayerPreferences(storage).values.camera,'cockpit');
-for(const corrupted of ['not json','null','[]','42','{"immersive":"false","livery":"../../private","camera":"bad"}']){
+for(const corrupted of ['not json','null','[]','42','{"immersive":"false","livery":"../../private","camera":"bad"}','{"circuit":{"toString":42}}']){
  data.set(PREFERENCES_KEY,corrupted);
  assert.deepEqual(new PlayerPreferences(storage).values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos'});
 }
