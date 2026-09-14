@@ -34,10 +34,12 @@ export class CarCondition {
 
 // Charged once; partial work stays installed and unused money is refunded.
 export class PitService {
- constructor({condition,getFuel,setFuel,pay,refund}){Object.assign(this,{condition,getFuel,setFuel,pay,refund});this.job=null;}
+ constructor({condition,getFuel,setFuel,pay,refund}){Object.assign(this,{condition,getFuel,setFuel,pay,refund});this.job=null;this.queue=[];}
+ has(id){return this.job?.id===id||this.queue.some(job=>job.id===id);}
  startRepair(id,kind){return this.start(this.condition.quote(id,kind));}
  startFuel(litres){const amount=Math.min(Math.max(0,Number(litres)||0),12-this.getFuel());if(amount<.05)return false;return this.start({id:'fuel',from:this.getFuel(),to:this.getFuel()+amount,cost:Math.ceil(amount*6.5),seconds:2+amount*1.5});}
- start(quote){if(this.job||!quote||!this.pay(quote.cost))return false;this.job={...quote,elapsed:0,progress:0};return true;}
- step(dt){if(!this.job)return null;const job=this.job;job.elapsed=Math.min(job.seconds,job.elapsed+Math.max(0,dt));job.progress=job.elapsed/job.seconds;if(job.id==='fuel')this.setFuel(job.from+(job.to-job.from)*job.progress);else this.condition.applyRepair(job,job.progress);if(job.progress>=1){this.job=null;return job;}return null;}
- cancel(){if(!this.job)return 0;const refund=Math.floor(this.job.cost*(1-this.job.progress)*100)/100;this.refund(refund);this.job=null;return refund;}
+ start(quote){if(!quote||this.has(quote.id))return false;const payment=this.pay(quote.cost);if(!payment)return false;const job={...quote,payment,elapsed:0,progress:0};if(this.job)this.queue.push(job);else this.job=job;return true;}
+ step(dt){if(!this.job)return null;const job=this.job;job.elapsed=Math.min(job.seconds,job.elapsed+Math.max(0,dt));job.progress=job.elapsed/job.seconds;if(job.id==='fuel')this.setFuel(job.from+(job.to-job.from)*job.progress);else this.condition.applyRepair(job,job.progress);if(job.progress>=1){this.job=this.queue.shift()||null;return job;}return null;}
+ cancelQueued(id){const index=this.queue.findIndex(job=>job.id===id);if(index<0)return 0;const [job]=this.queue.splice(index,1);this.refund(job.cost,job);return job.cost;}
+ cancel(){const jobs=[...(this.job?[this.job]:[]),...this.queue];let total=0;for(const job of jobs){const amount=Math.floor(job.cost*(1-job.progress)*100)/100;this.refund(amount,job);total+=amount;}this.job=null;this.queue=[];return Math.round(total*100)/100;}
 }

@@ -6,7 +6,7 @@ import {pitLane,inPitBox} from '../teste/pit-lane.js';
 import {ImmersiveMode} from '../teste/immersive-mode.js';
 import {ImmersiveState} from '../teste/immersive-state.js';
 import {RaceField} from '../teste/race-field.js';
-import {PitStop} from '../teste/pitstop.js';
+import {PitStop,CAFE_MENU} from '../teste/pitstop.js';
 const condition=new CarCondition(),data=createCurveloData();
 assert.equal(CAR_PARTS.length,6);assert.equal(condition.health,1);assert.equal(condition.factors.power,1);assert.equal(condition.factors.grip,1);
 condition.impact(20,2,0);assert(condition.quality.motor<condition.quality.tanque,'frontal hit primarily damages engine');
@@ -25,6 +25,25 @@ assert(service.startFuel(2));service.step(2.5);assert.equal(fuel,4,'refuel is gr
 wallet=0;assert(!service.startFuel(2));assert(!service.startRepair('tanque','proper'));assert.equal(fuel,4);
 const account=Object.create(PitStop.prototype);account.mode={active:true,state:{cash:10,profile:{fund:100}},save(){}};
 assert(account.spend(50,true));assert.equal(account.mode.state.cash,0);assert.equal(account.mode.state.profile.fund,60);account.refund(20);assert.equal(account.mode.state.cash,4);assert.equal(account.mode.state.profile.fund,76);assert(!account.spend(1000));assert.equal(account.wallet,80,'service uses cash first and refunds its original funding sources');
+// Different jobs are paid once, queued, and completed without another click.
+const queuedCondition=new CarCondition();for(const id of ['motor','freios','suspensao'])queuedCondition.damage(id,.6);
+let queueWallet=500,queueFuel=3,queueCharges=0;
+const queuedService=new PitService({condition:queuedCondition,getFuel:()=>queueFuel,setFuel:v=>queueFuel=v,pay:cost=>{queueWallet-=cost;queueCharges++;return true;},refund:cost=>queueWallet+=cost});
+for(const id of ['motor','freios','suspensao'])assert(queuedService.startRepair(id,'proper'));
+assert.equal(queuedService.queue.length,2);assert(!queuedService.startRepair('freios','patch'));assert.equal(queueCharges,3);
+queuedService.step(2);assert(queuedCondition.quality.motor>.4);assert.equal(queuedCondition.quality.freios,.4,'queued work has not started');
+const removed=queuedService.cancelQueued('suspensao');assert(removed>0);assert.equal(queuedService.queue.length,1);
+assert(queuedService.startFuel(2));assert(!queuedService.startFuel(2));
+for(let i=0;i<60*120;i++)queuedService.step(1/120);
+assert.equal(queuedCondition.quality.motor,1);assert.equal(queuedCondition.quality.freios,1);assert.equal(queuedCondition.quality.suspensao,.4);assert.equal(queueFuel,5);assert.equal(queuedService.job,null);
+// Refund each order to its own original cash/fund sources, even after buying food.
+account.mode.state.cash=100;account.mode.state.profile.fund=300;
+const accountingCondition=new CarCondition();accountingCondition.damage('motor',.5);accountingCondition.damage('freios',.8);
+const accountingService=new PitService({condition:accountingCondition,getFuel:()=>3,setFuel(){},pay:cost=>account.spend(cost,true)?{...account.payment}:false,refund:(cost,job)=>account.refund(cost,job.payment)});
+assert(accountingService.startRepair('motor','proper'));assert(accountingService.startRepair('freios','proper'));assert(account.spend(4));
+accountingService.step(accountingService.job.seconds/2);accountingService.cancel();
+assert.equal(account.mode.state.cash,55);assert.equal(account.mode.state.profile.fund,296);assert.equal(account.wallet,351,'only installed work and food remain charged');
+assert.deepEqual(CAFE_MENU.map(item=>item.id),['cafe','pao','doce']);assert(CAFE_MENU.every(item=>item.price>0));
 condition.reset();for(const p of CAR_PARTS){condition.damage(p.id,.65);const quote=condition.quote(p.id,'proper');condition.applyRepair(quote,1);}assert.equal(condition.health,1);assert.equal(condition.factors.power,1);
 
 function speedAfter(condition){const car=new TestCar(data);car.condition=condition;car.reset(data.samples.findIndex(p=>p[0]>=1150));for(let i=0;i<360;i++)car.step({throttle:1,brake:0,left:0,right:0},1/120);return Math.hypot(car.vx,car.vy);}
