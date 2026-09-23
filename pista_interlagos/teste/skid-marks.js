@@ -54,7 +54,9 @@ export class SkidMarks {
   this.previous={x:car.x,y:car.y};
   const c=Math.cos(car.heading),s=Math.sin(car.heading);
   const longitudinal=car.vx*c+car.vy*s,lateral=-car.vx*s+car.vy*c;
-  for(const w of this.wheels){
+  for(const [i,w] of this.wheels.entries()){
+   // A wheel in the air, or on a car lying on its side or roof, leaves no rubber.
+   if(car.wheelLoad&&!(car.wheelLoad[i]>0)){w.last=null;w.strength=0;continue;}
    const x=car.x+c*w.x-s*w.y,y=car.y+s*w.x+c*w.y;
    const angle=car.heading+(w.front?car.steer:0),nx=-Math.sin(angle),ny=Math.cos(angle);
    const surface=car.sample(x,y);

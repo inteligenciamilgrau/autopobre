@@ -37,7 +37,7 @@ const p=real.geometry.attributes.position;
 for(let i=0;i<real.count*4;i+=4)maxLength=Math.max(maxLength,Math.hypot(p.getX(i+2)-p.getX(i),p.getZ(i+2)-p.getZ(i)));
 check('continuous_short_segments',maxLength<2);
 const shared=new SkidMarks(2048),trails=RIVAL_ROSTER.map(()=>shared.createTrail());
-const rivals=new RaceField(data,{onStep:(r,i,input,dt)=>trails[i].update(r.car,input,dt),onReset:()=>trails.forEach(t=>t.breakTrails())});
+const rivals=new RaceField(data,{seed:1,onStep:(r,i,input,dt)=>trails[i].update(r.car,input,dt),onReset:()=>trails.forEach(t=>t.breakTrails())});
 const player=new TestCar(data);player.x+=10000;
 for(let i=0;i<120*45;i++)rivals.step(player,1/120,3);
 shared.flush();check('all_fourteen_ai_cars_leave_braking_marks',trails.every(t=>t.wheels.some(w=>w.segments>0)));

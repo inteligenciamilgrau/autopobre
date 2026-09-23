@@ -1,0 +1,22 @@
+Texturas do interior do Opala 99 — todas CC0 1.0 (domínio público)
+
+carbono_*            Fabric 004 (fibra de carbono) — ambientCG
+                     https://ambientcg.com/view?id=Fabric004
+chapa_xadrez_*       Diamond Plate 001 — ambientCG
+                     https://ambientcg.com/view?id=DiamondPlate001
+aluminio_escovado_*  Metal 009 — ambientCG
+                     https://ambientcg.com/view?id=Metal009
+couro_painel_*       Leather 026 — ambientCG
+                     https://ambientcg.com/view?id=Leather026
+borracha_*           Rubber 004 — ambientCG
+                     https://ambientcg.com/view?id=Rubber004
+camurca_*            Scuba Suede — Poly Haven
+                     https://polyhaven.com/a/scuba_suede
+
+Licenças: https://docs.ambientcg.com/license/ e https://polyhaven.com/license
+
+Mapas 1K baixados dos arquivos oficiais em 23/09/2026, reduzidos para
+512 px (1024 px no couro do painel) e recomprimidos em JPEG para a web.
+A cor do carbono e da camurça foi neutralizada para cinza: o tom final
+vem do material no jogo. Mostradores, visor LCD, etiquetas, adesivos e o
+bordado do banco são desenhados em canvas por teste/cockpit-materials.js.

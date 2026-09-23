@@ -52,8 +52,9 @@ road['surface']='LiDAR PMSP 2017, planos locais, perfil suavizado';road['nominal
 for side in [-1,1]:
  ribbon('Linha_limite_'+str(side),lambda i:side*(A[i,4]/2-.30),lambda i:side*(A[i,4]/2-.15),[white],height=.055)
 turn=np.arctan2(A[:,8],A[:,7]);curv=np.angle(np.exp(1j*(np.roll(turn,-4)-np.roll(turn,4))))/16
+# Zebras onde a ortofoto de 20 cm mostra pintura de zebra (colunas 13 direita, 14 esquerda).
 for side in [-1,1]:
- ribbon('Zebras_'+str(side),lambda i:side*A[i,4]/2,lambda i:side*(A[i,4]/2+1.05),[yellow,green],mask=lambda i,side=side:side*curv[i]>.0027,height=.075)
+ ribbon('Zebras_'+str(side),lambda i:side*A[i,4]/2,lambda i:side*(A[i,4]/2+1.05),[yellow,green],mask=lambda i,side=side:A[i,13 if side<0 else 14]>.5 and A[(i+1)%N,13 if side<0 else 14]>.5,height=.075)
 # Malha de terreno com ortofoto municipal georreferenciada.
 T=np.load(R/'dados/terreno.npz');xx,yy=np.meshgrid(T['x'],T['y']);zz=T['visual_z'];ny,nx=zz.shape
 verts=np.column_stack([xx.ravel(),yy.ravel(),zz.ravel()]).tolist()
@@ -86,15 +87,13 @@ for i in range(0,N,4):
  if s<250 or s>3820 or 750<s<1570:
   j=(i+4)%N
   for side in [-1,1]:
+   # O muro dos boxes (pit lane) substitui a protecao esquerda na reta principal.
+   if side==1 and (s<300 or s>3890):continue
    off=side*(A[i,4]/2+(2.5 if s<250 else 5))
    p=Vector(pos(i,off,.6));q=Vector(pos(j,off,.6));mid=(p+q)/2
    ob=cube('Muro_protecao',mid,((q-p).length+.06,.30,1.1),concrete,angle=math.atan2(q.y-p.y,q.x-p.x))
    ob.rotation_euler=(q-p).to_track_quat('X','Z').to_euler()
-for i in range(5,112,8):
- trackcube('Box_garagem',i,27,0,12,15.4,6,concrete)
- trackcube('Box_cobertura',i,27,0,14,16,0.3,blue,zlift=6)
- trackcube('Box_porta',i,20.8,0,.12,11,3.8,metal,zlift=.2)
- trackcube('Box_janela',i,20.7,0,.15,12,1,glass,zlift=4.5)
+# Pit lane, muros e garagens sao montados no navegador a partir de dados/pista.json (bloco pit).
 for i in range(2060,2135,14):
  for level in range(5):trackcube('Arquibancada',i,-21-level*1.2,0,1.3,26,.65,concrete,zlift=level*.65)
 # Portico de largada simples, sem marcas inventadas.
@@ -130,8 +129,12 @@ print('TRACK_EXPORTED',flush=True)
 bpy.ops.object.select_all(action='DESELECT');road.select_set(True)
 bpy.ops.export_scene.gltf(filepath=str(R/'exports/interlagos_colisao.glb'),use_selection=True,export_format='GLB')
 bpy.ops.object.select_all(action='DESELECT')
+CAR=R.parent/'modelo_3d/v03_lateral/exports/opala99_assinaturas_omp.glb'
+if not CAR.exists():
+ print('Modelo do carro ausente; GLBs exportados, cena .blend sem o Opala.',flush=True)
+ bpy.ops.wm.save_as_mainfile(filepath=str(R/'interlagos_opala99.blend'));print('BLENDER_COMPLETE',flush=True);raise SystemExit(0)
 before=set(bpy.data.objects)
-bpy.ops.import_scene.gltf(filepath=str(R.parent/'modelo_3d/v03_lateral/exports/opala99_assinaturas_omp.glb'))
+bpy.ops.import_scene.gltf(filepath=str(CAR))
 new=set(bpy.data.objects)-before
 root=bpy.data.objects.new('OPALA_TESTE_ROOT',None);carcol.objects.link(root)
 for ob in new:

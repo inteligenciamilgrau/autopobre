@@ -38,7 +38,7 @@ for(let i=80;i<300;i+=11)for(const d of [-7.6,7.6]){
 scene.traverse(o=>{o.geometry?.dispose();});
 const report=[];
 for(const active of [false,true]){
- const m=Object.create(ImmersiveMode.prototype);Object.assign(m,{data,car:new TestCar(data),state:new ImmersiveState(),field:new RaceField(data),parts:{reset(){}},contacts(){},sync(){},wallImpact(){},freeTotalLaps:3});
+ const m=Object.create(ImmersiveMode.prototype);Object.assign(m,{data,car:new TestCar(data),state:new ImmersiveState(),field:new RaceField(data,{seed:1}),parts:{reset(){}},contacts(){},sync(){},wallImpact(){},freeTotalLaps:3});
  m.car.resetGrid();m.resetField();if(active){m.state.active=true;m.state.phase='race';m.state.fuel=12;m.state.health=1;m.raceProgress=0;m.previousS=m.car.surface.s;m.debrisTimer=1e9;m.contactCooldown=0;}
  const initial=m.car.surface.s;assert(initial>1100&&m.rivals.every(r=>r.car.surface.s>initial&&r.car.surface.s<L),'all cars behind the stripe');
  let steps=0,offroad=0;
@@ -49,7 +49,7 @@ for(const active of [false,true]){
  report.push({immersive:active,laps:m.car.laps,time:finishTime,best:m.finishBest,offroad});
 }
 // The actual AI driver styles must also navigate both unlike turns for three laps.
-const field=new RaceField(data),parked=new TestCar(data);parked.resetGrid();field.reset(parked.surface.s,{grid:true});parked.x=600;parked.y=450;parked.surface=parked.sample(parked.x,parked.y);
+const field=new RaceField(data,{seed:1}),parked=new TestCar(data);parked.resetGrid();field.reset(parked.surface.s,{grid:true});parked.x=600;parked.y=450;parked.surface=parked.sample(parked.x,parked.y);
 let steps=0,offroad=0;while(field.rivals.some(r=>!r.finished)&&steps<120*250){field.step(parked,1/120,3);for(const r of field.rivals)if(!r.car.surface.onRoad)offroad++;steps++;}
 assert(field.rivals.every(r=>r.finished&&r.car.best>20),'all 14 AI finish with measured lap times');assert(offroad/(steps*14)<.03);
 console.log(JSON.stringify({passed:true,length,bankPercent:16,report,rivalFinishTimes:field.rivals.map(r=>({number:r.entry.number,time:r.finishTime}))},null,2));
