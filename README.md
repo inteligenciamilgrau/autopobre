@@ -43,7 +43,7 @@ Validação: `testar_eventos_audio.mjs`, `testar_colisoes.mjs`, `testar_saldo.mj
 
 ### GitHub Pages
 
-Em **Settings → Pages → Build and deployment → Source**, selecione **GitHub Actions**. O fluxo [Publicar Auto-Pobre Racing](.github/workflows/pages.yml) instala a dependência pelo lock, testa as preferências, gera `dist/` e publica somente esse conteúdo. Cada envio para `main` atualiza o jogo; também é possível executá-lo manualmente pela aba **Actions → Publicar Auto-Pobre Racing → Run workflow**.
+Em **Settings → Pages → Build and deployment → Source**, selecione **GitHub Actions**. O fluxo [Publicar Auto-Pobre Racing](.github/workflows/pages.yml) instala a dependência pelo lock, testa as preferências, gera `dist/` e publica somente esse conteúdo. A publicação é manual: enviar para `main` não muda o jogo no ar. Para publicar, abra **Actions → Publicar Auto-Pobre Racing → Run workflow** e informe em **versao** o que publicar (`main`, uma tag ou um commit). O Pages mantém a última versão publicada até a próxima execução. As versões que foram ao ar recebem tags `online-AAAA-MM-DD` (por exemplo, `online-2026-09-14`), que podem ser republicadas para voltar atrás.
 
 Endereço do jogo: **https://inteligenciamilgrau.github.io/autopobre/**. Aguarde o fluxo concluir com sucesso antes de abrir. Não selecione a raiz de `main` em “Deploy from a branch”: ela contém o código-fonte, e o jogo precisa da etapa de geração.
 

@@ -1,9 +1,14 @@
 name: Publicar Auto-Pobre Racing
 
+# Publishing is manual: pushes to main no longer replace the live game.
+# Actions -> Publicar Auto-Pobre Racing -> Run workflow, choosing what to publish.
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+    inputs:
+      versao:
+        description: 'Branch, tag ou commit a publicar (ex.: main ou online-2026-09-14)'
+        required: true
+        default: main
 
 permissions:
   contents: read
@@ -23,6 +28,7 @@ jobs:
       - name: Baixar o codigo
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          ref: ${{ inputs.versao }}
           persist-credentials: false
       - name: Preparar Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
