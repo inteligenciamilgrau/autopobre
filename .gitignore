@@ -58,13 +58,18 @@ desktop.ini
 # and prompts used to build the car, the driver and the game screens.
 # Local model workshop. Runtime copies stay in teste/assets/.
 # Unversioned originals remain on disk; keep a separate backup of the workshop.
-# Only the editable V4 car scenes and their game export script are versioned.
+# Only the editable V4 and V5 car scenes and the scripts that build and export them are versioned.
 /modelo_3d/*
 !/modelo_3d/v04_fechamentos/
 /modelo_3d/v04_fechamentos/*
 !/modelo_3d/v04_fechamentos/*.blend
 !/modelo_3d/v04_fechamentos/README.md
+!/modelo_3d/v05_opala_real/
+/modelo_3d/v05_opala_real/*
+!/modelo_3d/v05_opala_real/*.blend
+!/modelo_3d/v05_opala_real/README.md
 !/modelo_3d/scripts/
 /modelo_3d/scripts/*
 !/modelo_3d/scripts/exportar_glb_jogo.py
+!/modelo_3d/scripts/remodelar_opala_v05.py
 /pista_interlagos/teste/assets/piloto/referencia_capacete.jpg

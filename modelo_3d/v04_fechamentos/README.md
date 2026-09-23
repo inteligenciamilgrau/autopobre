@@ -1,5 +1,7 @@
 # Opala 99 — modelos editáveis (V4)
 
+> A fonte atual do carro é a [V5](../v05_opala_real/README.md), gerada a partir destes arquivos pelo script `remodelar_opala_v05.py`. Os `.blend` da V4 ficam como ponto de partida desse script.
+
 Estes dois arquivos Blender são a fonte do carro do jogo. Cada pintura é um arquivo separado e gera o seu GLB em `pista_interlagos/teste/assets/`.
 
 | Pintura | Blender editável | GLB do jogo |

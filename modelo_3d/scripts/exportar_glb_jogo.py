@@ -1,7 +1,7 @@
 """Export the open Opala 99 .blend to the game GLB, without changing the .blend.
 
 Usage, from the project root (the output defaults to pista_interlagos/teste/assets/):
- blender --background modelo_3d/v04_fechamentos/opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d/scripts/exportar_glb_jogo.py [-- output.glb]
+ blender --background modelo_3d/v05_opala_real/opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d/scripts/exportar_glb_jogo.py [-- output.glb]
 """
 import bpy,sys
 from pathlib import Path

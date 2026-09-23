@@ -4,7 +4,7 @@ Versão 1 · 13/09/2026. Pista 3D editável, com o Opala 99, e teste dirigível 
 
 **Modo opcional: [Auto-Pobre Racing com Stevan Gaipo](VERSAO_IMERSIVA.md).** Marque “Versão Imersiva opcional” no menu para jogar a vaquinha com piadas, uma corrida contra 14 adversários, combustível e avarias, resgate com controle do freio, vistoria e o pódio eterno em sexto. Os prêmios ajudam a tirar a Blazer da oficina. A sessão livre continua disponível com a opção desmarcada.
 
-O carro foi atualizado para a [V4 com assoalho e fechamentos corrigidos](../modelo_3d/v04_fechamentos/README.md), nas duas pinturas. O assoalho contínuo, suas uniões com as soleiras e os anteparos fecham os vãos que deixavam a pista aparecer por dentro do carro. As chapas receberam espessura; a estrutura permanece visível também na câmera interna. A lateral refinada da V3 foi mantida.
+O carro foi atualizado para a [V5 com as medidas do Opala cupê](../modelo_3d/v05_opala_real/README.md), nas duas pinturas: teto 11 cm mais baixo em arco até a traseira, traseira mais longa e sem para-choque, faróis redondos, ponta do capô com o "eletric", redes de janela com 6 × 4 tiras largas e, na pintura OMP, o capô atual (RDO DO ÓLEO, OMP e nextlane). Rodas, bitola e entre-eixos continuam os mesmos da física. O assoalho e os fechamentos da [V4](../modelo_3d/v04_fechamentos/README.md) foram mantidos e acompanham a nova carroceria.
 
 O teste no navegador agora usa asfalto texturizado, com granulação em escala métrica, rugosidade, variações de desgaste, juntas discretas e borracha nas frenagens. Os detalhes fixos no chão ajudam a perceber o deslocamento e a velocidade. A [textura e seu registro de geração](teste/assets/texturas/README.md) estão incluídos localmente.
 
@@ -159,7 +159,7 @@ Blender: **X = leste, Y = norte, Z = cima**, em metros. Origem dos dados: E 3270
 
 Scripts, na ordem: `baixar_lidar.py` (só se precisar obter novamente a fonte), `extrair_tracado.py` (registro inicial do mapa FIA), `refinar_tracado.py` (ortofoto de 20 cm: eixo, larguras, zebras e pit lane), `processar_relevo.py` e `criar_blender.py`, este executado pelo Blender. Sem o modelo do carro em `../modelo_3d`, o Blender exporta os GLBs e salva a cena sem o Opala. Dependências Python locais estão em `scripts/_deps`. Para o teste pronto não é necessário instalar essas bibliotecas: basta o Python existente, os arquivos entregues e um navegador com WebGL2.
 
-O carro vem dos dois `.blend` editáveis em `../modelo_3d/v04_fechamentos/`. O [README do modelo](../modelo_3d/v04_fechamentos/README.md) explica como editá-los e exportar os GLBs de `teste/assets/`. A verificação no navegador está em `scripts/verificar_fechamentos.py`, com resultado em `dados/validacao_fechamentos_browser.json` e capturas `renders/fechamento_*.png`.
+O carro vem dos dois `.blend` editáveis em `../modelo_3d/v05_opala_real/`. O [README do modelo](../modelo_3d/v05_opala_real/README.md) explica como editá-los e exportar os GLBs de `teste/assets/`. A verificação no navegador está em `scripts/verificar_fechamentos.py`, com resultado em `dados/validacao_fechamentos_browser.json` e capturas `renders/fechamento_*.png`.
 
 ## Verificação
 

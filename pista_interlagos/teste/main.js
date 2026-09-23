@@ -143,7 +143,7 @@ async function setLivery(value){
  const token=++loadToken;status('Carregando Opala 99…');
  $('skinButton').disabled=true;$('skinButton').textContent='Carregando pintura…';$('livery').disabled=true;
  try{
- const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=04-fechamentos`);
+ const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=05-opala-real`);
  if(token!==loadToken)return;
  if(model)carBody.remove(model);model=gltf.scene;wheels=[];
  model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;

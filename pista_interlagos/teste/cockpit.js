@@ -68,8 +68,9 @@ export function createCockpit(renderer){
   bar([.28,1.36,side*.59],[-.63,1.36,side*.59],.029);
   bar([.58,.60,side*.70],[-.62,.88,side*.70],.024);
   bar([-.63,.31,side*.63],[-.63,1.36,side*.59],.032);
-  for(let i=0;i<5;i++)box([-.02,.93+i*.075,side*.735],[.94,.018,.008],m.webbing);
-  for(let i=0;i<9;i++)box([-.46+i*.11,1.075,side*.735],[.018,.31,.008],m.webbing);
+  // Window net as on the real car: 4 rows and 6 columns of 40 mm webbing.
+  for(let i=0;i<4;i++)box([-.02,.93+i*.10,side*.735],[.94,.04,.008],m.webbing);
+  for(let i=0;i<6;i++)box([-.46+i*.18,1.08,side*.738],[.04,.34,.008],m.webbing);
  }
  bar([.29,1.36,-.60],[.29,1.36,.60],.029);
  bar([-.63,1.36,-.59],[-.63,1.36,.59],.032);
