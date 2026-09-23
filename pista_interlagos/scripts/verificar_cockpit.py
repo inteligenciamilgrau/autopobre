@@ -35,8 +35,8 @@ with sync_playwright() as p:
   info=page.evaluate('interlagos.cockpitInfo()');check('second_livery_cockpit',info['visible'] and not info['externalVisible']);page.screenshot(path=str(ROOT/'renders/cockpit_seiva.png'));page.keyboard.up('KeyS')
   page.click('#cockpitButton');frame();info=page.evaluate('interlagos.cockpitInfo()');check('external_car_restored',not info['visible'] and info['externalVisible'] and info['fov']==58)
   modes=[]
-  for _ in range(5):page.keyboard.press('KeyC');modes.append(page.evaluate('interlagos.state.mode'))
-  check('five_camera_cycle',modes==['hood','cockpit','aerial','orbit','chase'])
+  for _ in range(6):page.keyboard.press('KeyC');modes.append(page.evaluate('interlagos.state.mode'))
+  check('six_camera_cycle',modes==['close','hood','cockpit','aerial','orbit','chase'])
   page.click('#cockpitButton');page.set_viewport_size({'width':1280,'height':720});frame();page.screenshot(path=str(ROOT/'renders/cockpit_16x9.png'))
   check('no_webgl_errors',not report['errors']);report['passed']=True
  finally:

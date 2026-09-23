@@ -101,9 +101,9 @@ with sync_playwright() as p:
             enter_track(page)
         race_options(page,camera='chase');enter_track(page)
         modes=[]
-        for _ in range(5):
+        for _ in range(6):
             page.keyboard.press('KeyC'); modes.append(page.evaluate('interlagos.state.mode'))
-        check('camera_cycle',modes==['hood','cockpit','aerial','orbit','chase'])
+        check('camera_cycle',modes==['close','hood','cockpit','aerial','orbit','chase'])
         page.click('#orbitButton')
         check('orbit_button',page.evaluate("interlagos.state.mode==='orbit'"))
         check('no_browser_errors',not report['errors'])

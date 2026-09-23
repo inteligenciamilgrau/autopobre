@@ -55,8 +55,8 @@ with sync_playwright() as p:
     page.screenshot(path=str(ROOT / 'renders/boxes_box99.png'))
     page.click('#pitLeave')
     wait_js(page, '!interlagos.pitInfo().opened')
-    # Overview from above: C cycles chase, hood, cockpit, aerial.
-    for _ in range(3):
+    # Overview from above: C cycles chase, close, hood, cockpit, aerial.
+    for _ in range(4):
         page.keyboard.press('KeyC')
     for name, s in [('aerea_entrada', 90), ('aerea_garagens', 480), ('aerea_saida', 720)]:
         page.evaluate(PLACE, s)

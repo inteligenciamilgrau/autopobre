@@ -25,7 +25,7 @@ with sync_playwright() as p:
  page.click('#menuButton');page.select_option('#livery','seiva_danilo');wait_js(page,"interlagos.state.livery==='seiva_danilo'",timeout=60000)
  state=page.evaluate('interlagos.state')
  report={'errors':errors,'before':before,'accelerating':after,'steering':steering,'braking':braking,'camera':camera,'state':state}
- report['passed']=not errors and after['speed']>before['speed']+5 and braking['speed']<after['speed'] and camera=='hood' and state['wheels']==4 and state['livery']=='seiva_danilo'
+ report['passed']=not errors and after['speed']>before['speed']+5 and braking['speed']<after['speed'] and camera=='close' and state['wheels']==4 and state['livery']=='seiva_danilo'
  race_options(page,camera='chase');page.evaluate('interlagos.reposition(180)');enter_track(page);page.wait_for_timeout(1500)
  page.screenshot(path=str(R/'renders/teste_s_do_senna.png'))
  (R/'dados/validacao_browser.json').write_text(json.dumps(report,indent=2))

@@ -66,7 +66,8 @@ let sky,landscape,landscapeField,terrainTextures;
 let renderer;
 const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,6500);
 const orbit=new OrbitControls(camera,$('view'));
-orbit.enabled=false;orbit.enablePan=false;orbit.minDistance=3.2;orbit.maxDistance=45;
+const ORBIT_MAX_DISTANCE=45;
+orbit.enabled=false;orbit.enablePan=false;orbit.minDistance=3.2;orbit.maxDistance=ORBIT_MAX_DISTANCE;
 orbit.minPolarAngle=.015;orbit.maxPolarAngle=Math.PI/2;
 orbit.rotateSpeed=.8;orbit.zoomSpeed=.8;
 const orbitTarget=new THREE.Vector3(),orbitDelta=new THREE.Vector3();
@@ -74,7 +75,21 @@ const hoodEye=new THREE.Vector3(1.1,1.25,0),followOffset=new THREE.Vector3();let
 const cameraObstacles=[],cameraRay=new THREE.Raycaster(),cameraRayDirection=new THREE.Vector3();
 const obstacleMaterial=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});
 const cameraModes=CAMERA_MODES;
-const cameraReturn=new CameraReturn(),orbitSphere=new THREE.Spherical();
+const cameraReturn=new CameraReturn(),orbitSphere=new THREE.Spherical(),orbitHome=new THREE.Spherical(),orbitSeen=new THREE.Spherical();
+// Framing the orbit inherited: turn and tilt away from "looking at the car", about the vertical so the horizon stays level.
+// Also whether it keeps the chase speed widening, and the camera the mouse turned into the orbit.
+const orbitAim={yaw:0,pitch:0},orbitHomeAim={yaw:0,pitch:0},aimToCar=new THREE.Vector3(),aimView=new THREE.Vector3();let orbitSpeedFov=false,orbitFrom=null;
+function aimOffset(toCar,view,out){
+ out.yaw=wrap(Math.atan2(view.x,view.z)-Math.atan2(toCar.x,toCar.z));out.pitch=Math.asin(clamp(view.y,-1,1))-Math.asin(clamp(toCar.y,-1,1));return out;
+}
+function aimOrbit(){
+ aimToCar.subVectors(orbit.target,camera.position).normalize();
+ const yaw=Math.atan2(aimToCar.x,aimToCar.z)+orbitAim.yaw,pitch=clamp(Math.asin(clamp(aimToCar.y,-1,1))+orbitAim.pitch,-1.5,1.5);
+ camera.lookAt(aimView.set(Math.cos(pitch)*Math.sin(yaw),Math.sin(pitch),Math.cos(pitch)*Math.cos(yaw)).add(camera.position));
+}
+// Far from the car (an orbit that began in the aerial view) the camera stays high, above the trees.
+// Set before every orbit update, or the previous orbit's limit would move the next one.
+function orbitTilt(){orbit.maxPolarAngle=Math.PI/2-clamp((camera.position.distanceTo(orbit.target)-ORBIT_MAX_DISTANCE)/60,0,1)*.5;}
 const headLook={yaw:0,pitch:0};
 let pointerLocked=false,lockPending=false,lockUnavailable=!$('view').requestPointerLock;
 const isInside=()=>mode==='cockpit'||mode==='hood';
@@ -239,23 +254,40 @@ function restBodyPose(){
 }
 function setCameraMode(value){
  if(!cameraModes.includes(value))return;
- const previous=mode;mode=value;followInitialized=false;orbit.enabled=value==='orbit';$('camera').value=value;
+ // Only a follow view already drawn for this car is worth keeping when the orbit takes over.
+ const previous=mode,keepView=ready&&value==='orbit'&&previous!=='orbit'&&(followInitialized||wasGridPreview);
+ mode=value;orbitFrom=null;followInitialized=false;orbit.enabled=value==='orbit';$('camera').value=value;
  preferences.update({camera:value});
  orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;
  if(cockpit)cockpit.root.visible=value==='cockpit';if(model)model.visible=value!=='cockpit';
  document.body.classList.toggle('cockpit-mode',value==='cockpit');
  $('cockpitButton').classList.toggle('active',value==='cockpit');$('cockpitButton').setAttribute('aria-pressed',String(value==='cockpit'));
- camera.fov=value==='cockpit'?74:58;camera.near=value==='cockpit'?.025:.1;camera.updateProjectionMatrix();
+ if(!keepView)camera.fov=value==='cockpit'?74:58;camera.near=value==='cockpit'?.025:.1;camera.updateProjectionMatrix();
  if(value!=='cockpit')camera.up.set(0,1,0);
  $('orbitButton').classList.toggle('active',orbit.enabled);
  $('orbitButton').setAttribute('aria-pressed',String(orbit.enabled));
  cameraHint();
  if(orbit.enabled&&ready&&previous!=='orbit'){
   orbit.target.copy(carRoot.position).add(new THREE.Vector3(0,.85,0));
-  // Capo e aerea comecam a orbita numa distancia que enquadra o carro.
-  if(previous!=='chase')camera.position.copy(orbit.target).addScaledVector(forward,-7).add(new THREE.Vector3(0,2.8,0));
-  orbit.update();
+  // A orbita continua a vista externa atual: mesma posicao, enquadramento e campo de visao.
+  // De dentro do carro, recua atras dele na direcao do olhar e mira o carro.
+  if(!keepView){
+   if(previous==='hood'||previous==='cockpit')camera.getWorldDirection(orbitDelta);else orbitDelta.copy(forward);
+   if(orbitDelta.setY(0).lengthSq()<1e-6)orbitDelta.copy(forward).setY(0);
+   camera.position.copy(orbit.target).addScaledVector(orbitDelta.normalize(),-7).add(new THREE.Vector3(0,2.8,0));
+  }
+  // A aerea fica alem do alcance normal: a orbita comeca na mesma distancia.
+  orbit.maxDistance=keepView&&previous==='aerial'?Math.max(ORBIT_MAX_DISTANCE,camera.position.distanceTo(orbit.target)):ORBIT_MAX_DISTANCE;
+  camera.getWorldDirection(aimView);orbitTilt();orbit.update();
+  if(keepView)aimOffset(aimToCar.subVectors(orbit.target,camera.position).normalize(),aimView,orbitAim);else orbitAim.yaw=orbitAim.pitch=0;
+  aimOrbit();orbitSeen.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));orbitSpeedFov=keepView&&(previous==='chase'||previous==='close');
  }
+}
+// Mouse, wheel and touch turn the current view into the orbit; C still moves on from that view.
+function orbitFromView(){if(mode==='orbit')return;const from=mode;setCameraMode('orbit');orbitFrom=from;}
+function nextCameraMode(){
+ const step=m=>cameraModes[(cameraModes.indexOf(m)+1)%cameraModes.length],next=step(orbitFrom??mode);
+ return next===mode?step(next):next;
 }
 function cameraHint(){
  $('cameraHint').textContent=pointerLocked?'Mouse capturado · mova para olhar · Esc libera · retorno após 3 s em movimento':lockUnavailable?'Arraste para girar · retorno após 3 s em movimento':'Clique na pista para capturar o mouse · Esc libera';
@@ -278,13 +310,13 @@ window.addEventListener('blur',()=>blockedCameraTouches.clear());
 $('view').addEventListener('pointerdown',e=>{
  if(!ready||paused||pitstop?.opened||e.button!==0||immersive?.active&&!immersive.allowsPointer())return;
  cameraReturn.manual(performance.now());
- const preparing=immersive?.active&&immersive.state.phase==='prepare';if(preparing){previewOrbit=true;setCameraMode('orbit');orbit.target.copy(carRoot.position).add(new THREE.Vector3(0,.85,0));orbit.update();}
+ const preparing=immersive?.active&&immersive.state.phase==='prepare';if(preparing){previewOrbit=true;orbitFromView();orbit.target.copy(carRoot.position).add(new THREE.Vector3(0,.85,0));orbit.update();}
  if(!preparing&&e.pointerType==='mouse'&&!lockUnavailable&&$('view').requestPointerLock){
   e.stopImmediatePropagation();
   if(pointerLocked||lockPending)return;
   lockPending=true;
   try{const request=$('view').requestPointerLock();request?.catch(lockFailed);}catch{lockFailed();}
- }else{if(mode!=='orbit')setCameraMode('orbit');$('view').classList.add('dragging');}
+ }else{orbitFromView();$('view').classList.add('dragging');}
 },{capture:true});
 document.addEventListener('pointerlockchange',()=>{
  const wasLocked=pointerLocked;pointerLocked=document.pointerLockElement===$('view');lockPending=false;
@@ -301,7 +333,7 @@ document.addEventListener('mousemove',e=>{
   headLook.yaw=clamp(headLook.yaw+e.movementX*.0025,-1.45,1.45);
   headLook.pitch=clamp(headLook.pitch-e.movementY*.0025,-.60,.45);
  }else{
-  if(mode!=='orbit')setCameraMode('orbit');
+  orbitFromView();
   orbit.rotateLeft(e.movementX*.0025);orbit.rotateUp(e.movementY*.0025);
  }
  cameraReturn.manual(performance.now());
@@ -309,7 +341,14 @@ document.addEventListener('mousemove',e=>{
 $('view').addEventListener('pointermove',e=>{if(!pointerLocked&&e.buttons)cameraReturn.manual(performance.now());});
 window.addEventListener('pointerup',()=>$('view').classList.remove('dragging'));
 $('view').addEventListener('pointercancel',()=>$('view').classList.remove('dragging'));
-$('view').addEventListener('wheel',e=>{if(ready&&!paused){if(immersive?.active&&immersive.state.phase==='prepare')previewOrbit=true;if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}if(mode!=='orbit')setCameraMode('orbit');cameraReturn.manual(performance.now());}},{capture:true,passive:true});
+$('view').addEventListener('wheel',e=>{if(ready&&!paused){if(immersive?.active&&immersive.state.phase==='prepare')previewOrbit=true;if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}orbitFromView();cameraReturn.manual(performance.now());}},{capture:true,passive:true});
+// Follow cameras sit behind the smoothed heading and look ahead of the car.
+const followsCar=m=>m==='chase'||m==='close'||m==='aerial';
+function followPose(m,p,vel){
+ if(m==='aerial'){desired.copy(p).addScaledVector(chaseForward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(chaseForward,22);}
+ else if(m==='close'){desired.copy(p).addScaledVector(chaseForward,-5.6-Math.min(vel*.02,1)).add(new THREE.Vector3(0,2.2,0));look.copy(p).addScaledVector(chaseForward,9).add(new THREE.Vector3(0,.9,0));}
+ else{desired.copy(p).addScaledVector(chaseForward,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(chaseForward,13).add(new THREE.Vector3(0,1,0));}
+}
 function updateCamera(dt){
  if(pitstop?.opened)return;
  const phase=immersive?.active?immersive.state.phase:'free';if(phase!==previewPhase){previewPhase=phase;previewOrbit=false;}
@@ -319,7 +358,7 @@ function updateCamera(dt){
  if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
  const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
  // Speed widens the view a little; rough ground and very high speed add a fine shake.
- const speedFov=(mode==='cockpit'?74:58)+(mode==='aerial'||mode==='orbit'?0:clamp((vel-12)/45,0,1)*(mode==='cockpit'?5:7));
+ const speedFov=(mode==='cockpit'?74:58)+(mode==='aerial'||mode==='orbit'&&!orbitSpeedFov?0:clamp((vel-12)/45,0,1)*(mode==='cockpit'?5:7));
  if(Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1?speedFov:camera.fov+(speedFov-camera.fov)*(1-Math.exp(-dt*3));camera.updateProjectionMatrix();}
  const shakeTime=performance.now()/1000,shake=paused||mode==='aerial'||mode==='orbit'?0:roughRide*.05+clamp((vel-42)/18,0,1)*.01;
  if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
@@ -332,12 +371,25 @@ function updateCamera(dt){
   camera.up.set(0,1,0).transformDirection(carBody.matrixWorld);camera.lookAt(look);
  } else if(mode==='orbit'){
   orbitTarget.copy(p).add(new THREE.Vector3(0,.85,0));
-  orbitDelta.subVectors(orbitTarget,orbit.target);camera.position.add(orbitDelta);orbit.target.copy(orbitTarget);orbit.update();
+  orbitDelta.subVectors(orbitTarget,orbit.target);camera.position.add(orbitDelta);orbit.target.copy(orbitTarget);
+  orbitTilt();orbit.update();
+  orbitSphere.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));
+  // A sideways framing only fits the view it came from: turning the orbit by hand lets it go,
+  // or the car would slide off to the side as the camera comes down towards the horizon.
+  orbitAim.yaw*=Math.exp(-4*(Math.abs(wrap(orbitSphere.theta-orbitSeen.theta))*Math.sin(orbitSphere.phi)+Math.abs(orbitSphere.phi-orbitSeen.phi)));
   if(centering){
-   orbitSphere.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));
-   const behind=Math.atan2(-forward.x,-forward.z);
-   orbitSphere.theta+=wrap(behind-orbitSphere.theta)*blend;
-   orbitSphere.phi+=(1.25-orbitSphere.phi)*blend;
+   // The mouse only looked around a follow camera: return to that camera's own place. Otherwise go behind the car.
+   if(followsCar(orbitFrom)){
+    followPose(orbitFrom,p,vel);
+    // That camera frames the road ahead, not the car: blend the aim to its framing too.
+    aimOffset(aimToCar.subVectors(orbit.target,desired).normalize(),aimView.subVectors(look,desired).normalize(),orbitHomeAim);
+    orbitAim.yaw+=wrap(orbitHomeAim.yaw-orbitAim.yaw)*blend;orbitAim.pitch+=(orbitHomeAim.pitch-orbitAim.pitch)*blend;
+    orbitHome.setFromVector3(desired.sub(orbit.target));
+   }
+   else orbitHome.set(Math.min(orbitSphere.radius,ORBIT_MAX_DISTANCE),1.25,Math.atan2(-forward.x,-forward.z));
+   orbitSphere.theta+=wrap(orbitHome.theta-orbitSphere.theta)*blend;
+   orbitSphere.phi+=(orbitHome.phi-orbitSphere.phi)*blend;
+   orbitSphere.radius+=(orbitHome.radius-orbitSphere.radius)*blend;orbit.maxDistance=Math.max(ORBIT_MAX_DISTANCE,orbitSphere.radius);
    camera.position.copy(orbit.target).add(orbitDelta.setFromSpherical(orbitSphere));orbit.update();
   }
   // Evita entrar no solo nas subidas e nas bordas inclinadas da pista.
@@ -347,10 +399,9 @@ function updateCamera(dt){
   cameraRay.far=cameraRayDirection.length();cameraRay.set(orbit.target,cameraRayDirection.normalize());
   const obstruction=cameraRay.intersectObjects(cameraObstacles,false)[0];
   if(obstruction)camera.position.copy(orbit.target).addScaledVector(cameraRayDirection,Math.max(.2,obstruction.distance-.3));
-  camera.lookAt(orbit.target);
+  aimOrbit();orbitSeen.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));
  } else {
- if(mode==='aerial'){desired.copy(p).addScaledVector(chaseForward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(chaseForward,22);}
- else{desired.copy(p).addScaledVector(chaseForward,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(chaseForward,13).add(new THREE.Vector3(0,1,0));}
+ followPose(mode,p,vel);
  // Smooth the offset, not the world position: frame-rate changes must not
  // make the car surge back and forth relative to its following camera.
  desired.sub(p);if(!followInitialized){followOffset.copy(desired);followInitialized=true;}else followOffset.lerp(desired,1-Math.exp(-dt*5));
@@ -451,7 +502,7 @@ const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({onResta
 const pilotPicker=new PilotPicker(),automaticRecords=new AutomaticRecords(pilotStorage()),automaticAIRecords=new AutomaticAIRecords(pilotStorage());
 $('recordsButton').onclick=()=>{lapRecords.circuit=circuit.id;lapRecords.open();};
 $('settingsButton').onclick=openSettings;
-mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(cameraModes[(cameraModes.indexOf(mode)+1)%cameraModes.length]);},onSkin:cycleLivery,onReset:()=>{if(ready&&!immersive.finishing){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
+mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(nextCameraMode());},onSkin:cycleLivery,onReset:()=>{if(ready&&!immersive.finishing){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
 document.addEventListener('keydown',e=>{
  if(lapRecords.dialog.open)return;
  if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape'||e.code==='KeyP')openSettings();else if(pitstop.coffee&&!paused){if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(e.code==='KeyE'&&!e.repeat){e.preventDefault();pitstop.interact();}}return;}
@@ -459,7 +510,7 @@ document.addEventListener('keydown',e=>{
  if(['INPUT','SELECT'].includes(e.target.tagName)&&!['Escape','KeyP'].includes(e.code))return;
  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat||!ready)return;
  if(!paused&&immersive?.handleKey(e.code))return;
- if(e.code==='KeyC')setCameraMode(cameraModes[(cameraModes.indexOf(mode)+1)%cameraModes.length]);
+ if(e.code==='KeyC')setCameraMode(nextCameraMode());
  if(e.code==='KeyR'&&!immersive.finishing)reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
  if(e.code==='KeyV')cycleLivery();
@@ -572,7 +623,7 @@ async function loadCircuit(){
   cockpitInfo:()=>({...cockpit.info(),eyeLocal:carBody.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
    renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray()}),
   viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs}),
-  cameraSnapshot:()=>({position:camera.position.toArray(),target:orbit.target.toArray(),car:carRoot.position.toArray(),distance:camera.position.distanceTo(orbit.target),ground:car.sample(camera.position.x,-camera.position.z).z}),
+  cameraSnapshot:()=>({position:camera.position.toArray(),direction:camera.getWorldDirection(new THREE.Vector3()).toArray(),fov:camera.fov,roll:Math.asin(clamp(new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion).y,-1,1)),target:orbit.target.toArray(),car:carRoot.position.toArray(),distance:camera.position.distanceTo(orbit.target),ground:car.sample(camera.position.x,-camera.position.z).z}),
   wheelSnapshot:()=>{carRoot.updateMatrixWorld(true);const inverse=carRoot.getWorldQuaternion(new THREE.Quaternion()).invert();return wheels.map(w=>{const axle=new THREE.Vector3(0,0,1).applyQuaternion(w.obj.getWorldQuaternion(new THREE.Quaternion())).applyQuaternion(inverse);return {name:w.obj.name,front:w.front,angle:Math.atan2(axle.x,axle.z),axle:axle.toArray()};});},
   get state(){return {paused,automatic,mode,livery:activeLivery,wheels:wheels.length,drawCalls:renderer.info.render.calls};}};
  return true;

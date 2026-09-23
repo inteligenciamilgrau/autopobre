@@ -1,6 +1,6 @@
 import {circuitId} from './circuits.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
-export const CAMERA_MODES=Object.freeze(['chase','hood','cockpit','aerial','orbit']);
+export const CAMERA_MODES=Object.freeze(['chase','close','hood','cockpit','aerial','orbit']);
 const liveries=['assinaturas_omp','seiva_danilo'];
 export function normalizePreferences(value){
  const source=value&&typeof value==='object'?value:{};
