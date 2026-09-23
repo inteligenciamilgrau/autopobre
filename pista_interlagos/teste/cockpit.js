@@ -107,7 +107,7 @@ export function createCockpit(){
  function update(car,dt,powertrain){
   const speed=Math.hypot(car.vx,car.vy)*3.6,gear=Math.min(5,1+Math.floor(speed/42));
   const rpm=powertrain?.rpm??(speed<2?1100:Math.min(7800,1800+(speed%42)/42*5700));
-  wheelTurn.rotation.z=steeringWheelAngle(car.steer);
+  wheelTurn.rotation.z=steeringWheelAngle(car.steerVisual??car.steer);
   tach.rotation.z=(225-rpm/8000*270)*Math.PI/180;
   oil.rotation.z=(225-(3.8+rpm/8000*1.2)/8*270)*Math.PI/180;
   water.rotation.z=(225-86/120*270)*Math.PI/180;

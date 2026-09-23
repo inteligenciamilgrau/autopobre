@@ -4,392 +4,392 @@ export const AI_REFERENCE_TIMES=[
   "circuit": "interlagos",
   "mode": "normal",
   "number": "73",
-  "bestLap": 146.167,
-  "bestRace": 443.108
+  "bestLap": 145.333,
+  "bestRace": 440.25
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "00",
-  "bestLap": 151.5,
-  "bestRace": 460.275
+  "bestLap": 150.533,
+  "bestRace": 454.933
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "7",
-  "bestLap": 149.167,
-  "bestRace": 454.025
+  "bestLap": 148.975,
+  "bestRace": 451.492
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "64",
-  "bestLap": 151.875,
-  "bestRace": 462.192
+  "bestLap": 151.142,
+  "bestRace": 457.55
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "2",
-  "bestLap": 146.05,
-  "bestRace": 449.7
+  "bestLap": 145.45,
+  "bestRace": 447.942
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "19",
-  "bestLap": 147.742,
-  "bestRace": 452.017
+  "bestLap": 147.475,
+  "bestRace": 451.892
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "51",
-  "bestLap": 153.825,
-  "bestRace": 466.025
+  "bestLap": 152.3,
+  "bestRace": 463.775
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "93",
-  "bestLap": 147.242,
-  "bestRace": 447.683
+  "bestLap": 148.175,
+  "bestRace": 453.475
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "312",
-  "bestLap": 153.3,
-  "bestRace": 468.175
+  "bestLap": 152.917,
+  "bestRace": 466.875
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "70",
-  "bestLap": 152.142,
-  "bestRace": 463.65
+  "bestLap": 151.342,
+  "bestRace": 458.425
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "9",
-  "bestLap": 155.717,
-  "bestRace": 475.075
+  "bestLap": 155.983,
+  "bestRace": 473.183
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "74",
-  "bestLap": 149.225,
-  "bestRace": 457.317
+  "bestLap": 148.325,
+  "bestRace": 455.675
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "88",
-  "bestLap": 155.225,
-  "bestRace": 473.408
+  "bestLap": 153.083,
+  "bestRace": 468.3
  },
  {
   "circuit": "interlagos",
   "mode": "normal",
   "number": "42",
-  "bestLap": 154.7,
-  "bestRace": 471.192
+  "bestLap": 154.517,
+  "bestRace": 470.942
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "73",
-  "bestLap": 150.758,
-  "bestRace": 150.767
+  "bestLap": 149.55,
+  "bestRace": 149.558
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "00",
-  "bestLap": 156.4,
-  "bestRace": 156.4
+  "bestLap": 153.575,
+  "bestRace": 153.575
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "7",
-  "bestLap": 154.25,
-  "bestRace": 154.258
+  "bestLap": 153.217,
+  "bestRace": 153.225
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "64",
-  "bestLap": 158.292,
-  "bestRace": 158.3
+  "bestLap": 155.183,
+  "bestRace": 155.183
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "2",
-  "bestLap": 154.767,
-  "bestRace": 154.775
+  "bestLap": 153.742,
+  "bestRace": 153.742
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "19",
-  "bestLap": 156.283,
-  "bestRace": 156.292
+  "bestLap": 153.65,
+  "bestRace": 153.65
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "51",
-  "bestLap": 158.158,
-  "bestRace": 158.167
+  "bestLap": 159.158,
+  "bestRace": 159.167
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "93",
-  "bestLap": 153.175,
-  "bestRace": 153.183
+  "bestLap": 155.45,
+  "bestRace": 155.45
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "312",
-  "bestLap": 160.358,
-  "bestRace": 160.358
+  "bestLap": 160.558,
+  "bestRace": 160.558
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "70",
-  "bestLap": 158.825,
-  "bestRace": 158.825
+  "bestLap": 155.417,
+  "bestRace": 155.417
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "9",
-  "bestLap": 162.283,
-  "bestRace": 162.283
+  "bestLap": 160.592,
+  "bestRace": 160.592
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "74",
-  "bestLap": 158.225,
-  "bestRace": 158.225
+  "bestLap": 156.892,
+  "bestRace": 156.9
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "88",
-  "bestLap": 162.733,
-  "bestRace": 162.742
+  "bestLap": 161.683,
+  "bestRace": 161.683
  },
  {
   "circuit": "interlagos",
   "mode": "immersive",
   "number": "42",
-  "bestLap": 161.783,
-  "bestRace": 161.783
+  "bestLap": 160.833,
+  "bestRace": 160.833
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "73",
-  "bestLap": 38.208,
-  "bestRace": 119.025
+  "bestLap": 38.308,
+  "bestRace": 118.9
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "00",
-  "bestLap": 38.842,
-  "bestRace": 122
+  "bestLap": 38.875,
+  "bestRace": 121.183
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "7",
-  "bestLap": 39.408,
-  "bestRace": 122.775
+  "bestLap": 39.45,
+  "bestRace": 122.817
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "64",
-  "bestLap": 38.975,
-  "bestRace": 121.642
+  "bestLap": 39.042,
+  "bestRace": 122.342
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "2",
-  "bestLap": 39.408,
-  "bestRace": 122.992
+  "bestLap": 38.917,
+  "bestRace": 122.142
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "19",
-  "bestLap": 38.367,
-  "bestRace": 121.05
+  "bestLap": 39.017,
+  "bestRace": 122.483
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "51",
-  "bestLap": 40.167,
-  "bestRace": 125.917
+  "bestLap": 39.925,
+  "bestRace": 125.442
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "93",
-  "bestLap": 38.992,
-  "bestRace": 122.133
+  "bestLap": 37.883,
+  "bestRace": 120.675
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "312",
-  "bestLap": 40.358,
-  "bestRace": 126.817
+  "bestLap": 39.267,
+  "bestRace": 124.825
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "70",
-  "bestLap": 38.5,
-  "bestRace": 122.358
+  "bestLap": 38.742,
+  "bestRace": 121.858
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "9",
-  "bestLap": 40.608,
-  "bestRace": 127.908
+  "bestLap": 40.575,
+  "bestRace": 128.075
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "74",
-  "bestLap": 38.4,
-  "bestRace": 121.85
+  "bestLap": 38.667,
+  "bestRace": 122.058
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "88",
-  "bestLap": 39.833,
-  "bestRace": 127.092
+  "bestLap": 39.95,
+  "bestRace": 126.533
  },
  {
   "circuit": "curvelo",
   "mode": "normal",
   "number": "42",
-  "bestLap": 39.408,
-  "bestRace": 125.233
+  "bestLap": 40.725,
+  "bestRace": 126.908
  },
  {
   "circuit": "curvelo",
   "mode": "immersive",
   "number": "73",
-  "bestLap": 42.558,
-  "bestRace": 42.608
+  "bestLap": 42.233,
+  "bestRace": 42.283
  },
  {
   "circuit": "curvelo",
   "mode": "immersive",
   "number": "00",
-  "bestLap": 43.042,
-  "bestRace": 43.092
+  "bestLap": 42.692,
+  "bestRace": 42.742
  },
  {
   "circuit": "curvelo",
   "mode": "immersive",
   "number": "7",
-  "bestLap": 43.908,
-  "bestRace": 43.95
+  "bestLap": 43.533,
+  "bestRace": 43.575
  },
  {
   "circuit": "curvelo",
   "mode": "immersive",
   "number": "64",
-  "bestLap": 43.475,
-  "bestRace": 43.525
+  "bestLap": 43.125,
+  "bestRace": 43.175
  },
  {
   "circuit": "curvelo",
   "mode": "immersive",
   "number": "2",
-  "bestLap": 44.117,
-  "bestRace": 44.167
+  "bestLap": 43.733,
+  "bestRace": 43.775
  },
  {
   "circuit": "curvelo",
   "mode": "immersive",
   "number": "19",
-  "bestLap": 43.658,
-  "bestRace": 43.708
+  "bestLap": 43.367,
+  "bestRace": 43.417
  },
  {
   "circuit": "curvelo",
   "mode": "immersive",
   "number": "51",
+  "bestLap": 44.825,
+  "bestRace": 44.875
+ },
+ {
+  "circuit": "curvelo",
+  "mode": "immersive",
+  "number": "93",
+  "bestLap": 43.675,
+  "bestRace": 43.725
+ },
+ {
+  "circuit": "curvelo",
+  "mode": "immersive",
+  "number": "312",
+  "bestLap": 45.258,
+  "bestRace": 45.3
+ },
+ {
+  "circuit": "curvelo",
+  "mode": "immersive",
+  "number": "70",
+  "bestLap": 44.1,
+  "bestRace": 44.15
+ },
+ {
+  "circuit": "curvelo",
+  "mode": "immersive",
+  "number": "9",
+  "bestLap": 45.775,
+  "bestRace": 45.817
+ },
+ {
+  "circuit": "curvelo",
+  "mode": "immersive",
+  "number": "74",
+  "bestLap": 44.308,
+  "bestRace": 44.358
+ },
+ {
+  "circuit": "curvelo",
+  "mode": "immersive",
+  "number": "88",
+  "bestLap": 46.1,
+  "bestRace": 46.15
+ },
+ {
+  "circuit": "curvelo",
+  "mode": "immersive",
+  "number": "42",
   "bestLap": 45.158,
-  "bestRace": 45.2
- },
- {
-  "circuit": "curvelo",
-  "mode": "immersive",
-  "number": "93",
-  "bestLap": 43.842,
-  "bestRace": 43.892
- },
- {
-  "circuit": "curvelo",
-  "mode": "immersive",
-  "number": "312",
-  "bestLap": 45.633,
-  "bestRace": 45.683
- },
- {
-  "circuit": "curvelo",
-  "mode": "immersive",
-  "number": "70",
-  "bestLap": 44.55,
-  "bestRace": 44.6
- },
- {
-  "circuit": "curvelo",
-  "mode": "immersive",
-  "number": "9",
-  "bestLap": 46.133,
-  "bestRace": 46.175
- },
- {
-  "circuit": "curvelo",
-  "mode": "immersive",
-  "number": "74",
-  "bestLap": 44.867,
-  "bestRace": 44.917
- },
- {
-  "circuit": "curvelo",
-  "mode": "immersive",
-  "number": "88",
-  "bestLap": 46.467,
-  "bestRace": 46.517
- },
- {
-  "circuit": "curvelo",
-  "mode": "immersive",
-  "number": "42",
-  "bestLap": 45.525,
-  "bestRace": 45.575
+  "bestRace": 45.208
  }
 ];

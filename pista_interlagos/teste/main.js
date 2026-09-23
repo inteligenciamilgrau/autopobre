@@ -24,6 +24,8 @@ import {MobileControls} from './mobile-controls.js';
 import {setupSettings} from './settings.js';
 import {CarAudio} from './car-audio.js?v=20260913-immersive';
 import {PlayerPreferences,CAMERA_MODES} from './player-preferences.js';
+import {createSky,SUN_DIRECTION} from './sky.js';
+import {createLandscape,loadTerrainTextures,buildTrackField,readOrtho,terrainMaterial,structureMaterial,createCrowd} from './landscape.js';
 const $=id=>document.getElementById(id);
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;let mobile;
 const preferences=new PlayerPreferences();
@@ -56,7 +58,8 @@ function chooseImmersive(value){
  preferences.update({immersive:value});if(ready)updateMenuLabels();
 }
 $('immersiveMode').onchange=()=>chooseImmersive($('immersiveMode').checked);
-const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');scene.fog=new THREE.Fog('#a8c8dd',700,2100);
+const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');
+let sky,landscape,landscapeField,terrainTextures;
 let renderer;
 const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,6500);
 const orbit=new OrbitControls(camera,$('view'));
@@ -72,14 +75,22 @@ const cameraReturn=new CameraReturn(),orbitSphere=new THREE.Spherical();
 const headLook={yaw:0,pitch:0};
 let pointerLocked=false,lockPending=false,lockUnavailable=!$('view').requestPointerLock;
 const isInside=()=>mode==='cockpit'||mode==='hood';
-scene.add(new THREE.HemisphereLight('#d9edff','#60643c',2.4));
-const sun=new THREE.DirectionalLight('#fff2d5',3);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:2048,touchDevice?1024:2048);Object.assign(sun.shadow.camera,{left:-45,right:45,top:45,bottom:-45,near:1,far:250});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;scene.add(sun,sun.target);
+// Sky light comes mostly from the environment map; the hemisphere only lifts deep shadows.
+scene.add(new THREE.HemisphereLight('#cfe2ff','#4a5236',.75));
+const sun=new THREE.DirectionalLight('#fff1dc',3.4);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:2048,touchDevice?1024:2048);Object.assign(sun.shadow.camera,{left:-55,right:55,top:55,bottom:-55,near:1,far:300});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;sun.shadow.radius=2;scene.add(sun,sun.target);
+const sunOffset=SUN_DIRECTION.clone().multiplyScalar(140);
 const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
+// Sprung mass: body, cabin, cockpit and driver roll and pitch on the suspension;
+// the wheels are counter-rotated so they stay planted on the ground.
+const carBody=new THREE.Group();carBody.name='Carroceria_suspensao';carRoot.add(carBody);
+const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
+function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
 let cockpit,skidMarks,tyreSmoke;
 function initializeRenderer(){
  if(renderer)return;
- renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:!touchDevice});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFSoftShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.12;
- cockpit=createCockpit();carRoot.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,96);
+ renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:!touchDevice});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+ sky=createSky(renderer,scene,{mobile:touchDevice});
+ cockpit=createCockpit();carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,96);
  skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
 }
@@ -101,11 +112,14 @@ const wheelForward=new THREE.Vector3(),wheelUp=new THREE.Vector3(0,1,0),wheelAxl
 function status(text){$('status').textContent=text;$('status').classList.toggle('hidden',!text);}
 function flattenStatic(root){
  const retired=[];root.traverse(ob=>{if(/^(Muro_protecao|Zebras_)/.test(ob.name))retired.push(ob);});retired.forEach(ob=>ob.removeFromParent());
- root.updateMatrixWorld(true);const batches=new Map();
+ root.updateMatrixWorld(true);const batches=new Map(),structures=new Map(),standTops=[];
  root.traverse(ob=>{if(!ob.isMesh||ob.isInstancedMesh)return;
   if(Array.isArray(ob.material)){ob.receiveShadow=true;return;}
   let g=ob.geometry.clone().applyMatrix4(ob.matrixWorld);
   if(ob.material.name==='Asfalto'){ob.material=roadSurface.material;g=roadSurface.geometry(g);}
+  else ob.material=structureMaterial(ob.material,terrainTextures,structures);
+  // Each grandstand step contributes its top face as a row of seats.
+  if(/^Arquibancada/.test(ob.name)){const pos=g.attributes.position;let top=-Infinity;for(let i=0;i<pos.count;i++)top=Math.max(top,pos.getY(i));const corners=new Map();for(let i=0;i<pos.count;i++)if(pos.getY(i)>top-.02)corners.set(pos.getX(i).toFixed(2)+':'+pos.getZ(i).toFixed(2),{x:pos.getX(i),y:pos.getY(i),z:pos.getZ(i)});if(corners.size===4)standTops.push([...corners.values()]);}
   const key=ob.material.uuid;
   // Proxies so para consulta: os meshes visiveis seguem agrupados por material.
   if(/^(Portico_|Box_|Arquibancada|Muro)/.test(ob.name)){
@@ -116,9 +130,10 @@ function flattenStatic(root){
   if(!batches.has(key))batches.set(key,{mat:ob.material,gs:[],obs:[]});const b=batches.get(key);b.gs.push(g);b.obs.push(ob);
  });
  for(const b of batches.values()){
-  const g=mergeGeometries(b.gs,false);if(!g)continue;const m=new THREE.Mesh(g,b.mat);m.castShadow=true;m.receiveShadow=true;scene.add(m);b.obs.forEach(o=>o.removeFromParent());b.gs.forEach(g=>g.dispose());
+  const g=mergeGeometries(b.gs,false);if(!g)continue;const m=new THREE.Mesh(g,b.mat);m.castShadow=!b.mat.userData.terrain;m.receiveShadow=true;scene.add(m);b.obs.forEach(o=>o.removeFromParent());b.gs.forEach(g=>g.dispose());
  }
  scene.add(root);
+ return standTops;
 }
 async function setLivery(value){
  if(!['assinaturas_omp','seiva_danilo'].includes(value))throw new Error('Pintura inválida');
@@ -127,18 +142,18 @@ async function setLivery(value){
  try{
  const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=04-fechamentos`);
  if(token!==loadToken)return;
- if(model)carRoot.remove(model);model=gltf.scene;wheels=[];
+ if(model)carBody.remove(model);model=gltf.scene;wheels=[];
  model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;
   for(const m of Array.isArray(o.material)?o.material:[o.material])if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
- }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){wheels.push({obj:o,front:o.name.includes('Dianteira'),base:o.quaternion.clone()});}});
+ }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){wheels.push({obj:o,front:o.name.includes('Dianteira'),base:o.quaternion.clone(),basePosition:o.position.clone()});}});
  // These solid Blender panels close the cabin in every view. The detailed
  // cockpit hides the outer model, so retain its floor/bulkheads independently.
- if(carStructure)carRoot.remove(carStructure);
+ if(carStructure)carBody.remove(carStructure);
  carStructure=new THREE.Group();carStructure.name='Estrutura_cabine_V04';
  model.updateMatrixWorld(true);const structuralParts=[];
  model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
  for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
- carRoot.add(model,carStructure);model.visible=mode!=='cockpit';activeLivery=value;status('');
+ carBody.add(model,carStructure);model.visible=mode!=='cockpit';activeLivery=value;status('');
  preferences.update({livery:value});if(ready)carAudio.effect('paint');
  }finally{
   if(token===loadToken){
@@ -180,6 +195,11 @@ function updateCar(dt){
  matrix.makeBasis(forward,up,right);const q=new THREE.Quaternion().setFromRotationMatrix(matrix);groundOrientation.slerp(q,dt>=1?1:1-Math.exp(-dt*15));
  roughEuler.set(Math.sin(car.distance*2.7)*roughRide*.008,0,Math.sin(car.distance*1.9)*roughRide*.006);
  carRoot.quaternion.copy(groundOrientation).multiply(roughRotation.setFromEuler(roughEuler));
+ // Body roll outward in corners, dive under braking and squat under power.
+ const rollTarget=clamp((car.latAccel??0)*.0042,-.055,.055),pitchTarget=clamp((car.longAccel??0)*.0038,-.045,.028);
+ if(dt>=1){suspension.roll=rollTarget;suspension.pitch=pitchTarget;suspension.rollRate=suspension.pitchRate=0;}
+ else for(let left=dt;left>1e-6;left-=1/120){const h=Math.min(left,1/120);springTo('roll',rollTarget,h,8.5,.5);springTo('pitch',pitchTarget,h,9.5,.55);}
+ setBodyTilt(suspension.roll,suspension.pitch);
  // Cameras and bodywork must use the same rendered orientation.
  forward.set(1,0,0).applyQuaternion(carRoot.quaternion);up.set(0,1,0).applyQuaternion(carRoot.quaternion);right.set(0,0,1).applyQuaternion(carRoot.quaternion);
  for(const w of wheels){
@@ -191,8 +211,18 @@ function updateCar(dt){
   wheelAxle.crossVectors(wheelForward,wheelUp);
   wheelTurn.setFromRotationMatrix(wheelMatrix.makeBasis(wheelForward,wheelUp,wheelAxle));
   wheelSpin.setFromAxisAngle(axleAxis,-(w.front?car.spin:car.rearSpin));
-  w.obj.quaternion.copy(wheelTurn).multiply(w.base).multiply(wheelSpin);
+  w.obj.quaternion.copy(wheelTurn).multiply(w.base).multiply(wheelSpin).premultiply(bodyTiltInverse);
+  w.obj.position.copy(wheelOffset.copy(w.basePosition).sub(bodyPivot).applyQuaternion(bodyTiltInverse).add(bodyPivot));
  }
+}
+function setBodyTilt(roll,pitch){
+ bodyTilt.setFromEuler(bodyEuler.set(roll,0,pitch));bodyTiltInverse.copy(bodyTilt).invert();
+ carBody.quaternion.copy(bodyTilt);carBody.position.copy(bodyPivot).sub(wheelOffset.copy(bodyPivot).applyQuaternion(bodyTilt));
+}
+// Rival templates are cloned from the model: hand them an untilted body and wheels.
+function restBodyPose(){
+ suspension.roll=suspension.pitch=suspension.rollRate=suspension.pitchRate=0;setBodyTilt(0,0);
+ for(const w of wheels){w.obj.quaternion.copy(w.base);w.obj.position.copy(w.basePosition);}
 }
 function setCameraMode(value){
  if(!cameraModes.includes(value))return;
@@ -270,18 +300,23 @@ $('view').addEventListener('wheel',e=>{if(ready&&!paused){if(immersive?.active&&
 function updateCamera(dt){
  if(pitstop?.opened)return;
  const phase=immersive?.active?immersive.state.phase:'free';if(phase!==previewPhase){previewPhase=phase;previewOrbit=false;}
- if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
+ if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  const p=carRoot.position,vel=Math.hypot(car.vx,car.vy);
- if(gridPreview()&&!(phase==='prepare'&&previewOrbit)){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
+ if(gridPreview()&&!(phase==='prepare'&&previewOrbit)){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
  const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
+ // Speed widens the view a little; rough ground and very high speed add a fine shake.
+ const speedFov=(mode==='cockpit'?74:58)+(mode==='aerial'||mode==='orbit'?0:clamp((vel-12)/45,0,1)*(mode==='cockpit'?5:7));
+ if(Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1?speedFov:camera.fov+(speedFov-camera.fov)*(1-Math.exp(-dt*3));camera.updateProjectionMatrix();}
+ const shakeTime=performance.now()/1000,shake=paused||mode==='aerial'||mode==='orbit'?0:roughRide*.05+clamp((vel-42)/18,0,1)*.01;
  if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
  if(mode==='cockpit'||mode==='hood'){
   // Fixed local mount keeps the hood/dashboard still relative to the camera.
   const eye=mode==='hood'?hoodEye:cockpit.eye;
-  carRoot.updateMatrixWorld(true);camera.position.copy(eye).applyMatrix4(carRoot.matrixWorld);
-  look.set(Math.cos(headLook.pitch)*Math.cos(headLook.yaw)*20,Math.sin(headLook.pitch)*20-.20,Math.cos(headLook.pitch)*Math.sin(headLook.yaw)*20).add(eye).applyMatrix4(carRoot.matrixWorld);
-  camera.up.set(0,1,0).transformDirection(carRoot.matrixWorld);camera.lookAt(look);
+  carRoot.updateMatrixWorld(true);camera.position.copy(eye).applyMatrix4(carBody.matrixWorld);
+  look.set(Math.cos(headLook.pitch)*Math.cos(headLook.yaw)*20,Math.sin(headLook.pitch)*20-.20,Math.cos(headLook.pitch)*Math.sin(headLook.yaw)*20).add(eye).applyMatrix4(carBody.matrixWorld);
+  camera.position.y+=Math.sin(shakeTime*41)*shake*.35;look.y+=Math.sin(shakeTime*29+1.3)*shake*2;
+  camera.up.set(0,1,0).transformDirection(carBody.matrixWorld);camera.lookAt(look);
  } else if(mode==='orbit'){
   orbitTarget.copy(p).add(new THREE.Vector3(0,.85,0));
   orbitDelta.subVectors(orbitTarget,orbit.target);camera.position.add(orbitDelta);orbit.target.copy(orbitTarget);orbit.update();
@@ -306,9 +341,9 @@ function updateCamera(dt){
  // Smooth the offset, not the world position: frame-rate changes must not
  // make the car surge back and forth relative to its following camera.
  desired.sub(p);if(!followInitialized){followOffset.copy(desired);followInitialized=true;}else followOffset.lerp(desired,1-Math.exp(-dt*5));
- camera.position.copy(p).add(followOffset);camera.up.set(0,1,0);camera.lookAt(look);
+ camera.position.copy(p).add(followOffset);camera.position.y+=Math.sin(shakeTime*37)*shake;camera.position.x+=Math.sin(shakeTime*31+.7)*shake*.6;camera.up.set(0,1,0);camera.lookAt(look);
  }
- sun.position.copy(p).add(new THREE.Vector3(-45,90,30));sun.target.position.copy(p);sun.target.updateMatrixWorld();
+ sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();
 }
 const pressed=code=>keys.has(code)||mobile?.pressed.has(code);
 function input(){return {ignition:pressed('KeyI')?1:0,throttle:Math.max(pressed('KeyW')||pressed('ArrowUp')?1:0,mobile?.throttle??0),brake:Math.max(pressed('KeyS')||pressed('ArrowDown')?1:0,mobile?.brake??0),left:Math.max(pressed('KeyA')||pressed('ArrowLeft')?1:0,-(mobile?.steering??0)),right:Math.max(pressed('KeyD')||pressed('ArrowRight')?1:0,mobile?.steering??0),reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};}
@@ -323,9 +358,16 @@ function hud(){
  $('surface').textContent=automatic?'RECONHECIMENTO AUTOMÁTICO':p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=location(p.s);drawMap();
 }
 let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0;
+// Adaptive resolution: slower GPUs trade sharpness for a steady frame rate.
+const resolution={max:Math.min(devicePixelRatio,touchDevice?1:1.5),min:touchDevice?.6:.7,frame:1/60,timer:0};
+function adaptResolution(rawDt){
+ if(rawDt>.25)return;resolution.frame+=(rawDt-resolution.frame)*.05;resolution.timer+=rawDt;if(resolution.timer<1.5)return;resolution.timer=0;
+ const current=renderer.getPixelRatio(),next=resolution.frame>1/42?Math.max(resolution.min,current-.1):resolution.frame<1/56?Math.min(resolution.max,current+.05):current;
+ if(Math.abs(next-current)>.001){renderer.setPixelRatio(next);renderer.setSize(innerWidth,innerHeight,false);}
+}
 function updateCountdown(){const count=immersive?.active?(immersive.state.phase==='grid'?Math.max(1,Math.ceil(immersive.state.countdown)):0):Math.ceil(immersive?.freeCountdown||0),go=immersive?.goTime>0;const visible=sessionStarted&&!paused&&(count>0||go);$('raceCountdown').hidden=!visible;if(visible){const label=count>0?String(count):'VAI!';if($('countdownNumber').textContent!==label){$('countdownNumber').textContent=label;$('countdownCaption').textContent=count>0?'PREPARE-SE':'BOA CORRIDA!';}}}
 function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
- renderedFrame++;
+ renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;menu(true);}
  if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);}immersive?.stepFree(1/120,command);}skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
@@ -334,6 +376,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  carAudio.update(car,pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input(),skid,paused,mode);
  carAudio.updateScene({...immersive?.audioScene(),speed:Math.hypot(car.vx,car.vy),onRoad:car.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
+ sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
  updateCar(dt);updateCamera(dt);if(cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  immersive?.update(paused?0:dt,camera);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
@@ -345,9 +388,9 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
  if(mode==='cockpit'&&!gridPreview()){
   cockpit.root.visible=false;driver.root.visible=false;carStructure.visible=false;
-  cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carRoot.matrixWorld);
-  look.set(-30,1.14,0).applyMatrix4(carRoot.matrixWorld);
-  cockpit.rearCamera.up.set(0,1,0).transformDirection(carRoot.matrixWorld);cockpit.rearCamera.lookAt(look);
+  cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carBody.matrixWorld);
+  look.set(-30,1.14,0).applyMatrix4(carBody.matrixWorld);
+  cockpit.rearCamera.up.set(0,1,0).transformDirection(carBody.matrixWorld);cockpit.rearCamera.lookAt(look);
   const oldShadowUpdate=renderer.shadowMap.autoUpdate;renderer.shadowMap.autoUpdate=false;
   tyreSmoke.material.uniforms.viewport.value=cockpit.mirrorTarget.height;
   renderer.setRenderTarget(cockpit.mirrorTarget);renderer.render(scene,cockpit.rearCamera);renderer.setRenderTarget(null);
@@ -422,7 +465,7 @@ function clearCircuit(){
  camera.clearViewOffset();
  if(immersive){immersive.dispose();immersive.visual.damage.removeFromParent();retired.push(immersive.visual.damage);immersive=null;}
  if(car)delete car.condition;
- const keepRoots=new Set([carRoot,skidMarks?.mesh,tyreSmoke?.mesh,sun,sun.target]);
+ const keepRoots=new Set([carRoot,skidMarks?.mesh,tyreSmoke?.mesh,sun,sun.target,sky?.dome]);
  for(const root of [...scene.children])if(!root.isLight&&!keepRoots.has(root)){scene.remove(root);retired.push(root);}
  const collect=roots=>{const geometries=new Set(),materials=new Set(),textures=new Set();for(const root of roots)root?.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){materials.add(m);for(const value of Object.values(m))if(value?.isTexture)textures.add(value);}});return {geometries,materials,textures};};
  const keep=collect([...keepRoots]),old=collect(retired);
@@ -430,6 +473,7 @@ function clearCircuit(){
  if(roadSurface){old.materials.add(roadSurface.material);for(const value of Object.values(roadSurface.material))if(value?.isTexture)old.textures.add(value);}
  for(const key of ['geometries','materials','textures'])for(const resource of old[key])if(!keep[key].has(resource))resource.dispose();
  for(const proxy of cameraObstacles)if(!old.geometries.has(proxy.geometry))proxy.geometry.dispose();cameraObstacles.length=0;
+ landscapeField?.texture.dispose();landscapeField=null;landscape?.dispose();landscape=null;
  roadSurface=null;loadedCircuit=null;raceResults.mode=null;raceResults.snapshot=null;raceResults.root.hidden=true;renderer?.renderLists.dispose();
  if(skidMarks){skidMarks.breakTrails();skidMarks.count=skidMarks.total=skidMarks.cursor=0;skidMarks.geometry.setDrawRange(0,0);}
  tyreSmoke?.reset();accumulator=0;followInitialized=false;
@@ -446,11 +490,25 @@ async function loadCircuit(){
 
  data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/pista.json')).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);
  roadSurface=await createTrackSurface(renderer,data);
- if(!driver){driver=await createDriver(cockpit.wheel,cockpit.wheelTurn);carRoot.add(driver.root);}
- if(circuit.id==='curvelo'){flattenStatic(createCurveloScene(data,roadSurface));}else{const track=await loader.loadAsync('../exports/interlagos_pista.glb');flattenStatic(track.scene);}if(!model||activeLivery!==$('livery').value)await setLivery($('livery').value);
+ if(!driver){driver=await createDriver(cockpit.wheel,cockpit.wheelTurn);carBody.add(driver.root);}
+ terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];
+ if(circuit.id==='curvelo'){
+  const groundMaterial=terrainMaterial(terrainTextures,landscapeField,{mobile:touchDevice});groundMaterial.userData.terrain=true;
+  standTops=flattenStatic(createCurveloScene(data,roadSurface,{groundMaterial,gravelMap:terrainTextures.gravel}));
+  landscape=createLandscape({data,field:landscapeField,mobile:touchDevice,style:'cerrado'});
+ }else{
+  const track=await loader.loadAsync('../exports/interlagos_pista.glb');let ortho=null;
+  // The orthophoto stays as land-cover data and far-distance colour; close up it becomes grass, woods, paving and water.
+  track.scene.traverse(o=>{if(!o.isMesh||o.material?.name!=='GeoSampa_Ortofoto_2020')return;const photo=o.material;ortho=readOrtho(photo.map,o.geometry);o.material=terrainMaterial(terrainTextures,landscapeField,{ortho:photo.map,mobile:touchDevice});o.material.userData.terrain=true;photo.map=null;photo.dispose();});
+  standTops=flattenStatic(track.scene);
+  landscape=createLandscape({data,field:landscapeField,ortho,mobile:touchDevice});
+ }
+ scene.add(landscape.root);
+ const crowd=createCrowd(standTops,{mobile:touchDevice});scene.add(crowd.root);landscape.stats.fans=crowd.count;if(!model||activeLivery!==$('livery').value)await setLivery($('livery').value);
  const guardrails=createGuardrails(data);scene.add(guardrails.root);cameraObstacles.push(guardrails.rails);
  scene.add(createCurbs(data));
  const branding=await createTrackBranding(data);scene.add(branding.root);
+ restBodyPose();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
  if(circuit.id==='curvelo')pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
@@ -458,11 +516,14 @@ async function loadCircuit(){
  const oldStockMaterial=new THREE.MeshBasicMaterial({map:branding.oldStock,polygonOffset:true,polygonOffsetFactor:-2});
  for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.64,.43),oldStockMaterial);decal.position.set(.95,.75,side*.941);decal.rotation.y=side<0?Math.PI:0;decal.name='OldStock_no_Opala70';kleber.add(decal);}
  const roster=$('gridRoster');roster.replaceChildren();for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':` · Ritmo ${entry.level}/100`}`;roster.append(row);}
+ // Compile the new programs while the loading label is still shown, instead of
+ // freezing the first race frame (D3D shader compilation is slow on Windows).
+ updateCar(1);updateCamera(1);try{await renderer.compileAsync(scene,camera);}catch(err){console.warn(err);}
  ready=true;loadedCircuit=circuit.id;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;$('start').textContent='Entrar na pista →';
  window.interlagos={ready:true,circuit:circuit.id,car,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),pitInfo:()=>pitstop?.info()??null,
   audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),
-  skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),
+  skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
   driverInfo:()=>driver.info(),
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),

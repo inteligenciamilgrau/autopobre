@@ -95,18 +95,21 @@ export class CarAudio {
   if(this.paused!==paused)this.setPaused(paused);
   if(paused)return this.state;
   const speed=Math.hypot(car.vx,car.vy)*3.6;
+  const wheelspin=car.rearSlipSpeed??0,physicsGear=Number.isInteger(car.gear)&&Number.isFinite(car.rpm);
   let gear=Number.isInteger(this.state.gear)?this.state.gear:1;
-  // Hysteresis prevents repeated shifts when speed oscillates around a threshold.
-  while(gear<5&&speed>gear*42+1.5)gear++;
-  while(gear>1&&speed<(gear-1)*42-2.5)gear--;
-  const wheelspin=car.rearSlipSpeed??0;
-  if(command.reverse)gear='R';else if(wheelspin>1)gear=1;else if(speed<2)gear='N';
+  if(physicsGear)gear=Math.max(1,car.gear);
+  else{
+   // Hysteresis prevents repeated shifts when speed oscillates around a threshold.
+   while(gear<5&&speed>gear*42+1.5)gear++;
+   while(gear>1&&speed<(gear-1)*42-2.5)gear--;
+  }
+  if(command.reverse||car.gear<0)gear='R';else if(wheelspin>1&&!physicsGear)gear=1;else if(speed<2&&!(physicsGear&&command.throttle>.05))gear='N';
   if(Number.isInteger(gear)&&Number.isInteger(this.lastGear)&&gear!==this.lastGear)this.shift(gear>this.lastGear);
   if(command.engineOff)gear='N';
   this.lastGear=gear;
   const throttle=clamp(Math.max(command.throttle||0,command.reverse||0),0,1);
   const ratio=gear==='R'?150:[0,138,73,49,37,30][gear];
-  const rpm=command.engineOff?0:clamp(gear==='N'?950+throttle*3200:950+(speed+wheelspin*3.6)*ratio+throttle*250,950,7400);
+  const rpm=command.engineOff?0:clamp(gear==='N'?950+throttle*3200:physicsGear&&gear!=='R'?car.rpm+throttle*120:950+(speed+wheelspin*3.6)*ratio+throttle*250,950,7400);
   this.state={gear,rpm,skid:car.surface.onRoad&&(speed>5||wheelspin>1)?clamp(Math.max(skid,wheelspin/20),0,1):0,throttle};
   const ctx=this.context;if(!ctx)return this.state;
   const t=ctx.currentTime,param=(p,v,tau=.06)=>p.setTargetAtTime(v,t,tau);

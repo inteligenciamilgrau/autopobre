@@ -3,6 +3,7 @@ import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {FANS,strapPath} from './immersive-state.js';
 import {RIVAL_ROSTER} from './race-roster.js';
 const up=new THREE.Vector3(0,1,0);
+const leanRotation=new THREE.Quaternion(),leanEuler=new THREE.Euler();
 export function trackPoint(data,s,offset=0){
  const a=data.samples,L=data.meta.reconstructed_xy_m;s=((s%L)+L)%L;
  let lo=0,hi=a.length-1;while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(a[mid][0]<=s)lo=mid;else hi=mid-1;}
@@ -99,6 +100,23 @@ export class ImmersiveVisuals {
   if(number==='BLAZER'){this.box(root,[-.55,1.22,0],[3.25,.69,1.52],0x22363e);this.box(root,[-.55,1.59,0],[3.29,.07,1.56],color);for(const x of [-1.5,-.55,.5])this.box(root,[x,1.23,0],[.075,.67,1.57],color);}
   this.tag(root,number,[0,number==='BLAZER'?1.83:1.45,0],number==='BLAZER'?1.3:.7,.35,'#fff','#223234');return root;
  }
+ // ~250-triangle Opala silhouette in the rival's colours, for distant cars.
+ farProxy(color){
+  const paint=new THREE.Color().setHex(color),parts=[];
+  const add=(geometry,rgb)=>{let g=geometry.index?geometry.toNonIndexed():geometry;for(const key of Object.keys(g.attributes))if(key!=='position'&&key!=='normal')g.deleteAttribute(key);const c=new Float32Array(g.attributes.position.count*3);for(let i=0;i<c.length;i+=3){c[i]=rgb.r;c[i+1]=rgb.g;c[i+2]=rgb.b;}g.setAttribute('color',new THREE.BufferAttribute(c,3));parts.push(g);};
+  const profile=(points,width,rgb)=>{const shape=new THREE.Shape(points.map(([x,y])=>new THREE.Vector2(x,y)));add(new THREE.ExtrudeGeometry(shape,{depth:width,bevelEnabled:false}).translate(0,0,-width/2),rgb);};
+  profile([[-2.35,.2],[2.42,.2],[2.46,.32],[2.46,.62],[2.35,.8],[.85,.9],[.05,1.4],[-.95,1.4],[-1.65,1],[-2.3,.97],[-2.39,.4]],1.84,paint);
+  profile([[.9,.92],[.08,1.37],[-.97,1.37],[-1.7,.99]],1.86,new THREE.Color(.02,.025,.03));
+  const tyre=new THREE.Color(.025,.025,.025),trim=new THREE.Color(.05,.05,.05);
+  for(const x of [1.55,-1.117])for(const z of [-.8,.8])add(new THREE.CylinderGeometry(.316,.316,.26,8).rotateX(Math.PI/2).translate(x,.316,z),tyre);
+  for(const z of [-.55,.55]){add(new THREE.BoxGeometry(.05,.08,.35).translate(-2.37,.95,z),new THREE.Color(.5,.02,.02));add(new THREE.BoxGeometry(.04,.1,.25).translate(2.45,.63,z*1.1),new THREE.Color(.8,.78,.6));}
+  add(new THREE.BoxGeometry(.06,.14,1.8).translate(2.47,.42,0),trim);add(new THREE.BoxGeometry(.06,.14,1.8).translate(-2.41,.45,0),trim);
+  const geometry=mergeGeometries(parts,false);parts.forEach(g=>g.dispose());
+  this.materials.farCar??=new THREE.MeshStandardMaterial({name:'Rival_distante',vertexColors:true,roughness:.4,metalness:.1});
+  const mesh=new THREE.Mesh(geometry,this.materials.farCar);mesh.name='Rival_distante';mesh.castShadow=mesh.receiveShadow=true;mesh.visible=false;return mesh;
+ }
+ // Swap detailed and distant rival models around the player.
+ detailLevel(obj){const u=obj.userData;if(!u.far)return;const far=obj.position.distanceToSquared(this.carRoot.position)>40*40;u.far.visible=far;u.detail.visible=!far;}
  rivalCar(template,color,number,name=''){
   if(!template)return this.car(color,number);
   const root=template.clone(true),materials=new Map(),pivots=[];
@@ -118,16 +136,21 @@ export class ImmersiveVisuals {
   root.traverse(o=>{if(!o.isMesh||!o.visible||Array.isArray(o.material)||o.children.length)return;let parent=o.parent;while(parent&&parent!==root){if(pivots.some(p=>p.obj===parent))return;parent=parent.parent;}parts.push(o);});
   for(const o of parts){const geometry=o.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld));geometry.deleteAttribute('tangent');if(!geometry.attributes.uv)geometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));const key=o.material.uuid;if(!batches.has(key))batches.set(key,{material:o.material,geometries:[],objects:[]});const batch=batches.get(key);batch.geometries.push(geometry);batch.objects.push(o);}
   for(const batch of batches.values()){const geometry=mergeGeometries(batch.geometries,false);if(geometry){const mesh=new THREE.Mesh(geometry,batch.material);mesh.castShadow=!batch.material.transparent||batch.material.opacity>=.95;mesh.receiveShadow=true;root.add(mesh);batch.objects.forEach(o=>o.removeFromParent());}batch.geometries.forEach(g=>g.dispose());}
+  // Level of detail: beyond ~40 m the car is one vertex-coloured mesh (one draw call).
+  const detail=new THREE.Group();detail.name='Rival_detalhe';while(root.children.length)detail.add(root.children[0]);root.add(detail);
+  const far=this.farProxy(color);root.add(far);root.userData.detail=detail;root.userData.far=far;
   this.tag(root,number,[0,1.65,0],.65,.36,'#fff','#243a3d');
   const label=name?this.tag(root,name,[0,2.08,0],2.7,.30,'#fff','#172a2ddb'):null;
   // Actual numerals on both doors and the rear, including leading zero and #312.
   const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;const ctx=canvas.getContext('2d');ctx.fillStyle='#152420';ctx.fillRect(0,0,512,256);ctx.fillStyle='#fff';ctx.font='italic 900 205px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(number,256,139,480);
   const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;const plate=new THREE.MeshBasicMaterial({map,polygonOffset:true,polygonOffsetFactor:-2});
-  for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.92,.46),plate);decal.position.set(-.18,.75,side*.938);decal.rotation.y=side<0?Math.PI:0;decal.name='Numero_oficial_'+number;root.add(decal);}
-  const rear=new THREE.Mesh(new THREE.PlaneGeometry(.58,.28),plate);rear.position.set(-2.345,.70,-.30);rear.rotation.y=-Math.PI/2;root.add(rear);
+  for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.92,.46),plate);decal.position.set(-.18,.75,side*.938);decal.rotation.y=side<0?Math.PI:0;decal.name='Numero_oficial_'+number;detail.add(decal);}
+  const rear=new THREE.Mesh(new THREE.PlaneGeometry(.58,.28),plate);rear.position.set(-2.345,.70,-.30);rear.rotation.y=-Math.PI/2;detail.add(rear);
   root.userData.wheels=pivots;root.userData.nameLabel=label;return root;
  }
  truckModel(){const root=new THREE.Group();this.box(root,[0,.66,0],[4.9,.35,2],0xe5b13f);this.box(root,[1.5,1.25,0],[1.65,1,1.9],0xe3c271);this.box(root,[1.55,1.54,0],[1.72,.35,1.91],0x354951);this.box(root,[-.5,1.1,0],[2.4,.22,1.8],0x535c5d);for(const x of [-1.5,1.65])for(const z of [-1,1]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.38,.38,.25,16).rotateX(Math.PI/2),this.mat(0x171a1c));w.position.set(x,.4,z);root.add(w);}this.tag(root,'REBOQUE · SEM PRESSA',[0,2.2,0],3.5,.5,'#222','#e5b13f');return root;}
+ // Smoothed body roll and pitch from the rival's own cornering and braking.
+ lean(obj,c){const u=obj.userData;u.roll=(u.roll??0)+(Math.max(-.05,Math.min(.05,(c.latAccel??0)*.0042))-(u.roll??0))*.15;u.pitch=(u.pitch??0)+(Math.max(-.04,Math.min(.025,(c.longAccel??0)*.0038))-(u.pitch??0))*.15;obj.quaternion.multiply(leanRotation.setFromEuler(leanEuler.set(u.roll,0,u.pitch)));}
  setPose(obj,p){obj.position.set(p.x,p.y,p.z);const f=new THREE.Vector3(Math.cos(p.heading),p.grade||0,-Math.sin(p.heading)).normalize(),n=new THREE.Vector3(-(p.grade||0)*Math.cos(p.heading)+(p.bank||0)*Math.sin(p.heading),1,(p.grade||0)*Math.sin(p.heading)+(p.bank||0)*Math.cos(p.heading)).normalize(),side=new THREE.Vector3().crossVectors(f,n).normalize();n.crossVectors(side,f);obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(f,n,side));}
  reset(){this.fans.forEach(f=>{f.cheerUntil=0;f.reaction.visible=false;f.dollar.visible=true;});this.followPosition=null;this.followYaw=Math.PI*.75;this.walkCycle=0;this.hero.rotation.y=this.followYaw;this.hero.position.set(5,0,3);this.leakCount=this.leakCursor=this.leakTimer=0;this.leak.geometry.setDrawRange(0,0);this.lastGlass=-1;}
  walk(input,dt){
@@ -154,11 +177,11 @@ export class ImmersiveVisuals {
   // Keep the cracks below the opaque sun strip and the mirror housing.
   ctx.clearRect(0,0,1024,120);this.crackTexture.needsUpdate=true;
  }
- updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
+ updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});this.lean(obj,c);this.detailLevel(obj);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
  update(state,car,dt,rivals,projectile,towOrigin){
   this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;
   const staged=['crowd','podium'].includes(state.phase);this.stage.visible=staged;this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged;
-  this.rivals.forEach((obj,i)=>{obj.visible=['prepare','starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
+  this.rivals.forEach((obj,i)=>{obj.visible=['prepare','starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});this.lean(obj,c);this.detailLevel(obj);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
   const selected=state.fan??this.nearSocial;this.socialMarker.visible=state.phase==='crowd'&&Number.isInteger(selected)&&!!this.fans[selected];if(this.socialMarker.visible){this.socialMarker.position.copy(this.fans[selected].pos).add(new THREE.Vector3(.4,2.85,0));this.socialMarker.rotation.y=this.time*1.5;}
   this.fans.forEach((f,i)=>{const laughing=this.time<f.cheerUntil||state.fan===i&&state.feedback.includes('risada');f.person.rotation.z=laughing?Math.sin(this.time*9)*.08:0;f.dollar.visible=!state.donors.includes(i);f.reaction.visible=this.time<f.cheerUntil;f.reaction.position.y=3.15+Math.max(0,2.3-(f.cheerUntil-this.time))*.15;f.label.material.color.setHex(state.donors.includes(i)?0xc4eb93:0xffffff);});
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);

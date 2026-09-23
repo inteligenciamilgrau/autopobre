@@ -1,4 +1,4 @@
-import {TestCar,clamp,wrap,recognitionInput,MAX_STEER} from './physics.js?v=20260913-burnout';
+import {TestCar,clamp,wrap,recognitionInput,steerLimit} from './physics.js?v=20260913-burnout';
 import {RIVAL_ROSTER,GRID_ROW_SPACING} from './race-roster.js';
 const HALF_LENGTH=2.38,HALF_WIDTH=.93,MASS=1250,INERTIA=MASS*(4.76**2+1.86**2)/12;
 const axes=c=>[[Math.cos(c.heading),Math.sin(c.heading)],[-Math.sin(c.heading),Math.cos(c.heading)]];
@@ -68,7 +68,7 @@ export class RaceField {
    r.maneuverCooldown=Math.max(0,r.maneuverCooldown-dt);r.lane+=clamp(r.targetLane-r.lane,-dt*style.laneRate,dt*style.laneRate);
    const dx=p[1]-p[8]*r.lane-c.x,dy=p[2]+p[7]*r.lane-c.y;
    const steer=Math.atan2(2*2.667*Math.sin(wrap(Math.atan2(dy,dx)-c.heading)),Math.hypot(dx,dy));
-   const turn=clamp(steer/(MAX_STEER/(1+speed/28)),-1,1);input.left=Math.max(0,turn);input.right=Math.max(0,-turn);
+   const turn=clamp(steer/steerLimit(speed),-1,1);input.left=Math.max(0,turn);input.right=Math.max(0,-turn);
    if(speed>r.pace){input.throttle=0;input.brake=Math.max(input.brake,.2);}
    // Brake before a slower car; contact response still handles late and side impacts.
    const traffic=[player,...this.rivals.filter(x=>x!==r).map(x=>x.car)];

@@ -29,22 +29,50 @@ export async function createTrackBranding(data){
  return {root,oldStock,stats:{billboards:16,oldStock:8,autoPobre:8}};
 }
 
+// Painted kerb: 1.2 m yellow/green blocks, worn paint, rubber on the track side
+// and shallow rumble ridges. DataTextures keep this usable in Node tests.
+let curbMaps=null;
+function curbTextures(){
+ if(curbMaps)return curbMaps;
+ const w=64,h=256,color=new Uint8Array(w*h*4),normal=new Uint8Array(w*h*4);
+ const hash=(x,y)=>{const v=Math.sin(x*127.1+y*311.7)*43758.5453;return v-Math.floor(v);};
+ const noise=(x,y)=>{const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy,sx=fx*fx*(3-2*fx),sy=fy*fy*(3-2*fy);
+  const a=hash(ix%16,iy%64),b=hash((ix+1)%16,iy%64),c=hash(ix%16,(iy+1)%64),d=hash((ix+1)%16,(iy+1)%64);return (a+(b-a)*sx)+((c+(d-c)*sx)-(a+(b-a)*sx))*sy;};
+ const yellow=[226,178,46],green=[26,112,52];
+ for(let y=0;y<h;y++)for(let x=0;x<w;x++){
+  const i=(y*w+x)*4,u=x/w,base=y<h/2?yellow:green,edge=Math.min(y%(h/2),h/2-1-y%(h/2));
+  const wear=.78+.22*noise(x/6,y/6)*noise(x/2,y/2+7),rubber=Math.max(0,1-u/.45)*(.25+.35*noise(x/3,y/9)),seam=edge<2?.72:1;
+  for(let k=0;k<3;k++)color[i+k]=Math.round(base[k]*wear*seam*(1-rubber)+18*rubber);
+  color[i+3]=255;
+  // Ridge every 0.4 m along the kerb (six per 2.4 m tile), fading toward the outer edge.
+  const slope=Math.cos(y/h*Math.PI*2*6)*.55*(1-u*.4),nx=(noise(x/4,y/4)-.5)*.12,len=Math.hypot(nx,slope,1);
+  normal[i]=Math.round((nx/len*.5+.5)*255);normal[i+1]=Math.round((-slope/len*.5+.5)*255);normal[i+2]=Math.round((1/len*.5+.5)*255);normal[i+3]=255;
+ }
+ const make=(data,srgb)=>{const t=new THREE.DataTexture(data,w,h,THREE.RGBAFormat);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.magFilter=THREE.LinearFilter;t.minFilter=THREE.LinearMipmapLinearFilter;t.generateMipmaps=true;t.anisotropy=8;if(srgb)t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;return t;};
+ curbMaps={map:make(color,true),normalMap:make(normal,false)};return curbMaps;
+}
+
 export function createCurbs(data){
  const root=new THREE.Group();root.name='Zebras_circuito_completo';
- const probe=new TestCar(data),batches=[[],[]],profile=[[0,.02],[.48,.065],[1.05,.02]];
+ const probe=new TestCar(data),profile=[[0,.02],[.48,.065],[1.05,.02]],L=data.meta.reconstructed_xy_m;
+ const maps=curbTextures(),material=new THREE.MeshStandardMaterial({name:'Zebra_pintada',map:maps.map,normalMap:maps.normalMap,normalScale:new THREE.Vector2(.9,.9),roughness:.62,metalness:0,side:THREE.DoubleSide});
  function vertex(p,index,side,[width,height]){
   const offset=side*(p[4]/2+width),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
   probe.index=index;return [x,probe.sample(x,y).z+height,-y];
  }
- for(const side of [-1,1])for(let i=0;i<data.samples.length;i++){
-  const j=(i+1)%data.samples.length,p=data.samples[i],q=data.samples[j],out=batches[Math.floor(p[0]/4)%2];
-  const lane=pitLane(data,p[0]);if(side===1&&lane&&(lane.entry||lane.exit))continue;
-  const a=profile.map(v=>vertex(p,i,side,v)),b=profile.map(v=>vertex(q,j,side,v));
-  for(let k=0;k<2;k++)out.push(...a[k],...b[k],...a[k+1],...b[k],...b[k+1],...a[k+1]);
- }
- for(const [i,positions] of batches.entries()){
-  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.computeVertexNormals();
-  const m=new THREE.Mesh(g,new THREE.MeshStandardMaterial({color:i?0x187637:0xf1c82a,roughness:.92,side:THREE.DoubleSide}));m.receiveShadow=true;m.name=i?'Zebra_verde_continua':'Zebra_amarela_continua';root.add(m);
+ for(const side of [-1,1]){
+  const positions=[],uvs=[];
+  for(let i=0;i<data.samples.length;i++){
+   const j=(i+1)%data.samples.length,p=data.samples[i],q=data.samples[j];
+   const lane=pitLane(data,p[0]);if(side===1&&lane&&(lane.entry||lane.exit))continue;
+   const a=profile.map(v=>vertex(p,i,side,v)),b=profile.map(v=>vertex(q,j,side,v)),va=p[0]/2.4,vb=(j?q[0]:L)/2.4,u=[0,.46,1];
+   for(let k=0;k<2;k++){
+    positions.push(...a[k],...b[k],...a[k+1],...b[k],...b[k+1],...a[k+1]);
+    uvs.push(u[k],va,u[k],vb,u[k+1],va,u[k],vb,u[k+1],vb,u[k+1],va);
+   }
+  }
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));g.computeVertexNormals();
+  const m=new THREE.Mesh(g,material);m.receiveShadow=true;m.name=side<0?'Zebra_direita':'Zebra_esquerda';root.add(m);
  }
  return root;
 }

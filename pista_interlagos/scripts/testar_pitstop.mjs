@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {CarCondition,CAR_PARTS,PitService} from '../teste/car-condition.js';
-import {TestCar,MAX_STEER,clamp,wrap} from '../teste/physics.js';
+import {TestCar,steerLimit,clamp,wrap} from '../teste/physics.js';
 import {createCurveloData} from '../teste/curvelo-data.js';
 import {pitLane,inPitBox} from '../teste/pit-lane.js';
 import {ImmersiveMode} from '../teste/immersive-mode.js';
@@ -57,7 +57,7 @@ const before=car.clock,progress=m.rivals[0].progress;for(let i=0;i<600;i++)m.ste
 const route=new TestCar(data);route.reset(data.samples.findIndex(p=>p[0]>=1050));route.awaitingStart=true;let laneFrames=0,wallHits=0;
 for(let i=0;i<120*160&&route.laps<1;i++){
  const speed=Math.hypot(route.vx,route.vy),q=route.a[(route.index+Math.round((7+speed*.4)/2))%route.n],lane=pitLane(data,q[0]),d=lane?.offset??0;
- const dx=q[1]-q[8]*d-route.x,dy=q[2]+q[7]*d-route.y,steer=Math.atan2(2*2.667*Math.sin(wrap(Math.atan2(dy,dx)-route.heading)),Math.hypot(dx,dy)),turn=clamp(steer/(MAX_STEER/(1+speed/28)),-1,1);
+ const dx=q[1]-q[8]*d-route.x,dy=q[2]+q[7]*d-route.y,steer=Math.atan2(2*2.667*Math.sin(wrap(Math.atan2(dy,dx)-route.heading)),Math.hypot(dx,dy)),turn=clamp(steer/steerLimit(speed),-1,1);
  route.step({throttle:speed<13?1:0,brake:speed>14?.3:0,left:Math.max(0,turn),right:Math.max(0,-turn)},1/120);
  if(route.surface.pit)laneFrames++;if(route.wallImpactSpeed>1)wallHits++;
 }

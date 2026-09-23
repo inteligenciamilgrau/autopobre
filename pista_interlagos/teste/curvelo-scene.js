@@ -1,11 +1,12 @@
 import * as THREE from 'three';
 import {TestCar} from './physics.js';
 
-export function createCurveloScene(data,roadSurface){
+// groundMaterial/gravelMap come from the shared landscape; the scene falls back to plain colours.
+export function createCurveloScene(data,roadSurface,{groundMaterial=null,gravelMap=null}={}){
  const root=new THREE.Group();root.name='Circuito_Oval_de_Curvelo';
  const car=new TestCar(data),a=data.samples;
  const mat=(color,extras={})=>new THREE.MeshStandardMaterial({color,roughness:.95,...extras});
- const grass=mat(0xffffff,{vertexColors:true}),concrete=mat(0x8f918b),white=mat(0xe9e2cb,{polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}),dark=mat(0x292e30),roof=mat(0x667477,{metalness:.35,roughness:.6});
+ const grass=mat(0xffffff,{vertexColors:true}),concrete=mat(0x8f918b,{name:'Concreto'}),white=mat(0xe9e2cb,{polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}),dark=mat(0x292e30),roof=mat(0x667477,{name:'Boxes_azul',metalness:.35,roughness:.6});
  function mesh(g,m,name){g.computeVertexNormals();const o=new THREE.Mesh(g,m);o.name=name;o.receiveShadow=true;root.add(o);return o;}
  function strip(start,end,material,name,from=0,to=1250){
   const positions=[],uv=[],indices=[];
@@ -39,13 +40,13 @@ export function createCurveloScene(data,roadSurface){
    indices.push(v0,v1,v2,v1,v3,v2);
   }
  }
- const terrain=new THREE.BufferGeometry();terrain.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));terrain.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));terrain.setIndex(indices);mesh(terrain,grass,'Terreno_Cerrado_aproximado');
+ const terrain=new THREE.BufferGeometry();terrain.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));terrain.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));terrain.setIndex(indices);mesh(terrain,groundMaterial??grass,'Terreno_Cerrado_aproximado');
  const shoulder=mat(0x545658);strip(-8.4,-7,shoulder,'Acostamento_externo');strip(7,8.4,shoulder,'Acostamento_interno');
  strip(-7,7,roadSurface.material,'Asfalto_Curvelo');
  for(const side of [-1,1])strip(side*6.75,side*6.89,white,'Linha_borda');
  // Flat turn: external asphalt apron followed by a broad gravel trap.
  strip(-11.5,-8.4,mat(0x66686a),'Escape_asfaltado',880,1100);
- const gravel=strip(-30,-11.5,mat(0xb09c71,{vertexColors:true}),'Caixa_de_brita',890,1085);
+ const gravel=strip(-30,-11.5,mat(gravelMap?0xd6ccb6:0xb09c71,{vertexColors:true,map:gravelMap}),'Caixa_de_brita',890,1085);
  const gravelColors=[];for(let i=0;i<gravel.geometry.attributes.position.count;i++){const c=.75+.2*Math.sin(i*5.1)**2;gravelColors.push(c,c,c);}gravel.geometry.setAttribute('color',new THREE.Float32BufferAttribute(gravelColors,3));
  function box(x,y,z,w,h,d,m,name,heading=0){const o=mesh(new THREE.BoxGeometry(w,h,d),m,name);o.position.set(x,y,z);o.rotation.y=heading;o.castShadow=true;return o;}
  const p=a[0],heading=Math.atan2(p[8],p[7]);
@@ -70,15 +71,5 @@ export function createCurveloScene(data,roadSurface){
   const b=point(710,19+step*1.3);box(b.x,b.y+.4+step*.65,b.z,65,.65,1.5,step%2?white:concrete,'Arquibancada_Curvelo',b.heading);
  }
  const tower=point(1190,-42);box(tower.x,7,tower.z,8,8,7,white,'Torre_cronometragem',tower.heading);box(tower.x,11.3,tower.z,9,.4,8,roof,'Torre_cobertura',tower.heading);
- // Sparse cerrado trees, outside the racing corridor and the service area.
- const bark=mat(0x6a5540),leaves=mat(0x64703c),treePositions=[];
- for(let i=0;i<160;i++){
-  const x=-490+((i*157)%970),y=-410+((i*263)%870);car.index=car.nearest(x,y,true).i;const r=car.sample(x,y);
-  if(Math.abs(r.d)<65||Math.hypot(x,y)<70)continue;treePositions.push([x,car.terrain(x,y),-y,2+(i%5)*.5]);
- }
- for(const [geometry,material,lift] of [[new THREE.CylinderGeometry(.13,.23,2,5),bark,1],[new THREE.IcosahedronGeometry(1,0),leaves,3]]){
-  const trees=new THREE.InstancedMesh(geometry,material,treePositions.length),matrix=new THREE.Matrix4();
-  treePositions.forEach(([x,y,z,size],i)=>{matrix.compose(new THREE.Vector3(x,y+lift,z),new THREE.Quaternion(),new THREE.Vector3(lift===1?1:size,lift===1?1:size*.65,lift===1?1:size));trees.setMatrixAt(i,matrix);});trees.castShadow=true;trees.receiveShadow=true;root.add(trees);
- }
  return root;
 }

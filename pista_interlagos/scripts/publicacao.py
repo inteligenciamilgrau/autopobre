@@ -16,7 +16,7 @@ MODULES = (
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'cockpit.js',
     'driver.js', 'driver-rig.js', 'driver-helmet.js', 'family-phone.js',
     'immersive-mode.js', 'immersive-state.js', 'immersive-visuals.js',
-    'skid-marks.js', 'track-surface.js', 'tyre-smoke.js',
+    'skid-marks.js', 'track-surface.js', 'tyre-smoke.js', 'sky.js', 'landscape.js',
     'style.css', 'immersive.css', 'abertura.css', 'index.html', 'sobre.html',
     'favicon.svg', 'favicon.ico', 'apple-touch-icon.png',
 )
@@ -27,6 +27,8 @@ ASSETS = (
     'piloto/capacete_publico.jpg', 'piloto/referencia_frente.png',
     'texturas/asfalto_diff_v2.jpg', 'texturas/asfalto_nor_gl_v2.jpg', 'texturas/asfalto_rough_v2.jpg',
     'texturas/asfalto_creditos.txt', 'texturas/cockpit_faixa_invent.png',
+    'texturas/grama_diff_v1.jpg', 'texturas/grama_nor_gl_v1.jpg', 'texturas/mato_diff_v1.jpg',
+    'texturas/brita_diff_v1.jpg', 'texturas/concreto_diff_v1.jpg', 'texturas/terreno_creditos.txt',
 )
 THREE = (
     'build/three.module.js', 'build/three.core.js',

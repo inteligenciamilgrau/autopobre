@@ -1,0 +1,17 @@
+Texturas do terreno — Poly Haven, licença CC0 1.0 (domínio público)
+https://polyhaven.com/license
+
+grama_diff_v1.jpg, grama_nor_gl_v1.jpg — Leafy Grass
+https://polyhaven.com/a/leafy_grass
+mato_diff_v1.jpg — Grass Ground
+https://polyhaven.com/a/grass_ground
+brita_diff_v1.jpg — Gravel Floor 03
+https://polyhaven.com/a/gravel_floor_03
+concreto_diff_v1.jpg — Concrete Floor 01
+https://polyhaven.com/a/concrete_floor_01
+
+Mapas de 1024 x 1024 baixados dos arquivos oficiais do Poly Haven e
+recomprimidos em JPEG para a versão web. O shader do terreno escolhe a
+textura a partir das cores da ortofoto GeoSampa 2020 (mata, gramado,
+pavimento, telhados) e da distância até a pista; é uma interpretação
+visual para o jogo, não um levantamento do uso do solo.

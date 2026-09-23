@@ -16,7 +16,7 @@ with sync_playwright() as p:
   b=page.locator(selector).bounding_box();return {'x':b['x']+b['width']/2,'y':b['y']+b['height']/2}
  try:
   page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
-  check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio===1'));shot('abertura')
+  check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio<=1'));shot('abertura')
   page.tap('#settingsButton');check('settings_fit_landscape',page.evaluate("()=>{const r=document.querySelector('#settings').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.right<=innerWidth}"));shot('config')
   page.uncheck('#immersiveMode');page.tap('#settingsBack');page.tap('#start');wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
   session=context.new_cdp_session(page);points=[dict(center('#touchPedals'),y=page.locator('#touchPedals').bounding_box()['y']+18,id=1),dict(center('#touchSteering'),x=page.locator('#touchSteering').bounding_box()['x']+23,id=2)]
