@@ -130,7 +130,7 @@ Blender: **X = leste, Y = norte, Z = cima**, em metros. Origem dos dados: E 3270
 
 Scripts, na ordem: `baixar_lidar.py` (só se precisar obter novamente a fonte), `extrair_tracado.py`, `processar_relevo.py`, `criar_blender.py` executado pelo Blender. Dependências Python locais estão em `scripts/_deps`. Para o teste pronto não é necessário instalar essas bibliotecas: basta o Python existente, os arquivos entregues e um navegador com WebGL2.
 
-Depois dos scripts de criação, execute `modelo_3d/scripts/corrigir_fechamentos_v04.py` com o Blender, a partir da raiz do projeto, para aplicar a revisão atual do carro à cena e ao navegador. As exportações atuais ficam em `../modelo_3d/v04_fechamentos/exports/`, com cópias em `teste/assets/`. As versões anteriores foram preservadas. A verificação no navegador está em `scripts/verificar_fechamentos.py`, com resultado em `dados/validacao_fechamentos_browser.json` e capturas `renders/fechamento_*.png`.
+O carro vem dos dois `.blend` editáveis em `../modelo_3d/v04_fechamentos/`. O [README do modelo](../modelo_3d/v04_fechamentos/README.md) explica como editá-los e exportar os GLBs de `teste/assets/`. A verificação no navegador está em `scripts/verificar_fechamentos.py`, com resultado em `dados/validacao_fechamentos_browser.json` e capturas `renders/fechamento_*.png`.
 
 ## Verificação
 

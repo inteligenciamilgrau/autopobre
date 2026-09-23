@@ -55,9 +55,17 @@ desktop.ini
 
 # Local art/model workshop. Runtime copies stay in teste/assets/.
 # These originals remain on disk; keep a separate backup of the workshop.
-/carro/
+# The carro/ reference photos are versioned (metadata stripped before adding).
 /geracoes_carro/
 /geracoes_piloto/
 /geracoes_jogo/
-/modelo_3d/
+# Only the editable V4 car scenes and their game export script are versioned.
+/modelo_3d/*
+!/modelo_3d/v04_fechamentos/
+/modelo_3d/v04_fechamentos/*
+!/modelo_3d/v04_fechamentos/*.blend
+!/modelo_3d/v04_fechamentos/README.md
+!/modelo_3d/scripts/
+/modelo_3d/scripts/*
+!/modelo_3d/scripts/exportar_glb_jogo.py
 /pista_interlagos/teste/assets/piloto/referencia_capacete.jpg
