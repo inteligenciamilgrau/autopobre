@@ -26,7 +26,9 @@ export class TyreSmoke {
   const c=Math.cos(car.heading),s=Math.sin(car.heading);
   for(let i=0;i<wheels.length;i++){
    const w=wheels[i],x=car.x+c*w.x-s*w.y,y=car.y+s*w.x+c*w.y,p=car.sample(x,y),speed=Math.hypot(car.vx,car.vy);
-   const dust=!p.onRoad&&speed>4,intensity=dust?Math.min(.75,(speed-4)/22)*(w.front?.45:1):p.onRoad?Math.max(0,w.strength-.12):0;
+   const down=!car.wheelLoad||car.wheelLoad[i]>0,scraping=!!car.hullContact&&!p.onRoad&&speed>3,dust=!p.onRoad&&(speed>4&&down||scraping);
+   // Tyres throw dust only while touching the ground; a body sliding over soil raises its own cloud.
+   const intensity=!down&&!scraping?0:dust?Math.max(down?Math.min(.75,(speed-4)/22)*(w.front?.45:1):0,scraping?Math.min(.9,speed/15):0):p.onRoad?Math.max(0,w.strength-.12):0;
    this.emit[i]+=intensity*(dust?20:32)*dt;
    while(this.emit[i]>=1){
     this.emit[i]--;const q=this.particles[this.cursor];this.cursor=(this.cursor+1)%this.capacity;this.total++;

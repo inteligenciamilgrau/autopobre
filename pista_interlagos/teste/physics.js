@@ -1,12 +1,16 @@
-// Modelo de teste: bicicleta, aderencia limitada, gravidade no plano medido.
+// Modelo de jogo: corpo rigido sobre quatro suspensoes que leem o relevo medido,
+// pneus por eixo com limite de atrito e contato da carroceria com o chao.
 // Nao e simulacao homologada de pneus/suspensao do Old Stock.
 import {GRID_START_BACK} from './race-roster.js';
-import {pitLane} from './pit-lane.js';
+import {pitLane,pitGeometry,locatePit,pitLimit,wallContact} from './pit-lane.js';
 export const clamp=(x,a,b)=>Math.max(a,Math.min(b,x));
 export const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
 export const MAX_STEER=.72;
 export const WHEELBASE=2.667;
-const G=9.81,ROAD_GRIP=1.24;
+// Dry grass grips less than asphalt but is far from ice.
+const G=9.81,ROAD_GRIP=1.24,GRASS_GRIP=.78,GRASS_ROLLING=.7;
+// Pit lane speed limit tolerance, as in racing: 2 km/h over.
+const PIT_TOLERANCE=2/3.6;
 // Road-wheel lock follows the grip limit: full input reaches the limit at any
 // speed and partial input turns proportionally, instead of saturating above ~70 km/h.
 export function steerLimit(speed){
@@ -24,6 +28,44 @@ const SHIFT_TIME=.16;
 const TORQUE_TO_ACCEL=.1191*.9/.316/1250;
 // Opala CdA of about 0.9 m2 at sea-level air density, over 1250 kg.
 const AERO_DRAG=.5*1.2*.9/1250;
+// --- Rigid body. The origin is the centre of mass, 0.52 m above the ground,
+// 1.55 m behind the front axle and 1.117 m ahead of the rear axle.
+export const CG_HEIGHT=.52;
+const MASS=1250,REAR_AXLE=1.117,FRONT_AXLE=WHEELBASE-REAR_AXLE,HALF_TRACK=.804;
+// Yaw inertia m*a*b makes each axle the other's centre of percussion, so the
+// front and rear tyre constraints can be solved independently.
+const YAW_INERTIA=MASS*FRONT_AXLE*REAR_AXLE,PITCH_INERTIA=2350,ROLL_INERTIA=540;
+const FRONT_WEIGHT=REAR_AXLE/WHEELBASE,REAR_WEIGHT=FRONT_AXLE/WHEELBASE;
+// Suspension: 7 cm static sag (about 1.9 Hz in heave), 9 cm more to the bump stops.
+const SAG=.07,BUMP_TRAVEL=.09,DROOP=.11,ANTI_ROLL=26000,BUMP_STIFFNESS=320000,BUMP_DAMPING=9000,IMPACT_SCRUB=.6,TYRE_RELAXATION=.08;
+// Physics frame: +x forward, +y left. Order matches SkidMarks: FL, FR, RL, RR.
+export const SUSPENSION_WHEELS=Object.freeze([[FRONT_AXLE,HALF_TRACK],[FRONT_AXLE,-HALF_TRACK],[-REAR_AXLE,HALF_TRACK],[-REAR_AXLE,-HALF_TRACK]].map(([x,y])=>{
+ const load=MASS*G*(x>0?FRONT_WEIGHT:REAR_WEIGHT)/2,stiffness=load/SAG;
+ return Object.freeze({x,y,front:x>0,load,stiffness,damping:.85*Math.sqrt(stiffness*load/G)});
+}));
+// Body shell measured on the Opala model, relative to the centre of mass. The
+// first nine can meet the ground in ordinary driving: the lowest points of the
+// front and rear overhangs (about 19 and 15 degrees of approach and departure),
+// the sills and the floor, whose lowest point is the exhaust. Nose, tail,
+// shoulders, beltline and roof touch only when the car is upset.
+const HULL=[[2.25,.75,-.28],[2.25,-.75,-.28],[-2.05,.8,-.27],[-2.05,-.8,-.27],[.2,.93,-.34],[.2,-.93,-.34],[1,0,-.36],[0,0,-.36],[-1.4,0,-.41],
+ [2.42,.7,0],[2.42,-.7,0],[-2.35,.8,-.1],[-2.35,-.8,-.1],[2.3,.85,.28],[2.3,-.85,.28],[-2.3,.85,.28],[-2.3,-.85,.28],[.2,.95,.4],[.2,-.95,.4],[.35,.66,.86],[.35,-.66,.86],[-1.05,.66,.86],[-1.05,-.66,.86]];
+// The underbody skids over grass and soil; bodywork and roof scrape harder.
+const LOW_HULL=9,UNDERBODY_FRICTION=.3,HULL_FRICTION=.5;
+// Handling balance: the front reaches the limit first; the rear keeps a reserve
+// until braking, power, the handbrake or a slide takes it away.
+// Off the asphalt the rear keeps a wider margin, so grass pushes wide instead of spinning.
+const FRONT_BALANCE=.96,REAR_BALANCE=1.07,LOOSE_REAR_BALANCE=1.18,BRAKE_FRONT=.62;
+// Rear slide angle widens the usable lock for counter-steer, and castor pulls the wheels toward it.
+const COUNTER_RANGE=.9,CASTER_ALIGN=.3;
+// Marshals turn an overturned car back onto its wheels after it comes to rest.
+export const RIGHTING_DELAY=3;
+const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
+// Past the peak slip angle a tyre slides and grips less: what turns a drift into a spin.
+const slideGrip=(slip,along,drop)=>1-drop*smooth((Math.atan2(Math.abs(slip),Math.max(Math.abs(along),2))-.1)/.35);
+// Soil piles up against a tyre sliding sideways across it: a moderate slide
+// ploughs to a stop sooner, and a fast one can trip the car over.
+const trip=slip=>1+.3*smooth((Math.abs(slip)-2)/6)+1.15*smooth((Math.abs(slip)-10)/12);
 export function engineTorque(rpm){
  for(let i=1;i<TORQUE_CURVE.length;i++)if(rpm<=TORQUE_CURVE[i][0]){const [r0,t0]=TORQUE_CURVE[i-1],[r1,t1]=TORQUE_CURVE[i];return t0+(t1-t0)*(rpm-r0)/(r1-r0);}
  return 0;
@@ -31,9 +73,11 @@ export function engineTorque(rpm){
 export const GUARDRAIL_CLEARANCE=5;
 // Game-art selection from the GeoSampa overview, not a surveyed barrier inventory.
 // Open the run-offs and infield; retain selected straight and boundary sections.
+// On the left, the pit wall takes over from the pit entry after the Cafe
+// until the pit exit rejoins on the back straight.
 const INTERLAGOS_RAILS={
  '-1':[[0,160],[700,1300],[1780,1980],[2260,2420],[2610,2780],[3310,Infinity]],
- '1':[[0,180],[780,1200],[1950,2180],[3490,Infinity]]
+ '1':[[885,1200],[1950,2180],[3490,3900]]
 };
 const FULL_RAIL=[[0,Infinity]];
 export function guardrailSections(data,side){return data.meta.id==='curvelo'?FULL_RAIL:INTERLAGOS_RAILS[side<0?'-1':'1'];}
@@ -51,51 +95,125 @@ export function guardrailClearance(data,s,side){
  return 5+30*smooth((s-770)/100)*(1-smooth((s-1110)/95));
 }
 export class TestCar {
- constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.reset();}
+ constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.pitGeo=pitGeometry(data);this.axes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};this.reset();}
  resetGrid(){const target=this.data.meta.reconstructed_xy_m-GRID_START_BACK;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));this.awaitingStart=true;}
- reset(index=0){this.awaitingStart=false;const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.rpm=IDLE_RPM;this.shiftTimer=0;this.shifts=0;this.longAccel=0;this.latAccel=0;this.surface=this.sample(this.x,this.y);}
- nearest(x,y,global=false){
+ reset(index=0){this.awaitingStart=false;const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.rpm=IDLE_RPM;this.shiftTimer=0;this.shifts=0;this.longAccel=0;this.latAccel=0;this.rightings=0;this.rightedAt=null;this.crashImpactSpeed=0;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.settle();}
+ // Seat the body on its wheels at the current position and heading: level with
+ // the ground under the four tyres, and clear of any bank under the body.
+ settle(){
+  const p=this.sample(this.x,this.y),c=Math.cos(this.heading),s=Math.sin(this.heading),gx=p.gx??0,gy=p.gy??0;
+  this.surface=p;if(Number.isInteger(p.i))this.index=p.i;
+  const at=(fx,ly)=>this.sample(this.x+c*fx-s*ly,this.y+s*fx+c*ly,this.index).z;
+  const fl=at(FRONT_AXLE,HALF_TRACK),fr=at(FRONT_AXLE,-HALF_TRACK),rl=at(-REAR_AXLE,HALF_TRACK),rr=at(-REAR_AXLE,-HALF_TRACK);
+  const along=(fl+fr-rl-rr)/(2*WHEELBASE),across=(fl+rl-fr-rr)/(4*HALF_TRACK);
+  this.pitch=-Math.atan(along);this.roll=Math.atan(across);
+  this.z=(fl+fr+rl+rr)/4-along*(FRONT_AXLE-REAR_AXLE)/2+CG_HEIGHT*Math.sqrt(1+along*along+across*across);
+  const {f,l,u}=this.updateAxes();let lift=0;
+  for(const [px,py,pz] of [...SUSPENSION_WHEELS.map(w=>[w.x,w.y,-CG_HEIGHT]),...HULL.slice(0,LOW_HULL)]){
+   const rx=f[0]*px+l[0]*py+u[0]*pz,ry=f[1]*px+l[1]*py+u[1]*pz,rz=f[2]*px+l[2]*py+u[2]*pz;
+   lift=Math.max(lift,this.sample(this.x+rx,this.y+ry,this.index).z-this.z-rz);
+  }
+  this.z+=lift;this.vz=this.vx*gx+this.vy*gy;this.pitchRate=this.rollRate=0;
+  // No previous strut length: the first step starts without a damper kick.
+  this.extension=[NaN,NaN,NaN,NaN];this.wheelLoad=SUSPENSION_WHEELS.map(w=>w.load);this.wheelTravel=[0,0,0,0];
+  this.frontLoad=this.rearLoad=1;this.gripFront=MASS*G*FRONT_WEIGHT;this.gripRear=MASS*G*REAR_WEIGHT;this.wheelsDown=4;this.airTime=0;this.hullContact=false;this.overturned=0;this.upright=Math.cos(this.pitch)*Math.cos(this.roll);
+  this.stepX=this.x;this.stepY=this.y;
+ }
+ nearest(x,y,global=false,hint=null){
   let best=Infinity,out;
-  const count=global?this.n:81,start=global?0:this.index-40;
+  // Contact probes stay within a few metres of the car: a short window around it suffices.
+  const count=global?this.n:hint===null?81:9,start=global?0:hint===null?this.index-40:hint-4;
   for(let k=0;k<count;k++){
    const i=(start+k+this.n)%this.n,a=this.a[i],b=this.a[(i+1)%this.n];
    const dx=b[1]-a[1],dy=b[2]-a[2],u=clamp(((x-a[1])*dx+(y-a[2])*dy)/(dx*dx+dy*dy),0,1);
    const ex=x-a[1]-u*dx,ey=y-a[2]-u*dy,d2=ex*ex+ey*ey;
    if(d2<best){best=d2;out={i,u,ex,ey};}
   }
-  if(best>10000&&!global)return this.nearest(x,y,true);
+  if(best>10000&&!global&&hint===null)return this.nearest(x,y,true);
   return out;
  }
  terrain(x,y){const t=this.data.terrain,fx=clamp((x-t.x0)/t.step,0,t.nx-1.001),fy=clamp((y-t.y0)/t.step,0,t.ny-1.001),ix=Math.floor(fx),iy=Math.floor(fy),u=fx-ix,v=fy-iy,k=iy*t.nx+ix;
   return (t.z[k]*(1-u)+t.z[k+1]*u)*(1-v)+(t.z[k+t.nx]*(1-u)+t.z[k+t.nx+1]*u)*v;
  }
- sample(x,y){
-  const q=this.nearest(x,y),a=this.a[q.i],b=this.a[(q.i+1)%this.n],mix=k=>a[k]+(b[k]-a[k])*q.u;
-  const tx=mix(7),ty=mix(8),lx=-ty,ly=tx,d=q.ex*lx+q.ey*ly,bank=mix(5),grade=mix(6),width=mix(4);
-  let gx=tx*grade+lx*bank,gy=ty*grade+ly*bank;
-  const roadz=mix(3)+bank*d,blend=clamp((Math.abs(d)-width/2)/3,0,1);
+ sample(x,y,hint=null){
+  const q=this.nearest(x,y,false,hint),a=this.a[q.i],b=this.a[(q.i+1)%this.n],mix=k=>a[k]+(b[k]-a[k])*q.u;
+  const tx=mix(7),ty=mix(8),lx=-ty,ly=tx,d=q.ex*lx+q.ey*ly,width=mix(4),L=this.data.meta.reconstructed_xy_m;
+  let bank=mix(5),grade=mix(6),gx=tx*grade+lx*bank,gy=ty*grade+ly*bank,roadz=mix(3)+bank*d,outside=Math.abs(d)-width/2;
+  let s=(a[0]+q.u*Math.hypot(b[1]-a[1],b[2]-a[2]))%L,pit=false,pitS=null,pitD=null;
+  // The surveyed pit lane has its own profile; off both roads the nearer one blends into the terrain.
+  const lane=this.pitGeo?locatePit(this.pitGeo,x,y):null;
+  if(lane){
+   // Where the lanes overlap (entry, final merge) the painted pit lane is the pit's;
+   // both profiles are joined there, so the switch has no step.
+   const out=Math.max(lane.lo-lane.d,lane.d-lane.hi),inLane=lane.d>=lane.laneLo&&lane.d<=lane.laneHi;
+   if(out<outside&&outside>0||inLane){
+    pit=out<=0;outside=out;bank=lane.bank;grade=lane.grade;roadz=lane.z+bank*lane.d;
+    gx=lane.tx*grade+lane.lx*bank;gy=lane.ty*grade+lane.ly*bank;pitS=lane.s;pitD=lane.d;
+    // Lap distance keeps counting along the track while the car runs through the pits.
+    if(pit)s=lane.mainS;
+   }
+  }
+  const blend=clamp(outside/3,0,1);
   // Off the asphalt the car sits on the LiDAR terrain, so it must also lean and roll with it.
   if(blend>0){const e=1.5,tx2=(this.terrain(x+e,y)-this.terrain(x-e,y))/(2*e),ty2=(this.terrain(x,y+e)-this.terrain(x,y-e))/(2*e);gx+=(tx2-gx)*blend;gy+=(ty2-gy)*blend;}
-  const s=(a[0]+q.u*Math.hypot(b[1]-a[1],b[2]-a[2]))%this.data.meta.reconstructed_xy_m;
-  const lane=pitLane(this.data,s),pit=!!lane&&Math.abs(d-lane.offset)<=lane.halfWidth&&d>width/2;
-  const z=pit?3.055:roadz*(1-blend)+this.terrain(x,y)*blend+.055;
-  return {i:q.i,u:q.u,s:s>this.data.meta.reconstructed_xy_m-.01?0:s,d,z,width,bank:pit?0:bank,grade:pit?0:grade,gx:pit?0:gx,gy:pit?0:gy,tx,ty,lx,ly,pit,onRoad:pit||Math.abs(d)<width/2};
+  const service=pitLane(this.data,s);
+  if(service&&Math.abs(d-service.offset)<=service.halfWidth&&d>width/2){pit=true;bank=grade=gx=gy=0;}
+  const z=service&&pit?3.055:roadz*(1-blend)+this.terrain(x,y)*blend+.055;
+  return {i:q.i,u:q.u,s:s>L-.01?0:s,d,z,width,bank,grade,gx,gy,tx,ty,lx,ly,pit,pitS,pitD,onRoad:pit||Math.abs(d)<width/2};
+ }
+ // Ground height and slope under one contact point near the car.
+ ground(x,y){return this.sample(x,y,this.index);}
+ // Body axes in the world (x, y horizontal, z up): forward, left, up, and the pitch axis.
+ updateAxes(){
+  const {f,l,u,j}=this.axes,ch=Math.cos(this.heading),sh=Math.sin(this.heading),cp=Math.cos(this.pitch),sp=Math.sin(this.pitch),cr=Math.cos(this.roll),sr=Math.sin(this.roll);
+  f[0]=ch*cp;f[1]=sh*cp;f[2]=-sp;
+  l[0]=ch*sr*sp-sh*cr;l[1]=sh*sr*sp+ch*cr;l[2]=sr*cp;
+  u[0]=ch*cr*sp+sh*sr;u[1]=sh*cr*sp-ch*sr;u[2]=cr*cp;
+  j[0]=-sh;j[1]=ch;j[2]=0;
+  this.upright=u[2];return this.axes;
+ }
+ // Rendering pose: the model origin sits on the ground below the centre of mass.
+ pose(){const {f,l,u}=this.updateAxes();return {x:this.x-u[0]*CG_HEIGHT,y:this.y-u[1]*CG_HEIGHT,z:this.z-u[2]*CG_HEIGHT,forward:[...f],left:[...l],up:[...u]};}
+ // Velocity of a body point at offset r from the centre of mass.
+ pointVelocity(r,out){
+  const {f,j}=this.axes,wx=this.rollRate*f[0]+this.pitchRate*j[0],wy=this.rollRate*f[1]+this.pitchRate*j[1],wz=this.rollRate*f[2]+this.yaw;
+  out[0]=this.vx+wy*r[2]-wz*r[1];out[1]=this.vy+wz*r[0]-wx*r[2];out[2]=this.vz+wx*r[1]-wy*r[0];return out;
+ }
+ // Impulse per unit mass (a velocity change) at offset r. Yaw is optional so the
+ // axle solver, which already set yaw, can add only the roll and pitch it causes.
+ impulse(r,px,py,pz,linear=true,yaw=true){
+  if(linear){this.vx+=px;this.vy+=py;this.vz+=pz;}
+  const {f,j}=this.axes,tx=r[1]*pz-r[2]*py,ty=r[2]*px-r[0]*pz,tz=r[0]*py-r[1]*px;
+  if(yaw)this.yaw+=tz*MASS/YAW_INERTIA;
+  this.pitchRate+=(tx*j[0]+ty*j[1])*MASS/PITCH_INERTIA;
+  this.rollRate+=(tx*f[0]+ty*f[1]+tz*f[2])*MASS/ROLL_INERTIA;
+ }
+ // Inverse effective mass (relative to the car's mass) for an impulse along n at r.
+ inverseMass(r,nx,ny,nz){
+  const {f,j}=this.axes,tx=r[1]*nz-r[2]*ny,ty=r[2]*nx-r[0]*nz,tz=r[0]*ny-r[1]*nx,pitch=tx*j[0]+ty*j[1],roll=tx*f[0]+ty*f[1]+tz*f[2];
+  return 1+MASS*(tz*tz/YAW_INERTIA+pitch*pitch/PITCH_INERTIA+roll*roll/ROLL_INERTIA);
  }
  step(input,dt){
-  this.wallImpactSpeed=0;
+  this.wallImpactSpeed=0;this.crashImpactSpeed=0;
+  // Scripts and other systems may place the car directly: seat it on the ground there.
+  if(!(Math.hypot(this.x-this.stepX,this.y-this.stepY)<.5))this.settle();
   const p=this.surface,oldX=this.x,oldY=this.y;
   const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
-  const condition=this.condition?.factors;
-  const mu=(p.onRoad?(input.handbrake?.99:ROAD_GRIP):.62)*(condition?.grip??1);
+  const condition=this.condition?.factors,grounded=this.wheelsDown>0;
+  const loose=!p.onRoad,mu=(p.onRoad?(input.handbrake?.99:ROAD_GRIP):GRASS_GRIP)*(condition?.grip??1);
   // Smooth the driver's input, then scale it to the lock available at this speed.
   const command=clamp(input.left-input.right,-1,1),inputResponse=command*(this.steerInput??0)<0?20:12;
   this.steerInput=(this.steerInput??0)+(command-(this.steerInput??0))*(1-Math.exp(-dt*inputResponse));
-  this.steer=this.steerInput*steerLimit(speed)*(condition?.steering??1);
+  // With the tail out, steering against the slide gets extra lock up to the
+  // slide angle, and castor already turns the wheels part of the way.
+  const drift=v>3?Math.atan2(lat-REAR_AXLE*this.yaw,v):0,baseSteer=this.steerInput*steerLimit(speed)*(condition?.steering??1);
+  const counterSteer=this.steerInput*drift>0?this.steerInput*Math.abs(drift)*COUNTER_RANGE:0;
+  this.steer=clamp(baseSteer+counterSteer+drift*CASTER_ALIGN,-MAX_STEER,MAX_STEER);
   // Cockpit wheel keeps the familiar hand travel: road-wheel angle is small at speed.
-  this.steerVisual=this.steerInput*MAX_STEER*(condition?.steering??1)/(1+speed/28);
+  this.steerVisual=this.steerInput*MAX_STEER*(condition?.steering??1)/(1+speed/28)+this.steer-baseSteer;
   // Deliberate low-speed stunt assist: hold + throttle spins the driven rear
   // tyres; steering allows a tight powered circle. Ordinary driving is unchanged.
-  const burning=!!(input.handbrake&&input.throttle&&!input.reverse&&p.onRoad&&speed<12);
+  const burning=!!(input.handbrake&&input.throttle&&!input.reverse&&p.onRoad&&speed<12&&this.wheelsDown===4);
   this.burnout=(this.burnout??0)+((burning?input.throttle:0)-(this.burnout??0))*(1-Math.exp(-dt*(burning?3:input.throttle?2:7)));
   const turn=clamp(this.steerInput/(1+speed/28),-1,1);
   // --- Engine and five-speed gearbox (automatic, with a short torque cut per shift).
@@ -118,63 +236,53 @@ export class TestCar {
    if(wheelRpm>=REDLINE_RPM)drive=0;
    if(this.shiftTimer>0)drive*=.12;
   }
+  // Pit lane: no limiter. Beyond the painted limit the driver answers for it:
+  // speeding there costs the lap, like cutting the track.
+  const limit=pitLimit(this.pitGeo,p);this.limiter=limit!==null;
+  if(limit!==null&&speed>limit+PIT_TOLERANCE){if(this.lapValid)this.pitPenalty={kmh:speed*3.6,clock:this.clock};this.lapValid=false;this.invalidReason='pit';}
   if(input.reverse)drive-=3*(condition?.power??1);
   // Rear-wheel drive: acceleration moves load onto the rear axle, and a
   // traction limiter keeps the driven tyres just past the peak of grip.
-  const rearShare=.47+clamp(drive,0,8)*.5/(G*WHEELBASE),traction=mu*G*rearShare*1.04;
+  // Unloaded rear tyres (a crest, a jump) have nothing to push against; climbing
+  // a slope loads them and they push harder. The squat under power is in rearShare.
+  const rearGrip=clamp(this.rearLoad/(1+.034*Math.max(0,drive)),0,1.35),rearShare=.47+clamp(drive,0,8)*.5/(G*WHEELBASE),traction=mu*G*rearShare*1.04*rearGrip;
   let wheelspin=0;
   // Loose ground still takes some push from spinning tyres.
-  if(!burning&&drive>traction){wheelspin=drive-traction;drive=traction+(p.onRoad?0:wheelspin*.55);}
-  this.rearSlipSpeed=Math.max(this.burnout*20,p.onRoad&&speed<30?clamp(wheelspin*1.4,0,7):0);
+  if(!burning&&drive>traction){wheelspin=drive-traction;drive=traction+(p.onRoad?0:wheelspin*.55*rearGrip);}
+  this.rearSlipSpeed=Math.max(this.burnout*20,p.onRoad&&speed<30&&grounded?clamp(wheelspin*1.4,0,7):0,grounded?0:input.throttle*(this.gear>0)*9);
   this.rpm=this.gear<0?IDLE_RPM+Math.abs(v)*3.6*110+input.reverse*400:clamp(engineRpm+this.rearSlipSpeed*3.6*ratio*.6+(burning?input.throttle*3500:0),IDLE_RPM,REDLINE_RPM+80);
   // --- Longitudinal forces.
-  // Grass grips the tyres more firmly but costs speed through rolling resistance.
-  const rolling=p.onRoad?.16:1.9+.085*Math.abs(v);
+  // Turf rolls harder than asphalt; beyond that, grip, bumps and slopes slow a car on grass.
+  const rolling=p.onRoad?.16:GRASS_ROLLING;
   const engineBrake=this.gear>0&&input.throttle<.05&&this.shiftTimer===0&&Math.abs(v)>1?.18+.5*clamp(wheelRpm/REDLINE_RPM,0,1):0;
-  const drag=AERO_DRAG*v*Math.abs(v)+Math.sign(v)*Math.min(rolling+engineBrake,Math.abs(v)/dt);
   // Brakes cannot exceed the tyres: on grass the car simply cannot stop as hard.
   const brakeDecel=Math.min(Math.max(input.brake*11*(condition?.brakes??1),input.handbrake&&!burning?7:0),mu*G*1.02);
-  const braking=brakeDecel*Math.min(1,Math.abs(v)/Math.max(dt*11,.001))*Math.sign(v);
-  // --- Combined grip: longitudinal work leaves less of the tyre for cornering.
-  const longUse=clamp(Math.max(Math.abs(v)>2?brakeDecel:0,Math.max(0,drive))/(mu*G*1.32),0,.9),circle=Math.sqrt(1-longUse*longUse);
-  // Braking loads the front tyres (sharper turn-in); a rear axle busy putting
-  // power down lets the tail step out slightly on corner exit.
-  const frontLoad=1+.09*clamp(brakeDecel/G,0,1)-.05*clamp(drive/G,0,1);
-  const powerSlide=p.onRoad&&!input.handbrake?clamp((drive/traction-.86)/.14,0,1)*clamp((speed-4)/6,0,1):0;
-  let targetYaw=v/WHEELBASE*Math.tan(this.steer);
-  // Reserve some tyre force for correcting sideways motion on corner entry.
-  // Handbrake stunts retain their previous grip budget.
-  const yawLimit=mu*G*(p.onRoad&&!input.handbrake?.94:1)*circle*frontLoad*(1+.16*powerSlide)/Math.max(speed,3);
-  targetYaw=clamp(targetYaw,-yawLimit,yawLimit);
-  if(burning)targetYaw=input.brake?0:turn*1.35*this.burnout;
-  const yawResponse=burning?6:targetYaw*this.yaw<0?17:12;
-  this.yaw+=(targetYaw-this.yaw)*(1-Math.exp(-dt*yawResponse));
-  this.heading=wrap(this.heading+this.yaw*dt);
-  const gx=-G*p.gx,gy=-G*p.gy;
-  // The car origin is 1.117 m ahead of the rear axle. In a gripping turn its
-  // lateral velocity is yaw * rearOffset; damping it toward zero made the rear slide.
-  const lateralLimit=mu*G*(input.handbrake?.45:1)*circle*(1-.18*powerSlide);
-  const turnAcross=clamp(v*this.yaw,-lateralLimit,lateralLimit);
-  const rollingLateral=this.yaw*1.117,gravityAcross=-gx*s+gy*c;
-  const across=clamp(turnAcross+(rollingLateral-lat)*(input.handbrake?1.5:12)*(condition?.stability??1)-gravityAcross,-lateralLimit,lateralLimit);
-  // The turning force is perpendicular to travel, rather than adding free speed.
-  const along=drive-drag-braking-(Math.abs(v)>.5?turnAcross*lat/v:0);
-  this.vx+=(along*c-across*s+gx)*dt;this.vy+=(along*s+across*c+gy)*dt;
-  // Forces felt by the chassis, for suspension and camera motion.
-  this.longAccel=along;this.latAccel=across;
+  // --- Combined grip: longitudinal work leaves less of each axle's tyres for
+  // cornering. Front-biased brakes make hard braking in a turn push wide, not spin.
+  const braking=Math.abs(v)>2&&!(input.handbrake&&!input.brake)?brakeDecel:0;
+  const frontUse=clamp(braking*BRAKE_FRONT/(mu*G*FRONT_WEIGHT*1.5),0,.9),rearUse=clamp((braking*(1-BRAKE_FRONT)+Math.max(0,drive)*(loose?.35:.7))/(mu*G*REAR_WEIGHT*1.5),0,.9);
+  // A rear axle busy putting power down lets the tail step out on corner
+  // exit; spinning tyres, a locked handbrake or a tired rear suspension hold even less.
+  // In soil a driven tyre digs its tread in and keeps most of its side bite.
+  const powerSlide=p.onRoad&&!input.handbrake&&traction>0?clamp((drive/traction-.86)/.14,0,1)*clamp((speed-4)/6,0,1):0;
+  const grip={front:mu*Math.sqrt(1-frontUse*frontUse)*FRONT_BALANCE,
+   rear:mu*Math.sqrt(1-rearUse*rearUse)*(loose?LOOSE_REAR_BALANCE:REAR_BALANCE)*(input.handbrake&&!burning?.45:1)*(1-.3*powerSlide)*(1-(loose?.15:.45)*clamp(wheelspin/4,0,1))*(.8+.2*(condition?.stability??1)),loose};
   if(burning){
-   // Bracing at rest, then a tight powered circle that fits the asphalt width.
-   const crawl=input.brake?0:Math.abs(turn)*2*this.burnout;
-   // Let the rear swing outward around the gripping front end.
-   const side=input.brake?0:-this.yaw*1.1;
-   const blend=1-Math.exp(-dt*8);
-   this.vx+=(crawl*c-side*s-this.vx)*blend;
-   this.vy+=(crawl*s+side*c-this.vy)*blend;
-   if(Math.abs(turn)<.02&&speed<.8){this.vx=0;this.vy=0;}
+   // The stunt assist steers the rotation directly, as a sliding pivot on the front tyres.
+   const targetYaw=input.brake?0:turn*1.35*this.burnout;
+   this.yaw+=(targetYaw-this.yaw)*(1-Math.exp(-dt*6));
   }
-  if(input.brake&&speed<.3){this.vx=0;this.vy=0;}
-  if(input.handbrake&&!burning&&speed<.3){this.vx=0;this.vy=0;}
-  this.x+=this.vx*dt;this.y+=this.vy*dt;
+  // --- Rigid-body integration: finer sub-steps while the body is upset or airborne.
+  const wild=this.wheelsDown<4||this.hullContact||this.upright<.9,count=dt>0?Math.max(1,Math.ceil(dt*(wild?360:120)-1e-6)):0,h=dt/count;
+  // Slipstream: RaceField sets car.draft (0-0.5) for one step when this car runs in a wake.
+  const forces={dt,drive,rolling,engineBrake,brakeDecel,burning,grip,drag:AERO_DRAG*(1-clamp(this.draft||0,0,.5)),
+   // Bracing at rest, then a tight powered circle that fits the asphalt width.
+   crawl:input.brake?0:Math.abs(turn)*2*this.burnout,swing:!input.brake,braced:Math.abs(turn)<.02&&speed<.8,
+   hold:grounded&&speed<.3&&!!(input.brake||input.handbrake&&!burning)};
+  this.longAccel=this.latAccel=0;this.draft=0;
+  for(let k=0;k<count;k++)this.integrate(h,forces);
+  // Forces felt by the chassis, for suspension and camera motion.
+  if(count){this.longAccel/=dt;this.latAccel/=dt;}
   this.surface=this.sample(this.x,this.y);this.index=this.surface.i;
   // Visible sections and collision share the same openings and shoulder clearance.
   const r=this.surface,side=Math.sign(r.d),angle=wrap(this.heading-Math.atan2(r.ty,r.tx));
@@ -192,9 +300,148 @@ export class TestCar {
    }
    this.surface=this.sample(this.x,this.y);
   }
+  // Pit wall, garage fronts and the walls along the pit exit.
+  for(let pass=0;this.pitGeo&&pass<2;pass++){
+   const hit=wallContact(this.pitGeo,this.x,this.y,this.heading);if(!hit)break;
+   this.x+=hit.nx*hit.depth;this.y+=hit.ny*hit.depth;
+   const into=-(this.vx*hit.nx+this.vy*hit.ny);
+   if(into>0){
+    this.wallImpactSpeed=Math.max(this.wallImpactSpeed,into);
+    const keep=1-Math.min(.18,into*.006),tx=(this.vx+into*hit.nx)*keep,ty=(this.vy+into*hit.ny)*keep;
+    this.vx=tx+hit.nx*into*.22;this.vy=ty+hit.ny*into*.22;this.yaw*=.65;
+   }
+   this.surface=this.sample(this.x,this.y);
+  }
   this.distance+=speed*dt;this.clock+=dt;this.spin+=v*dt/.31595;
   this.rearSpin=(this.rearSpin??0)+(input.handbrake&&!burning?0:v+this.rearSlipSpeed)*dt/.31595;
+  // Upside down or on its side and at rest: after a pause the marshals right it.
+  const resting=speed<1.5&&Math.abs(this.vz)<1.5&&Math.abs(this.yaw)+Math.abs(this.rollRate)+Math.abs(this.pitchRate)<1.2;
+  if(this.upright<.45&&resting)this.overturned+=dt;else if(this.upright>.8)this.overturned=0;
+  if(this.overturned>RIGHTING_DELAY){this.vx=this.vy=this.yaw=0;this.settle();this.rightings++;this.rightedAt=this.clock;}
+  this.stepX=this.x;this.stepY=this.y;
   this.trackLap(p,this.surface,Math.hypot(this.x-oldX,this.y-oldY),v);
+ }
+ integrate(h,f){
+  const {f:F,l:L,u:U}=this.updateAxes(),ch=Math.cos(this.heading),sh=Math.sin(this.heading);
+  // --- Suspension: each wheel reads the ground under its own contact patch.
+  const loads=this.wheelLoad,patches=this.patches??=SUSPENSION_WHEELS.map(()=>[0,0,0]),normals=this.normals??=SUSPENSION_WHEELS.map(()=>[0,0,1]),scrub=this.scrub??=[0,0,0,0];
+  for(let i=0;i<4;i++){
+   const w=SUSPENSION_WHEELS[i],r=patches[i],n=normals[i];
+   r[0]=F[0]*w.x+L[0]*w.y-U[0]*CG_HEIGHT;r[1]=F[1]*w.x+L[1]*w.y-U[1]*CG_HEIGHT;r[2]=F[2]*w.x+L[2]*w.y-U[2]*CG_HEIGHT;
+   const g=this.ground(this.x+r[0],this.y+r[1]),gx=g.gx??0,gy=g.gy??0,nz=1/Math.sqrt(1+gx*gx+gy*gy);
+   n[0]=-gx*nz;n[1]=-gy*nz;n[2]=nz;
+   // Strut length beyond its static position needed to reach the ground.
+   const align=U[0]*n[0]+U[1]*n[1]+U[2]*n[2],extension=align>.3?(this.z+r[2]-g.z)*nz/align:Infinity;
+   const previous=this.extension[i],rate=Number.isFinite(previous)&&Number.isFinite(extension)?(extension-previous)/h:0;
+   this.extension[i]=extension;
+   let force=0;scrub[i]=0;
+   if(extension<SAG){
+    force=w.stiffness*(SAG-extension)-w.damping*rate;
+    // Bump stops: a hard landing bottoms the suspension out. Deeper than that
+    // the wheel is buried in a bank or a step, and the body shell takes over.
+    if(extension<-BUMP_TRAVEL){const bump=BUMP_STIFFNESS*Math.min(.12,-BUMP_TRAVEL-extension)-BUMP_DAMPING*Math.min(0,rate);force+=bump;scrub[i]=bump;this.crashImpactSpeed=Math.max(this.crashImpactSpeed,Math.min(25,-rate*.8));}
+    force=Math.min(force,w.load*12);
+    // Contact patch, where the strut meets the ground.
+    r[0]-=U[0]*extension;r[1]-=U[1]*extension;r[2]-=U[2]*extension;
+   }
+   loads[i]=Math.max(0,force);
+  }
+  // Anti-roll bars share load across each axle while both of its tyres are down.
+  for(const [a,b] of [[0,1],[2,3]])if(loads[a]>0&&loads[b]>0){const bar=ANTI_ROLL*(this.extension[b]-this.extension[a]);loads[a]=Math.max(0,loads[a]+bar);loads[b]=Math.max(0,loads[b]-bar);}
+  let front=0,rear=0,down=0;
+  for(let i=0;i<4;i++){
+   const w=SUSPENSION_WHEELS[i],r=patches[i],n=normals[i],travel=loads[i]>0?clamp(-this.extension[i],-DROOP,BUMP_TRAVEL):-DROOP;
+   this.wheelTravel[i]+=(travel-this.wheelTravel[i])*(1-Math.exp(-h*40));
+   if(!(loads[i]>0))continue;
+   down++;if(w.front)front+=loads[i];else rear+=loads[i];
+   // The stunt assist holds its circle on the road's crossfall, as the tyres did before.
+   const k=loads[i]/MASS*h,flat=f.burning?0:1;this.impulse(r,n[0]*k*flat,n[1]*k*flat,n[2]*k);
+   // A wheel slammed into its bump stop by a bank or a hard landing scrubs speed:
+   // tyre, suspension and soil soak up part of the hit, and the nose digs in.
+   const speed=Math.hypot(this.vx,this.vy),loss=Math.min(IMPACT_SCRUB*scrub[i]/MASS*h,speed*.5);
+   if(loss>0)this.impulse(r,-this.vx/speed*loss,-this.vy/speed*loss,0);
+  }
+  this.vz-=G*h;
+  this.wheelsDown=down;this.airTime=down?0:this.airTime+h;
+  this.frontLoad=front/(2*SUSPENSION_WHEELS[0].load);this.rearLoad=rear/(2*SUSPENSION_WHEELS[2].load);
+  // Tyre capacity follows the suspension, with part of the pitch load transfer.
+  const total=front+rear,support=Math.min(1,total/(MASS*G));
+  let frontN=front,rearN=rear;
+  if(front>0&&rear>0){frontN=total*FRONT_WEIGHT+.4*(front-total*FRONT_WEIGHT);rearN=total-frontN;}
+  // A tyre needs some rolling to feel a load change: a quick bump no longer
+  // robs it of grip for an instant, while a real jump still lets go.
+  const relax=1-Math.exp(-h/TYRE_RELAXATION);this.gripFront+=(frontN-this.gripFront)*relax;this.gripRear+=(rearN-this.gripRear)*relax;
+  frontN=this.gripFront;rearN=this.gripRear;
+  const patch=(a,b,out)=>{const sum=loads[a]+loads[b];for(let k=0;k<3;k++)out[k]=sum>0?(patches[a][k]*loads[a]+patches[b][k]*loads[b])/sum:-U[k]*CG_HEIGHT;return out;};
+  const frontPatch=patch(0,1,this.frontPatch??=[0,0,0]),rearPatch=patch(2,3,this.rearPatch??=[0,0,0]);
+  // --- Longitudinal tyre forces at the contact patches: dive and squat.
+  if(total>0){
+   const u=this.vx*ch+this.vy*sh;
+   const drag=Math.sign(u)*Math.min((f.rolling+f.engineBrake)*support,Math.abs(u)/h);
+   const braking=f.brakeDecel*support*Math.min(1,Math.abs(u)/Math.max(f.dt*11,.001))*Math.sign(u);
+   const along=((rear>0?f.drive:0)-drag-braking)*h;
+   // In a burnout the spinning rear and the braked front cancel out: no squat.
+   if(f.burning){this.vx+=along*ch;this.vy+=along*sh;}
+   else this.impulse(rear>0&&f.drive>0?rearPatch:frontPatch,along*ch,along*sh,0,true,false);
+   this.longAccel+=along;
+  }
+  {const u=this.vx*ch+this.vy*sh,drag=f.drag*u*Math.abs(u)*h;this.vx-=drag*ch;this.vy-=drag*sh;this.longAccel-=drag;}
+  // --- Lateral tyre forces: each axle cancels its sideways slip up to its grip.
+  // A saturated rear lets the front keep turning the car: oversteer, then a spin.
+  if(!f.burning&&total>0){
+   const u=this.vx*ch+this.vy*sh,w=-this.vx*sh+this.vy*ch,yaw=this.yaw,cd=Math.cos(this.steer),sd=Math.sin(this.steer);
+   const sf=-u*sd+(w+FRONT_AXLE*yaw)*cd,sr=w-REAR_AXLE*yaw;
+   // On asphalt a sliding tyre loses grip; on soil it ploughs in instead.
+   const muF=f.grip.front*(f.grip.loose?trip(sf):slideGrip(sf,u*cd+(w+FRONT_AXLE*yaw)*sd,.15));
+   const muR=f.grip.rear*(f.grip.loose?trip(sr):slideGrip(sr,u,.25));
+   const capF=muF*frontN/MASS*h,capR=muR*rearN/MASS*h;
+   const pf=clamp(-sf/(1+FRONT_AXLE/REAR_AXLE*cd*cd),-capF,capF),pr=clamp(-sr/(1+REAR_AXLE/FRONT_AXLE),-capR,capR);
+   const du=-pf*sd,dw=pf*cd+pr;
+   this.vx+=du*ch-dw*sh;this.vy+=du*sh+dw*ch;
+   this.yaw+=(FRONT_AXLE*pf*cd-REAR_AXLE*pr)/(FRONT_AXLE*REAR_AXLE);
+   // The same forces act at ground level, below the centre of mass: body roll, and trips.
+   this.impulse(frontPatch,(-sd*ch-cd*sh)*pf,(-sd*sh+cd*ch)*pf,0,false,false);
+   this.impulse(rearPatch,-sh*pr,ch*pr,0,false,false);
+   this.longAccel+=du;this.latAccel+=dw;
+  }
+  if(f.burning){
+   // Let the rear swing outward around the gripping front end.
+   const side=f.swing?-this.yaw*1.1:0,blend=1-Math.exp(-h*8);
+   this.vx+=(f.crawl*ch-side*sh-this.vx)*blend;this.vy+=(f.crawl*sh+side*ch-this.vy)*blend;
+   if(f.braced)this.vx=this.vy=0;
+  }
+  if(f.hold)this.vx=this.vy=0;
+  // --- Body shell against the ground: scraping, digging in and rolling over.
+  this.contactShell(h,F,L,U);
+  this.x+=this.vx*h;this.y+=this.vy*h;this.z+=this.vz*h;
+  this.heading=wrap(this.heading+this.yaw*h);this.pitch=wrap(this.pitch+this.pitchRate*h);this.roll=wrap(this.roll+this.rollRate*h);
+  // Structural and aerodynamic damping of pitch and roll.
+  const damping=Math.exp(-h*.4);this.pitchRate*=damping;this.rollRate*=damping;
+ }
+ contactShell(h,F,L,U){
+  const count=this.wheelsDown<4||U[2]<.9||this.hullContact?HULL.length:LOW_HULL,contacts=this.shell??=HULL.map(()=>({r:[0,0,0],n:[0,0,1],depth:0,normal:0,friction:0}));
+  const v=[0,0,0];let any=false;
+  for(let k=0;k<count;k++){
+   const [px,py,pz]=HULL[k],q=contacts[k],r=q.r;
+   r[0]=F[0]*px+L[0]*py+U[0]*pz;r[1]=F[1]*px+L[1]*py+U[1]*pz;r[2]=F[2]*px+L[2]*py+U[2]*pz;
+   const g=this.ground(this.x+r[0],this.y+r[1]),gx=g.gx??0,gy=g.gy??0,nz=1/Math.sqrt(1+gx*gx+gy*gy);
+   q.n[0]=-gx*nz;q.n[1]=-gy*nz;q.n[2]=nz;q.depth=(g.z-this.z-r[2])*nz;q.normal=q.friction=0;
+   if(q.depth>0){any=true;this.pointVelocity(r,v);q.approach=v[0]*q.n[0]+v[1]*q.n[1]+v[2]*q.n[2];this.crashImpactSpeed=Math.max(this.crashImpactSpeed,-q.approach);}
+  }
+  this.hullContact=any;if(!any)return;
+  // Sequential impulses: inelastic contact with a little bounce, Coulomb friction.
+  for(let iteration=0;iteration<4;iteration++)for(let k=0;k<count;k++){
+   const q=contacts[k];if(q.depth<=0)continue;
+   const {r,n}=q;this.pointVelocity(r,v);
+   const vn=v[0]*n[0]+v[1]*n[1]+v[2]*n[2],target=Math.max(Math.min(2,Math.max(0,q.depth-.015)*20),q.approach<-3?-q.approach*.12:0);
+   const total=Math.max(0,q.normal+(target-vn)/this.inverseMass(r,n[0],n[1],n[2])),normal=total-q.normal;q.normal=total;
+   this.impulse(r,n[0]*normal,n[1]*normal,n[2]*normal);
+   this.pointVelocity(r,v);
+   const along=v[0]*n[0]+v[1]*n[1]+v[2]*n[2],tx=v[0]-along*n[0],ty=v[1]-along*n[1],tz=v[2]-along*n[2],slip=Math.hypot(tx,ty,tz);
+   if(slip<1e-6)continue;
+   const dx=tx/slip,dy=ty/slip,dz=tz/slip,friction=Math.min(slip/this.inverseMass(r,dx,dy,dz),Math.max(0,(k<LOW_HULL?UNDERBODY_FRICTION:HULL_FRICTION)*q.normal-q.friction));
+   q.friction+=friction;this.impulse(r,-dx*friction,-dy*friction,-dz*friction);
+  }
  }
  trackLap(previous,current,distance,forwardSpeed){
   const L=this.data.meta.reconstructed_xy_m;
@@ -209,7 +456,7 @@ export class TestCar {
   const finish=previous.s>L-16&&current.s<16&&advance>0&&forwardSpeed>1;
   // A runoff alone is allowed. Reject only a meaningful gain from cutting the route.
   if(this.excursion&&(!outside(current)||finish)){
-   if(this.excursion.advance>40&&this.excursion.advance-this.excursion.distance>18)this.lapValid=false;
+   if(this.excursion.advance>40&&this.excursion.advance-this.excursion.distance>18){if(this.lapValid)this.invalidReason='cut';this.lapValid=false;}
    this.excursion=null;
   }
   const checkpoint=Math.floor(current.s/L*20);
@@ -219,16 +466,21 @@ export class TestCar {
    this.lastLapValid=this.lapValid&&this.nextCheckpoint===20;
    this.lastLap=this.clock-this.lapStart;
    if(this.lastLapValid){this.laps++;if(this.best===null||this.lastLap<this.best)this.best=this.lastLap;}
-   this.lapStart=this.clock;this.lapValid=true;this.checkpoints=new Set([0]);this.nextCheckpoint=1;
+   this.lastInvalidReason=this.lastLapValid?null:this.invalidReason??'cut';
+   this.lapStart=this.clock;this.lapValid=true;this.invalidReason=null;this.checkpoints=new Set([0]);this.nextCheckpoint=1;
   }
  }
- telemetry(){return {x:this.x,y:this.y,z:this.surface.z,speed:Math.hypot(this.vx,this.vy)*3.6,index:this.index,s:this.surface.s,grade:this.surface.grade*100,bank:this.surface.bank*100,onRoad:this.surface.onRoad,laps:this.laps,best:this.best,clock:this.clock};}
+ telemetry(){return {x:this.x,y:this.y,z:this.surface.z,speed:Math.hypot(this.vx,this.vy)*3.6,index:this.index,s:this.surface.s,grade:this.surface.grade*100,bank:this.surface.bank*100,onRoad:this.surface.onRoad,laps:this.laps,best:this.best,clock:this.clock,
+  height:this.z-CG_HEIGHT,airborne:this.wheelsDown===0&&!this.hullContact,wheelsDown:this.wheelsDown,upright:this.upright,roll:this.roll,pitch:this.pitch,overturned:this.overturned,rightings:this.rightings};}
 }
 export function recognitionInput(car,{maxSpeed=33,cornerGrip=3.3,braking=3.5,throttleResponse=.5,brakeResponse=.6}={}){
  const data=car.data,speed=Math.hypot(car.vx,car.vy),la=9+speed*.6,target=data.samples[(car.index+Math.round(la/2))%car.n],dx=target[1]-car.x,dy=target[2]-car.y;
  const alpha=wrap(Math.atan2(dy,dx)-car.heading),steer=Math.atan2(2*2.667*Math.sin(alpha),Math.hypot(dx,dy));
- const command=clamp(steer/steerLimit(speed),-1,1);
- let desiredSpeed=maxSpeed;
+ // After a spin the target can lie behind the car: turn round on full lock, slowly.
+ const facingAway=Math.abs(alpha)>Math.PI/2,command=facingAway?Math.sign(alpha):clamp(steer/steerLimit(speed),-1,1);
+ let desiredSpeed=facingAway?6:maxSpeed;
  for(let j=0;j<(maxSpeed>35?85:40);j+=5){const a=data.samples[(car.index+j+car.n-3)%car.n],b=data.samples[(car.index+j+3)%car.n];const curvature=Math.abs(wrap(Math.atan2(b[8],b[7])-Math.atan2(a[8],a[7])))/12;const corner=Math.sqrt(cornerGrip/Math.max(curvature,.0001));desiredSpeed=Math.min(desiredSpeed,Math.sqrt(corner*corner+2*braking*j*2));}
- return {left:Math.max(0,command),right:Math.max(0,-command),throttle:clamp((desiredSpeed-speed)*throttleResponse,0,1),brake:clamp((speed-desiredSpeed)*brakeResponse,0,1),reverse:0,handbrake:0};
+ // Like a driver feeling the tail step out, ease off the throttle in a slide.
+ const c=Math.cos(car.heading),s=Math.sin(car.heading),forward=car.vx*c+car.vy*s,slide=forward>3?Math.abs(Math.atan2(-car.vx*s+car.vy*c-1.117*car.yaw,forward)):0;
+ return {left:Math.max(0,command),right:Math.max(0,-command),throttle:clamp((desiredSpeed-speed)*throttleResponse,0,1)*clamp(1-(slide-.06)*8,0,1),brake:clamp((speed-desiredSpeed)*brakeResponse,0,1),reverse:0,handbrake:0};
 }

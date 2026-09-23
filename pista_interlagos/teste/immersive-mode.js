@@ -77,7 +77,7 @@ export class ImmersiveMode {
   document.body.classList.toggle('tow-scene',['tow','broken','snag'].includes(s.phase));document.body.classList.toggle('podium-scene',s.phase==='podium');document.body.classList.toggle('disqualified-scene',s.phase==='disqualified');if(['podium','complete','disqualified'].includes(s.phase))this.save();
  }
  stop(){this.car.vx=this.car.vy=this.car.yaw=0;this.car.burnout=this.car.rearSlipSpeed=0;}
- placeCar(p){const c=this.car;c.x=p.x;c.y=-p.z;c.heading=p.heading;c.index=p.index;c.surface=c.sample(c.x,c.y);}
+ placeCar(p){const c=this.car;c.x=p.x;c.y=-p.z;c.heading=p.heading;c.index=p.index;c.surface=c.sample(c.x,c.y);c.settle?.();}
  action(action){
   const s=this.state;
   if(action==='mainMenu'){this.onMainMenu?.();return;}
@@ -116,7 +116,7 @@ export class ImmersiveMode {
   else if(s.phase==='starting')s.startEngine(input,dt);
   else if(s.phase==='grid'){const before=Math.ceil(s.countdown);s.countdown-=dt;if(s.countdown<=0){s.startRace();this.goTime=.85;}else if(Math.ceil(s.countdown)<before)s.emitSound('countdown');}
   else if(s.phase==='race'){
-   const before=Math.hypot(c.vx,c.vy);c.step(input,dt);const speed=Math.hypot(c.vx,c.vy),L=this.data.meta.reconstructed_xy_m,impact=Math.max(c.wallImpactSpeed??0,before-speed);if(impact>4)this.wallImpact(impact);
+   const before=Math.hypot(c.vx,c.vy);c.step(input,dt);const speed=Math.hypot(c.vx,c.vy),L=this.data.meta.reconstructed_xy_m,impact=Math.max(c.wallImpactSpeed??0,c.crashImpactSpeed??0,before-speed);if(impact>4)this.wallImpact(impact);
    let travel=c.surface.s-this.previousS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;this.raceProgress=Math.max(0,this.raceProgress+travel);this.previousS=c.surface.s;
    this.contacts(this.field.step(c,dt,true));
    s.position=1+this.rivals.filter(r=>r.progress>this.raceProgress).length;

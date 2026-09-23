@@ -8,11 +8,13 @@ export const CAR_PARTS=Object.freeze([
  {id:'tanque',name:'Tanque',effect:'Vazamento de combustível',price:65,point:[-1.9,.65,0]}
 ]);
 export class CarCondition {
- constructor(){this.reset();}
+ constructor({enabled=true}={}){this.enabled=enabled;this.reset();}
+ // Off, the Opala never loses power, brakes or grip: impacts and wear leave it as new.
+ setEnabled(on){this.enabled=!!on;if(!this.enabled)this.reset();}
  reset(){this.quality=Object.fromEntries(CAR_PARTS.map(p=>[p.id,1]));this.revision=0;}
  get health(){return CAR_PARTS.reduce((n,p)=>n+this.quality[p.id],0)/6;}
  get factors(){const q=this.quality;return {power:(.4+.6*q.motor)*(.55+.45*q.cambio),brakes:.3+.7*q.freios,grip:(.72+.28*q.pneus)*(.82+.18*q.suspensao),steering:.72+.28*q.suspensao,stability:.5+.5*q.suspensao,leak:(1-q.tanque)**2*.065};}
- damage(id,amount){if(!Object.hasOwn(this.quality,id))return;const before=this.quality[id];this.quality[id]=clamp(before-Math.max(0,amount));if(before!==this.quality[id])this.revision++;}
+ damage(id,amount){if(!this.enabled||!Object.hasOwn(this.quality,id))return;const before=this.quality[id];this.quality[id]=clamp(before-Math.max(0,amount));if(before!==this.quality[id])this.revision++;}
  impact(speed,forward=1,side=0){
   const force=clamp((speed-2)/28,0,.75);if(!force)return;
   const front=forward>.5,rear=forward<-.5,lateral=Math.abs(side)>.5;

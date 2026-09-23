@@ -8,7 +8,9 @@ export function normalizePreferences(value){
   immersive:typeof source.immersive==='boolean'?source.immersive:true,
   livery:liveries.includes(source.livery)?source.livery:'assinaturas_omp',
   camera:CAMERA_MODES.includes(source.camera)?source.camera:'chase',
-  circuit:circuitId(source.circuit)
+  circuit:circuitId(source.circuit),
+  // Car damage and wear (power, brakes, grip) is an opt-in realism setting.
+  damage:typeof source.damage==='boolean'?source.damage:false
  };
 }
 function browserStorage(){try{return globalThis.localStorage;}catch{return null;}}

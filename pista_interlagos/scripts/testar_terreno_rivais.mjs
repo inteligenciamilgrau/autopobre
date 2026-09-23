@@ -13,14 +13,15 @@ const idle={throttle:0,brake:0,left:0,right:0,reverse:0,handbrake:0};
 function flat(road){const c=new TestCar(data);c.sample=()=>({i:0,u:0,s:500,d:0,z:0,width:1000,bank:0,grade:0,gx:0,gy:0,tx:1,ty:0,lx:0,ly:1,onRoad:road});c.reset();c.x=c.y=c.heading=0;c.surface=c.sample();return c;}
 const road=flat(true),grass=flat(false);road.vx=grass.vx=30;
 for(let i=0;i<240;i++){road.step(idle,1/120);grass.step(idle,1/120);}
-assert(grass.vx<road.vx-6,'grass meaningfully slows a coasting car');
+// Turf rolls harder than asphalt, but there is no artificial brake on the grass.
+assert(grass.vx<road.vx-.5&&grass.vx>road.vx-3,'grass rolls a little harder than asphalt');
 const grip=flat(false);grip.vx=12;grip.vy=6;
 for(let i=0;i<90;i++)grip.step(idle,1/120);
 assert(Math.abs(grip.vy)<2,'off-road tyres arrest sideways sliding');
-for(let i=0;i<1200;i++)grass.step(idle,1/120);
-assert(Math.hypot(grass.vx,grass.vy)<.01,'grass resistance stops without reversing or jittering');
-const recover=flat(false);for(let i=0;i<600;i++)recover.step({...idle,throttle:1},1/120);
-assert(recover.vx>5&&recover.vx<25,'driver can accelerate back from grass without matching asphalt pace');
+let grassMin=grass.vx;for(let i=0;i<120*40&&Math.hypot(grass.vx,grass.vy)>=.01;i++){grass.step(idle,1/120);grassMin=Math.min(grassMin,grass.vx);}
+assert(Math.hypot(grass.vx,grass.vy)<.01&&grassMin>-.02,'grass resistance stops without reversing or jittering');
+const recover=flat(false),launch=flat(true);for(let i=0;i<600;i++){recover.step({...idle,throttle:1},1/120);launch.step({...idle,throttle:1},1/120);}
+assert(recover.vx>5&&recover.vx<launch.vx-1.5,'driver can accelerate back from grass, traction-limited below asphalt pace');
 let contacts=0;
 for(let index=0;index<data.samples.length;index+=37)for(const side of [-1,1]){
  const c=new TestCar(data);c.reset(index);const p=c.surface;if(!guardrailPresent(data,p.s,side)||guardrailClearance(data,p.s,side)>5.001||!guardrailPresent(data,p.s+12,side))continue;const offset=side*(p.width/2+guardrailClearance(data,p.s,side)-.93-.2);
@@ -32,7 +33,10 @@ for(let index=0;index<data.samples.length;index+=37)for(const side of [-1,1]){
 const rails=createGuardrails(data),pos=rails.rails.geometry.attributes.position;
 assert.equal(rails.stats.sides,2);assert.equal(rails.stats.closed,false);assert(rails.stats.coverageRatio>.35&&rails.stats.coverageRatio<.5);assert(pos.count>3000);assert([...pos.array].every(Number.isFinite));
 const curbs=createCurbs(data);assert.equal(curbs.children.length,2);
-assert.equal(curbs.children.reduce((n,m)=>n+m.geometry.attributes.position.count,0),data.samples.length*24,'both curb edges cover every track segment');
+// Kerbs only where the orthophoto shows them (columns 13 right, 14 left): 12 vertices per segment.
+const kerbSegments=[13,14].reduce((n,col)=>n+data.samples.filter((p,i)=>p[col]&&data.samples[(i+1)%data.samples.length][col]).length,0);
+assert(kerbSegments*2>1200,'surveyed kerbs line the corners on both sides');
+assert.equal(curbs.children.reduce((n,m)=>n+m.geometry.attributes.position.count,0),kerbSegments*12,'curb meshes follow the surveyed kerb flags');
 assert(curbs.children.every(m=>[...m.geometry.attributes.position.array].every(Number.isFinite)));
 // Open run-offs must also be open in the physics, for both car and AI.
 for(const s of [300,550,1550,2500,2900,3150])for(const side of [-1,1]){
@@ -43,13 +47,15 @@ for(const s of [300,550,1550,2500,2900,3150])for(const side of [-1,1]){
 }
 const indices=rails.rails.geometry.index,probeGeometry=new TestCar(data);
 for(let i=0;i<indices.count;i+=3){const points=[0,1,2].map(j=>indices.getX(i+j)),x=points.reduce((v,k)=>v+pos.getX(k),0)/3,y=-points.reduce((v,k)=>v+pos.getZ(k),0)/3;probeGeometry.index=probeGeometry.nearest(x,y,true).i;const p=probeGeometry.sample(x,y);assert(guardrailPresent(data,p.s,Math.sign(p.d)),'no rendered face spans an opening');}
-for(const side of [-1,1]){assert(guardrailPresent(data,0,side));assert(guardrailPresent(data,data.meta.reconstructed_xy_m-.01,side));assert.equal(guardrailClearance(data,0,side),5,'retained rails still join over the timing line');}
+assert(guardrailPresent(data,0,-1));assert(guardrailPresent(data,data.meta.reconstructed_xy_m-.01,-1));assert.equal(guardrailClearance(data,0,-1),5,'retained rails still join over the timing line');
+// On the left of the start-finish straight the pit wall replaces the rail.
+assert(!guardrailPresent(data,0,1));assert(data.pit.walls.find(w=>w.name==='Muro_boxes').points.some(([x,y])=>Math.hypot(x-data.samples[0][1],y-data.samples[0][2])<20),'pit wall beside the timing line');
 
 // All personalities face identical corners at the same speed: commands must differ.
 const signals=DRIVER_STYLES.map(()=>[]),probe=new TestCar(data);
 for(let i=0;i<data.samples.length;i+=5){probe.reset(i);probe.vx=probe.surface.tx*35;probe.vy=probe.surface.ty*35;DRIVER_STYLES.forEach((style,j)=>signals[j].push(recognitionInput(probe,style).brake));}
 for(let i=0;i<5;i++)for(let j=i+1;j<5;j++)assert(signals[i].filter((v,k)=>Math.abs(v-signals[j][k])>.1).length>8,'drivers choose distinct braking strengths/locations');
-const field=new RaceField(data),player=new TestCar(data),laps=Array(RIVAL_ROSTER.length).fill(null);player.x+=10000;let peak=0,maxOutside=0;
+const field=new RaceField(data,{seed:1}),player=new TestCar(data),laps=Array(RIVAL_ROSTER.length).fill(null);player.x+=10000;let peak=0,maxOutside=0;
 for(let frame=0;frame<180*120;frame++){field.step(player,1/120);for(const [i,r] of field.rivals.entries()){peak=Math.max(peak,Math.hypot(r.car.vx,r.car.vy)*3.6);maxOutside=Math.max(maxOutside,Math.abs(r.car.surface.d)-r.car.surface.width/2);if(laps[i]===null&&r.progress>=data.meta.reconstructed_xy_m)laps[i]=frame/120;}}
 assert(laps.every(t=>t!==null&&t<176),'all fourteen rivals maintain a competitive complete lap');assert(Math.max(...laps)-Math.min(...laps)>3,'different styles produce different lap times');assert(peak>168&&maxOutside<3,'faster rivals stay within the run-off margin');
 console.log(JSON.stringify({passed:true,grassCoastingKmh:grass.vx*3.6,grassRecoveryKmh:recover.vx*3.6,railContacts:contacts,railCoverage:rails.stats.coverageRatio,laps,peakKmh:peak,maxOutside},null,2));

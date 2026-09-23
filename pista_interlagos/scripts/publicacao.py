@@ -8,12 +8,12 @@ ROOT = Path(__file__).resolve().parents[2]
 GAME = 'pista_interlagos/teste/'
 MODULES = (
     'pilot-profile.js', 'ai-records.js', 'ai-record-references.js',
-    'car-condition.js', 'pit-lane.js', 'pitstop.js', 'pitstop.css',
+    'car-condition.js', 'pit-lane.js', 'interlagos-pit.js', 'pitstop.js', 'pitstop.css',
     'circuits.js', 'curvelo-data.js', 'curvelo-scene.js',
     'race-results.js', 'race-results.css', 'lap-records.js',
     'race-roster.js',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
-    'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'cockpit.js',
+    'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'cockpit.js', 'cockpit-materials.js',
     'driver.js', 'driver-rig.js', 'driver-controls.js', 'driver-helmet.js', 'family-phone.js',
     'immersive-mode.js', 'immersive-state.js', 'immersive-visuals.js',
     'skid-marks.js', 'track-surface.js', 'tyre-smoke.js', 'sky.js', 'landscape.js',
@@ -29,6 +29,14 @@ ASSETS = (
     'texturas/asfalto_creditos.txt', 'texturas/cockpit_faixa_invent.png',
     'texturas/grama_diff_v1.jpg', 'texturas/grama_nor_gl_v1.jpg', 'texturas/mato_diff_v1.jpg',
     'texturas/brita_diff_v1.jpg', 'texturas/concreto_diff_v1.jpg', 'texturas/terreno_creditos.txt',
+    'texturas/interior/aluminio_escovado_diff.jpg', 'texturas/interior/aluminio_escovado_nor_gl.jpg',
+    'texturas/interior/aluminio_escovado_rough.jpg', 'texturas/interior/borracha_diff.jpg',
+    'texturas/interior/borracha_nor_gl.jpg', 'texturas/interior/camurca_diff.jpg',
+    'texturas/interior/camurca_nor_gl.jpg', 'texturas/interior/camurca_rough.jpg',
+    'texturas/interior/carbono_diff.jpg', 'texturas/interior/carbono_nor_gl.jpg',
+    'texturas/interior/chapa_xadrez_diff.jpg', 'texturas/interior/chapa_xadrez_nor_gl.jpg',
+    'texturas/interior/chapa_xadrez_rough.jpg', 'texturas/interior/couro_painel_diff.jpg',
+    'texturas/interior/couro_painel_nor_gl.jpg', 'texturas/interior/couro_painel_rough.jpg', 'texturas/interior/creditos.txt',
 )
 THREE = (
     'build/three.module.js', 'build/three.core.js',

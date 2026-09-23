@@ -1,5 +1,6 @@
 import {PitStop} from './pitstop.js';
 import {pitLane} from './pit-lane.js';
+import {createInterlagosPit} from './interlagos-pit.js';
 import {CIRCUITS,selectedCircuit,mapProjection} from './circuits.js';
 import {createCurveloData} from './curvelo-data.js';
 import {createCurveloScene} from './curvelo-scene.js';
@@ -11,14 +12,14 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {TestCar,clamp,wrap,recognitionInput} from './physics.js?v=20260913-burnout';
+import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v=20260923-capotagem';
 import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260923-controls';
 import {CameraReturn} from './camera-return.js';
 import {createDriver} from './driver.js?v=20260923-controls';
-import {SkidMarks} from './skid-marks.js?v=20260913-burnout';
-import {TyreSmoke} from './tyre-smoke.js';
+import {SkidMarks} from './skid-marks.js?v=20260923-capotagem';
+import {TyreSmoke} from './tyre-smoke.js?v=20260923-capotagem';
 import {ImmersiveMode} from './immersive-mode.js';
 import {MobileControls} from './mobile-controls.js';
 import {setupSettings} from './settings.js';
@@ -52,6 +53,8 @@ let projectMap;
 $('immersiveMode').checked=preferences.values.immersive;
 $('livery').value=preferences.values.livery;
 $('camera').value=preferences.values.camera;
+$('carDamage').checked=preferences.values.damage;
+$('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked});pitstop?.setDamage(preferences.values.damage);};
 $('tour').disabled=preferences.values.immersive;
 function chooseImmersive(value){
  $('immersiveMode').checked=value;$('tour').disabled=value;
@@ -90,7 +93,7 @@ function initializeRenderer(){
  if(renderer)return;
  renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:!touchDevice});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
  sky=createSky(renderer,scene,{mobile:touchDevice});
- cockpit=createCockpit();carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,96);
+ cockpit=createCockpit(renderer);carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,96);
  skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
 }
@@ -145,7 +148,7 @@ async function setLivery(value){
  if(model)carBody.remove(model);model=gltf.scene;wheels=[];
  model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;
   for(const m of Array.isArray(o.material)?o.material:[o.material])if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
- }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){wheels.push({obj:o,front:o.name.includes('Dianteira'),base:o.quaternion.clone(),basePosition:o.position.clone()});}});
+ }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){const front=o.name.includes('Dianteira');wheels.push({obj:o,front,index:(front?0:2)+(o.position.z>0?1:0),base:o.quaternion.clone(),basePosition:o.position.clone()});}});
  // These solid Blender panels close the cabin in every view. The detailed
  // cockpit hides the outer model, so retain its floor/bulkheads independently.
  if(carStructure)carBody.remove(carStructure);
@@ -179,29 +182,37 @@ function drawMap(){
  ctx.beginPath();data.samples.forEach((p,i)=>{const [x,y]=xy(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.lineWidth=8;ctx.strokeStyle='#ffffff16';ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle='#b6c5b5';ctx.stroke();
  if(immersive&&(!immersive.active||['prepare','starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle='#'+r.entry.color.toString(16).padStart(6,'0');ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
  if(pitstop){ctx.beginPath();let started=false;const nodes=data.samples.filter(p=>pitLane(data,p[0])).sort((a,b)=>pitLane(data,a[0]).u-pitLane(data,b[0]).u);for(const p of nodes){const d=pitLane(data,p[0]).offset,[x,y]=projectMap(p[1]-p[8]*d,p[2]+p[7]*d);if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y);}ctx.strokeStyle='#55e0db';ctx.lineWidth=2;ctx.stroke();const [px,py]=projectMap(pitstop.anchor.x,-pitstop.anchor.z);ctx.fillStyle='#114e43';ctx.fillRect(px-9,py-21,18,16);ctx.fillStyle='#fff5a1';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillText('P',px,py-9);}
+ if(data.pit){const c=data.pit.columns,x=c.indexOf('x'),y=c.indexOf('y');ctx.beginPath();data.pit.samples.forEach((p,i)=>{const [px,py]=projectMap(p[x],p[y]);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.lineWidth=1.5;ctx.strokeStyle=car.surface.pit?'#55e0db':'#7fa7a0';ctx.stroke();}
  const [sx,sy]=xy(data.samples[0]);ctx.fillStyle='#ffffff';ctx.fillRect(sx-3,sy-3,6,6);
  const [x,y]=projectMap(car.x,car.y);ctx.save();ctx.translate(x,y);ctx.rotate(-car.heading);ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(-5,-4);ctx.lineTo(-3,0);ctx.lineTo(-5,4);ctx.closePath();ctx.fillStyle='#e2fb57';ctx.shadowBlur=10;ctx.shadowColor='#d6fa4b';ctx.fill();ctx.restore();
 }
-const groundOrientation=new THREE.Quaternion(),roughRotation=new THREE.Quaternion(),roughEuler=new THREE.Euler();let roughRide=0;
+const roughRotation=new THREE.Quaternion(),roughEuler=new THREE.Euler(),chaseForward=new THREE.Vector3(1,0,0),chaseTarget=new THREE.Vector3(1,0,0);let roughRide=0;
 function updateCar(dt){
  cockpit.root.visible=mode==='cockpit'&&!gridPreview();if(model)model.visible=!cockpit.root.visible;
- const p=car.surface,c=Math.cos(car.heading),s=Math.sin(car.heading);
- const speed=Math.hypot(car.vx,car.vy),roughTarget=p.onRoad?0:clamp(speed/22,0,1);
+ const p=car.surface,speed=Math.hypot(car.vx,car.vy),roughTarget=p.onRoad||!car.wheelsDown?0:clamp(speed/22,0,1);
  roughRide=dt>=1?0:roughRide+(roughTarget-roughRide)*(1-Math.exp(-dt*9));
  // Distance-based suspension motion stops at rest and fades on returning to asphalt.
  const bump=roughRide*(Math.sin(car.distance*2.1)*.025+Math.sin(car.distance*4.7)*.012);
- carRoot.position.set(car.x,p.z+bump,-car.y);
- forward.set(c,p.gx*c+p.gy*s,-s).normalize();up.set(-p.gx,1,p.gy).normalize();right.crossVectors(forward,up).normalize();up.crossVectors(right,forward).normalize();
- matrix.makeBasis(forward,up,right);const q=new THREE.Quaternion().setFromRotationMatrix(matrix);groundOrientation.slerp(q,dt>=1?1:1-Math.exp(-dt*15));
+ // The physics body carries heave, pitch, roll, jumps and rollovers; the
+ // model origin sits on the ground below its centre of mass.
+ const pose=car.pose();carRoot.position.set(pose.x,pose.z+bump,-pose.y);
+ forward.set(pose.forward[0],pose.forward[2],-pose.forward[1]);up.set(pose.up[0],pose.up[2],-pose.up[1]);right.crossVectors(forward,up).normalize();
+ matrix.makeBasis(forward,up,right);
  roughEuler.set(Math.sin(car.distance*2.7)*roughRide*.008,0,Math.sin(car.distance*1.9)*roughRide*.006);
- carRoot.quaternion.copy(groundOrientation).multiply(roughRotation.setFromEuler(roughEuler));
- // Body roll outward in corners, dive under braking and squat under power.
- const rollTarget=clamp((car.latAccel??0)*.0042,-.055,.055),pitchTarget=clamp((car.longAccel??0)*.0038,-.045,.028);
+ carRoot.quaternion.setFromRotationMatrix(matrix).multiply(roughRotation.setFromEuler(roughEuler));
+ // Springs and anti-roll bars now tilt the physics body; this adds the rest of
+ // the visible roll outward in corners, dive under braking and squat under power.
+ const rollTarget=clamp((car.latAccel??0)*.0022,-.03,.03),pitchTarget=clamp((car.longAccel??0)*.002,-.025,.015);
  if(dt>=1){suspension.roll=rollTarget;suspension.pitch=pitchTarget;suspension.rollRate=suspension.pitchRate=0;}
  else for(let left=dt;left>1e-6;left-=1/120){const h=Math.min(left,1/120);springTo('roll',rollTarget,h,8.5,.5);springTo('pitch',pitchTarget,h,9.5,.55);}
  setBodyTilt(suspension.roll,suspension.pitch);
  // Cameras and bodywork must use the same rendered orientation.
  forward.set(1,0,0).applyQuaternion(carRoot.quaternion);up.set(0,1,0).applyQuaternion(carRoot.quaternion);right.set(0,0,1).applyQuaternion(carRoot.quaternion);
+ // Chase views follow the nose while the car is on its wheels; in a roll they
+ // swing slowly toward the direction of travel instead of tumbling with it.
+ const tumbling=car.upright<.6;
+ if(!tumbling)chaseTarget.copy(forward);else if(speed>2)chaseTarget.set(car.vx,0,-car.vy).normalize();
+ chaseForward.lerp(chaseTarget,dt>=1?1:1-Math.exp(-dt*(tumbling?2.5:30))).normalize();
  for(const w of wheels){
   // Fisica: angulo positivo aponta para a esquerda. No GLB: frente +X,
   // cima +Y e esquerda -Z. Construir o eixo de rodagem evita inverter
@@ -212,7 +223,9 @@ function updateCar(dt){
   wheelTurn.setFromRotationMatrix(wheelMatrix.makeBasis(wheelForward,wheelUp,wheelAxle));
   wheelSpin.setFromAxisAngle(axleAxis,-(w.front?car.spin:car.rearSpin));
   w.obj.quaternion.copy(wheelTurn).multiply(w.base).multiply(wheelSpin).premultiply(bodyTiltInverse);
-  w.obj.position.copy(wheelOffset.copy(w.basePosition).sub(bodyPivot).applyQuaternion(bodyTiltInverse).add(bodyPivot));
+  // Suspension travel: wheels tuck in over bumps and hang down in the air.
+  wheelOffset.copy(w.basePosition);wheelOffset.y+=car.wheelTravel?.[w.index]??0;
+  w.obj.position.copy(wheelOffset.sub(bodyPivot).applyQuaternion(bodyTiltInverse).add(bodyPivot));
  }
 }
 function setBodyTilt(roll,pitch){
@@ -336,8 +349,8 @@ function updateCamera(dt){
   if(obstruction)camera.position.copy(orbit.target).addScaledVector(cameraRayDirection,Math.max(.2,obstruction.distance-.3));
   camera.lookAt(orbit.target);
  } else {
- if(mode==='aerial'){desired.copy(p).addScaledVector(forward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(forward,22);}
- else{desired.copy(p).addScaledVector(forward,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(forward,13).add(new THREE.Vector3(0,1,0));}
+ if(mode==='aerial'){desired.copy(p).addScaledVector(chaseForward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(chaseForward,22);}
+ else{desired.copy(p).addScaledVector(chaseForward,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(chaseForward,13).add(new THREE.Vector3(0,1,0));}
  // Smooth the offset, not the world position: frame-rate changes must not
  // make the car surge back and forth relative to its following camera.
  desired.sub(p);if(!followInitialized){followOffset.copy(desired);followInitialized=true;}else followOffset.lerp(desired,1-Math.exp(-dt*5));
@@ -354,8 +367,10 @@ function hud(){
  const fuel=immersive?.active?immersive.state.fuel:immersive?.freeFuel??12,staged=immersive?.active&&['crowd','podium'].includes(immersive.state.phase);$('fuelGauge').classList.toggle('hidden',!!staged);$('fuelGauge').classList.toggle('reserve',fuel<1);$('fuelVolume').textContent=fuel.toFixed(1)+' L';$('fuelBar').value=fuel;$('fuelStatus').textContent=fuel<=0?(immersive?.active?'TANQUE VAZIO':'VAZIO · R PARA REABASTECER'):fuel<1?'RESERVA':immersive?.active&&immersive.state.tankDetached?'VAZAMENTO':'COMBUSTÍVEL';const p=car.surface,speed=Math.hypot(car.vx,car.vy)*3.6;
  $('speed').textContent=Math.round(speed);$('gear').textContent=carAudio.state.gear;$('rev').style.width=`${carAudio.state.rpm/7400*100}%`;
  $('grade').textContent=`${(p.grade*100).toFixed(1).replace('.',',')}%`;$('bank').textContent=`${(p.bank*100).toFixed(1).replace('.',',')}%`;$('alt').textContent=circuit.altitude===null?'—':`${(p.z+circuit.altitude).toFixed(1)} m`;
- $('lap').textContent=`${Math.min(car.laps+1,immersive.active?1:immersive.freeTotalLaps)} / ${immersive.active?1:immersive.freeTotalLaps}`;$('racePosition').textContent=`${immersive.active?immersive.state.result?.position??immersive.state.position:immersive.freePosition}º / ${GRID_SIZE}`;$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);const rejected=car.lastLapValid===false&&car.clock-car.lapStart<10;$('valid').textContent=rejected?'Volta não contou · trecho cortado ou incompleto':car.lapValid?'Volta válida':'Volta inválida · trecho cortado';$('valid').hidden=car.lapValid&&!rejected;$('valid').style.color=car.lapValid&&!rejected?'#e2fb57':'#ffb789';
- $('surface').textContent=automatic?'RECONHECIMENTO AUTOMÁTICO':p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=location(p.s);drawMap();
+ $('lap').textContent=`${Math.min(car.laps+1,immersive.active?1:immersive.freeTotalLaps)} / ${immersive.active?1:immersive.freeTotalLaps}`;$('racePosition').textContent=`${immersive.active?immersive.state.result?.position??immersive.state.position:immersive.freePosition}º / ${GRID_SIZE}`;$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);const rejected=car.lastLapValid===false&&car.clock-car.lapStart<10;$('valid').textContent=rejected?(car.lastInvalidReason==='pit'?'Volta não contou · excesso de velocidade nos boxes':'Volta não contou · trecho cortado ou incompleto'):car.lapValid?'Volta válida':car.invalidReason==='pit'?`Volta inválida · ${Math.round(car.pitPenalty?.kmh??0)} km/h nos boxes (máx. 60)`:'Volta inválida · trecho cortado';$('valid').hidden=car.lapValid&&!rejected;$('valid').style.color=car.lapValid&&!rejected?'#e2fb57':'#ffb789';
+ $('surface').textContent=automatic?'RECONHECIMENTO AUTOMÁTICO':p.pit&&data.pit?(car.limiter?'PIT LANE · MÁX. 60 km/h':'PIT LANE'):p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=p.pit&&data.pit?'Pit lane · boxes':location(p.s);drawMap();
+ // Jumps and crashes take over the surface line while they last.
+ const crash=car.upright<.45?(car.overturned>0?`CAPOTADO · FISCAIS DESVIRAM EM ${Math.max(1,Math.ceil(RIGHTING_DELAY-car.overturned))} s`:'CAPOTANDO!'):car.rightedAt!==null&&car.clock-car.rightedAt<3?'FISCAIS DESVIRARAM O CARRO':car.airTime>.25?'NO AR!':car.pitPenalty&&car.clock-car.pitPenalty.clock<3?'EXCESSO DE VELOCIDADE NOS BOXES · VOLTA INVÁLIDA':'';if(crash)$('surface').textContent=crash;
 }
 let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0,frameImpact=0;
 // Adaptive resolution: slower GPUs trade sharpness for a steady frame rate.
@@ -366,10 +381,30 @@ function adaptResolution(rawDt){
  if(Math.abs(next-current)>.001){renderer.setPixelRatio(next);renderer.setSize(innerWidth,innerHeight,false);}
 }
 function updateCountdown(){const count=immersive?.active?(immersive.state.phase==='grid'?Math.max(1,Math.ceil(immersive.state.countdown)):0):Math.ceil(immersive?.freeCountdown||0),go=immersive?.goTime>0;const visible=sessionStarted&&!paused&&(count>0||go);$('raceCountdown').hidden=!visible;if(visible){const label=count>0?String(count):'VAI!';if($('countdownNumber').textContent!==label){$('countdownNumber').textContent=label;$('countdownCaption').textContent=count>0?'PREPARE-SE':'BOA CORRIDA!';}}}
+// Crossing the line: the lap just run, the best lap and the position, for a few seconds.
+let lapSeen=0,lapShown=0;
+function lapBanner(dt){
+ const banner=$('lapBanner');
+ if(car.lapStart!==lapSeen){
+  const crossed=car.lapStart>lapSeen&&car.lastLap!==null&&car.lastLapValid!==null;lapSeen=car.lapStart;
+  if(crossed){
+   const total=immersive?.active?1:immersive?.freeTotalLaps??3,valid=car.lastLapValid,record=valid&&car.laps>1&&car.best===car.lastLap;
+   const position=immersive?.active?immersive.state.result?.position??immersive.state.position:immersive?.freePosition;
+   $('lapBannerTitle').textContent=valid?`VOLTA ${Math.min(car.laps,total)} DE ${total}`:'VOLTA NÃO CONTOU';
+   $('lapBannerTime').textContent=fmt(car.lastLap);
+   $('lapBannerNote').textContent=!valid?(car.lastInvalidReason==='pit'?'EXCESSO DE VELOCIDADE NOS BOXES':'TRECHO CORTADO'):record?'NOVA MELHOR VOLTA!':car.lastLap>car.best?`+${(car.lastLap-car.best).toFixed(3).replace('.',',')} s da melhor`:'';
+   $('lapBannerBest').textContent=fmt(car.best);$('lapBannerPosition').textContent=position?`${position}º de ${GRID_SIZE}`:'—';
+   banner.classList.toggle('record',record);banner.classList.toggle('invalid',!valid);
+   // Restart the entrance animation even when two crossings come close together.
+   banner.hidden=true;void banner.offsetWidth;banner.hidden=false;lapShown=5;
+  }
+ }
+ if(lapShown>0){lapShown-=dt;if(lapShown<=0)banner.hidden=true;}
+}
 function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;menu(true);}
- if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}immersive?.stepFree(1/120,command);}skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
+ if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}immersive?.stepFree(1/120,command);}skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  skidMarks.flush();
  tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);
@@ -379,7 +414,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  carAudio.update(car,driveCommand,skid,paused,mode);
  carAudio.updateScene({...immersive?.audioScene(),speed:Math.hypot(car.vx,car.vy),onRoad:car.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
- updateCar(dt);updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ updateCar(dt);updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  immersive?.update(paused?0:dt,camera);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
  raceResults.update(immersive,paused,$('settings').open);
@@ -509,11 +544,15 @@ async function loadCircuit(){
  const crowd=createCrowd(standTops,{mobile:touchDevice});scene.add(crowd.root);landscape.stats.fans=crowd.count;if(!model||activeLivery!==$('livery').value)await setLivery($('livery').value);
  const guardrails=createGuardrails(data);scene.add(guardrails.root);cameraObstacles.push(guardrails.rails);
  scene.add(createCurbs(data));
+ // Surveyed pit lane: entry after the Cafe, garages, exit around the S do Senna.
+ let pitLayout=null;if(data.pit){const pitLaneScene=createInterlagosPit(data,roadSurface,terrainTextures);scene.add(pitLaneScene.root);cameraObstacles.push(...pitLaneScene.obstacles);pitLayout=pitLaneScene.box;}
  const branding=await createTrackBranding(data);scene.add(branding.root);
  restBodyPose();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
- if(circuit.id==='curvelo')pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
+ // Box 99: Curvelo's service lane, or the surveyed garage at Interlagos.
+ if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
+ pitstop?.setDamage(preferences.values.damage);
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');
  const oldStockMaterial=new THREE.MeshBasicMaterial({map:branding.oldStock,polygonOffset:true,polygonOffsetFactor:-2});
  for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.64,.43),oldStockMaterial);decal.position.set(.95,.75,side*.941);decal.rotation.y=side<0?Math.PI:0;decal.name='OldStock_no_Opala70';kleber.add(decal);}

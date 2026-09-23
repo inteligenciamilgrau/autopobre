@@ -19,6 +19,10 @@ with sync_playwright() as p:
   info=page.evaluate('interlagos.cockpitInfo()');report['views'].append(info)
   check('internal_selected',info['visible'] and not info['externalVisible'])
   check('eye_inside_cabin',math.dist(info['eyeLocal'],[-.39,1.08,.015])<1e-6)
+  # Scanned interior maps (carbon, leather, suede, aluminium, tread plate, rubber) and the cabin reflections.
+  loaded=wait_js(page,"performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length>=16&&performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length")
+  check('interior_textures_loaded',loaded>=16)
+  check('cabin_reflections_and_seat',info['cabinReflections'] and info['seat']>0)
   for key,sign in [('KeyA',1),('KeyD',-1)]:
    page.keyboard.down(key);wait_js(page,'(s)=>interlagos.car.steer*s>.3',arg=sign);frame()
    check(key+'_wheel_direction',page.evaluate('(s)=>interlagos.cockpitInfo().steering*s>.85',sign));page.keyboard.up(key)

@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE,guardrailClearance,guardrailSections} from './physics.js';
-import {pitLane} from './pit-lane.js';
+import {pitLane,pitGeometry,locatePit} from './pit-lane.js';
 
 export async function createTrackBranding(data){
  const loader=new THREE.TextureLoader(),[oldStock,game]=await Promise.all([
@@ -15,8 +15,12 @@ export async function createTrackBranding(data){
  const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
  for(let i=0;i<16;i++){
   const s=i===0?length-30:i===1?70:230+(i-2)*(length-480)/14;
-  const index=Math.max(0,data.samples.findIndex(p=>p[0]>=s)),p=data.samples[index],side=i%2?1:-1,offset=side*(p[4]/2+guardrailClearance(data,p[0],side)+5);
-  const x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;probe.index=index;const ground=probe.sample(x,y).z;
+  const index=Math.max(0,data.samples.findIndex(p=>p[0]>=s)),p=data.samples[index];let side=i%2?1:-1;
+  const place=side=>{const offset=side*(p[4]/2+guardrailClearance(data,p[0],side)+5);return [p[1]-p[8]*offset,p[2]+p[7]*offset];};
+  // Keep the boards off the pit lane and out of the garages.
+  const pitGeo=pitGeometry(data),inPits=([x,y])=>{const lane=pitGeo&&locatePit(pitGeo,x,y);return !!lane&&lane.d>lane.lo-4&&lane.d<lane.hi+26;};
+  if(inPits(place(side)))side=-side;
+  const [x,y]=place(side);probe.index=index;const ground=probe.sample(x,y).z;
   const board=new THREE.Group();board.name=i%2?'Outdoor_AutoPobre':'Outdoor_OldStock';board.position.set(x,ground,-y);
   // Face the approaching driver, rather than presenting the edge of the sign.
   const fx=-p[7]*.8+p[8]*side*.6,fz=p[8]*.8+p[7]*side*.6;board.rotation.y=Math.atan2(fx,fz);
@@ -65,6 +69,8 @@ export function createCurbs(data){
   for(let i=0;i<data.samples.length;i++){
    const j=(i+1)%data.samples.length,p=data.samples[i],q=data.samples[j];
    const lane=pitLane(data,p[0]);if(side===1&&lane&&(lane.entry||lane.exit))continue;
+   // Surveyed circuits flag the kerbs seen on the orthophoto, per side (13 right, 14 left).
+   const flag=side<0?13:14;if(p.length>flag&&!(p[flag]&&q[flag]))continue;
    const a=profile.map(v=>vertex(p,i,side,v)),b=profile.map(v=>vertex(q,j,side,v)),va=p[0]/2.4,vb=(j?q[0]:L)/2.4,u=[0,.46,1];
    for(let k=0;k<2;k++){
     positions.push(...a[k],...b[k],...a[k+1],...b[k],...b[k+1],...a[k+1]);
