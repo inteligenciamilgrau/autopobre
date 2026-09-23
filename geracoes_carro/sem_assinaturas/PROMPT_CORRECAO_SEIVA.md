@@ -1,0 +1,9 @@
+# Correção final — Seiva na porta do motorista
+
+Ferramenta: image_gen integrada.
+
+Alvo: `01_lateral_motorista.png` (versão anterior preservada em `rascunhos/01_motorista_porta_preta.png`).
+Referência original: `../../carro/carro_3_lateral_da_frente_e_porta_motorista.jpg`.
+
+Use case: precise-object-edit. Image 1 is the EDIT TARGET: generated full left/driver-side elevation of black/yellow Opala race car 99 with blank black door, front pointing LEFT. Image 2 is the AUTHORITATIVE ORIGINAL reference for the SEIVA door sponsor. Make ONE localized correction to image 1: restore the large SEIVA sponsor logo on the driver DOOR, tracing the exact logo from image 2. The logo is lowercase white heavy slab-serif word "seiva", a thick YELLOW curved arch centered ABOVE the word, and the distinctive WHITE branching tree ROOTS centered BELOW it. Copy the actual typography, root silhouette, arch thickness, proportions, and placement relative to the door from the original photograph, correcting its perspective to this flat side elevation. Position it in the FRONT HALF of the black door below the yellow shoulder stripe, as in image 2 (not enlarged to fill the entire door); whole white word takes roughly two thirds of the door width, centered around the forward/middle part, yellow arch just under shoulder stripe, roots extending downward. This is the ONLY new graphic. No handwritten signatures, no supporter names, no LAIS TE AMO, no hearts, no door handle. Keep yellow shoulder stripe clean with the red safety arrow. Preserve ALL remaining target image details as closely as possible: RR IMPORT behind door, invent software, white 99, front fender MAN•PEC and sponsors, quarter window stickers, JESUS / TÁ ON, printed driver names above window, wheels, mirrors, nets, lighting, background, car shape, position and resolution 1536x1024. No crop or new view. Do not use the background or diagonal angle of reference image 2.
+
