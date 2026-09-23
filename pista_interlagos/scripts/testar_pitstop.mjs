@@ -49,6 +49,9 @@ condition.reset();for(const p of CAR_PARTS){condition.damage(p.id,.65);const quo
 function speedAfter(condition){const car=new TestCar(data);car.condition=condition;car.reset(data.samples.findIndex(p=>p[0]>=1150));for(let i=0;i<360;i++)car.step({throttle:1,brake:0,left:0,right:0},1/120);return Math.hypot(car.vx,car.vy);}
 const full=speedAfter(new CarCondition()),broken=new CarCondition();broken.damage('motor',.8);broken.damage('cambio',.8);const slow=speedAfter(broken);assert(slow<full*.6,'damage actually reduces acceleration');
 for(const p of CAR_PARTS){const q=broken.quote(p.id,'proper');if(q)broken.applyRepair(q,1);}assert(Math.abs(speedAfter(broken)-full)<.001,'full repairs restore original performance');
+// Realism off (the game default): impacts and wear leave the car as new, and switching off repairs it.
+const unbreakable=new CarCondition({enabled:false});unbreakable.impact(30,1,0);unbreakable.wear(10,{offRoad:true,speed:40,spin:8});assert.equal(unbreakable.health,1);assert(Math.abs(speedAfter(unbreakable)-full)<.001,'no damage without the realism setting');
+const switched=new CarCondition();switched.damage('motor',.7);switched.setEnabled(false);assert.equal(switched.health,1);switched.setEnabled(true);switched.damage('motor',.5);assert.equal(switched.quality.motor,.5);
 const car=new TestCar(data),row=data.samples.find(p=>p[0]>=20);car.index=data.samples.indexOf(row);car.x=row[1]+row[9]*20;car.y=row[2]+row[10]*20;car.surface=car.sample(car.x,car.y);assert(car.surface.pit&&car.surface.onRoad&&inPitBox(car.surface));
 const m=Object.create(ImmersiveMode.prototype);Object.assign(m,{car,data,state:new ImmersiveState(),field:new RaceField(data),contacts(){},freeTotalLaps:3,freePlayerProgress:0});m.rivals=m.field.rivals;
 const before=car.clock,progress=m.rivals[0].progress;for(let i=0;i<600;i++)m.stepPit(1/120);assert(Math.abs(car.clock-before-5)<1e-7);assert(m.rivals[0].progress>progress+10,'rivals and clock keep running at the pit');
