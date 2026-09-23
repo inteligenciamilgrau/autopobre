@@ -53,12 +53,11 @@ desktop.ini
 /pista_interlagos/exports/*
 !/pista_interlagos/exports/interlagos_pista.glb
 
-# Local art/model workshop. Runtime copies stay in teste/assets/.
-# These originals remain on disk; keep a separate backup of the workshop.
-# The carro/ reference photos are versioned (metadata stripped before adding).
-/geracoes_carro/
-/geracoes_piloto/
-/geracoes_jogo/
+# Art references are versioned: the carro/ photos (metadata stripped before
+# adding) and the geracoes_carro/, geracoes_piloto/ and geracoes_jogo/ images
+# and prompts used to build the car, the driver and the game screens.
+# Local model workshop. Runtime copies stay in teste/assets/.
+# Unversioned originals remain on disk; keep a separate backup of the workshop.
 # Only the editable V4 car scenes and their game export script are versioned.
 /modelo_3d/*
 !/modelo_3d/v04_fechamentos/
