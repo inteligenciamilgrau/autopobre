@@ -1,6 +1,13 @@
 import * as THREE from 'three';
 import {steeringWheelAngle} from './driver-rig.js';
+import {GATE} from './driver-controls.js';
+import {clamp} from './physics.js';
 import {createFamilyPhone} from './family-phone.js';
+
+// Lever length (m) and lever/pedal travel (rad) for the controls the driver works.
+const SHIFT_LEVER=.255,SHIFT_THROW=.2,SHIFT_LANE=.15,SHIFT_LEAN=.1;
+const HANDBRAKE_REST=-.32,HANDBRAKE_PULL=.4;
+const PEDAL_TRAVEL=Object.freeze({clutch:.22,brake:.11,throttle:.16});
 
 // Reference: carro/carro_14_interna.JPG and carro_8_piloto_dentro_edu_neves.jpg.
 // +X forward, +Y up, -Z driver's side. Dimensions are a visual reconstruction.
@@ -90,9 +97,65 @@ export function createCockpit(){
  mesh(new THREE.PlaneGeometry(.086,.039),new THREE.MeshBasicMaterial({map:displayTexture}),[0,0,.022],displayPanel);
  const switches=panel([.28,1.335,-.39]);box([0,0,0],[.26,.060,.026],black,switches);
  for(let i=0;i<7;i++){const x=-.104+i*.034;mesh(new THREE.TorusGeometry(.007,.002,6,12),silver,[x,0,.018],switches);bar([x,-.007,.018],[x,.007,.026],.0025,silver,switches);}
- // Shifter, pedals, exposed cables and passenger fire extinguisher.
- bar([.08,.38,.02],[.12,.69,.02],.013,silver);mesh(new THREE.SphereGeometry(.026,16,12),silver,[.12,.70,.02]);
- for(let i=0;i<3;i++){const pedal=box([.68,.39,-.46+i*.10],[.025,.095,.06],silver);pedal.rotation.z=.25;}
+ // Driver controls. Each moving part is a pivot group the seated driver animates;
+ // the *Grip/contact anchors are where a glove or boot sole meets it.
+ const leather=new THREE.MeshStandardMaterial({color:0x141617,roughness:.9});
+ const rubber=new THREE.MeshStandardMaterial({color:0x0b0c0d,roughness:.95});
+ // Tall five-speed H lever on the tunnel, rubber boot and gate pattern on the knob.
+ const shifter=new THREE.Group();shifter.name='Cambio_H_animado';shifter.position.set(.095,.512,.02);root.add(shifter);
+ mesh(new THREE.TorusGeometry(.047,.006,8,28).rotateX(Math.PI/2),silver,[0,.004,0],shifter);
+ const boot=new THREE.Group();shifter.add(boot);mesh(new THREE.CylinderGeometry(.017,.046,.075,18,3,true),leather,[0,.0375,0],boot);
+ const lever=new THREE.Group();lever.name='Alavanca_cambio';shifter.add(lever);
+ bar([0,0,0],[0,SHIFT_LEVER,0],.0085,silver,lever);
+ mesh(new THREE.SphereGeometry(.027,20,14),black,[0,SHIFT_LEVER,0],lever);
+ const patternCanvas=document.createElement('canvas');patternCanvas.width=patternCanvas.height=128;const pc=patternCanvas.getContext('2d');
+ pc.fillStyle='#101213';pc.fillRect(0,0,128,128);pc.strokeStyle='#d9dad4';pc.lineWidth=4;pc.beginPath();
+ for(const x of [34,64,94]){pc.moveTo(x,34);pc.lineTo(x,94);}pc.moveTo(34,64);pc.lineTo(94,64);pc.stroke();
+ pc.fillStyle='#e8e8e2';pc.font='bold 22px Arial';pc.textAlign='center';pc.textBaseline='middle';
+ [['1',34,20],['3',64,20],['5',94,20],['2',34,110],['4',64,110],['R',94,110]].forEach(([t,x,y])=>pc.fillText(t,x,y));
+ const patternTexture=new THREE.CanvasTexture(patternCanvas);patternTexture.colorSpace=THREE.SRGBColorSpace;
+ // Canvas top faces forward (+X) when seen from the seat.
+ mesh(new THREE.CircleGeometry(.019,24).rotateX(-Math.PI/2).rotateY(-Math.PI/2),new THREE.MeshBasicMaterial({map:patternTexture}),[0,SHIFT_LEVER+.0262,0],lever);
+ const knobGrip=new THREE.Object3D();knobGrip.position.set(0,SHIFT_LEVER-.034,0);lever.add(knobGrip);
+ function setShifter(lane,throwPosition){
+  lever.rotation.set(lane*SHIFT_LANE,0,-throwPosition*SHIFT_THROW-SHIFT_LEAN);
+  boot.rotation.set(lever.rotation.x*.5,0,lever.rotation.z*.5);
+ }
+ // Hydraulic fly-off handbrake beside the shifter: pulled back toward the driver.
+ const handbrake=new THREE.Group();handbrake.name='Freio_de_mao_hidraulico';handbrake.position.set(.06,.512,.105);root.add(handbrake);
+ box([0,.012,0],[.075,.024,.05],steel,handbrake);
+ mesh(new THREE.CylinderGeometry(.01,.01,.05,12).rotateZ(Math.PI/2),steel,[-.05,.022,0],handbrake);
+ bar([-.075,.022,0],[-.09,-.015,0],.004,cloth,handbrake);
+ mesh(new THREE.CylinderGeometry(.008,.008,.058,10).rotateX(Math.PI/2),silver,[0,.022,0],handbrake);
+ const handbrakeLever=new THREE.Group();handbrakeLever.name='Alavanca_freio_de_mao';handbrakeLever.position.y=.022;handbrake.add(handbrakeLever);
+ bar([0,0,0],[0,.30,0],.0095,steel,handbrakeLever);
+ mesh(new THREE.CylinderGeometry(.0165,.0165,.105,16),rubber,[0,.235,0],handbrakeLever);
+ mesh(new THREE.SphereGeometry(.013,12,8),red,[0,.292,0],handbrakeLever);
+ const handbrakeGrip=new THREE.Object3D();handbrakeGrip.position.set(0,.232,0);handbrakeLever.add(handbrakeGrip);
+ const setHandbrake=value=>{handbrakeLever.rotation.z=HANDBRAKE_REST+value*HANDBRAKE_PULL;};
+ // Hanging pedals (clutch, brake, throttle) on a common axle under the dash; the
+ // pads are angled to meet a boot sole pivoting on its heel.
+ const pedals={};
+ bar([.755,.70,-.52],[.755,.70,-.20],.01,steel);
+ for(const [name,z,x,y,width,height] of [['clutch',-.46,.705,.458,.062,.075],['brake',-.35,.698,.462,.07,.08],['throttle',-.248,.712,.44,.05,.12]]){
+  const pivot=new THREE.Group();pivot.name='Pedal_'+name;pivot.position.set(.755,.70,z);root.add(pivot);
+  const pad=[x-.755,y-.70,0];bar([0,0,0],[pad[0]+.008,pad[1],0],.0075,silver,pivot);
+  const face=new THREE.Group();face.position.set(...pad);face.rotation.z=-.7;pivot.add(face);
+  box([0,0,0],[.012,height,width],silver,face);
+  for(let i=-1;i<=1;i++)box([-.0068,i*height*.3,0],[.002,.006,width*.88],black,face);
+  const contact=new THREE.Object3D();contact.position.x=-.008;face.add(contact);
+  pedals[name]={pivot,contact,travel:PEDAL_TRAVEL[name]};
+ }
+ const footrest=new THREE.Group();footrest.name='Apoio_pe_esquerdo';footrest.position.set(.70,.43,-.585);footrest.rotation.z=-.7;root.add(footrest);
+ box([0,0,0],[.012,.16,.085],satin,footrest);
+ const restContact=new THREE.Object3D();restContact.position.set(-.008,.02,0);footrest.add(restContact);
+ function setPedals(clutch,brake,throttle){for(const [name,value] of Object.entries({clutch,brake,throttle}))pedals[name].pivot.rotation.z=clamp(value,0,1)*pedals[name].travel;}
+ setShifter(...GATE[1]);setHandbrake(0);
+ const controls={shifter,lever,knobGrip,handbrake,handbrakeLever,handbrakeGrip,pedals,footrest,restContact,
+  parts:[shifter,handbrake,footrest,...Object.values(pedals).map(p=>p.pivot)],
+  apply(pose){setShifter(...pose.lever);setHandbrake(pose.handbrake);setPedals(pose.clutch,pose.brake,pose.throttle);},
+  info:()=>({lever:[lever.rotation.x,lever.rotation.z],handbrake:handbrakeLever.rotation.z,pedals:Object.fromEntries(Object.entries(pedals).map(([k,p])=>[k,p.pivot.rotation.z/p.travel]))})};
+ // Exposed cables and passenger fire extinguisher.
  for(let i=0;i<4;i++)bar([.54,.76,.22+i*.10],[.31,.35,.14+i*.09],.003,cloth);
  const extinguisher=mesh(new THREE.CylinderGeometry(.067,.067,.34,20),red,[.45,.40,.48]);extinguisher.rotation.x=Math.PI/2;
  for(const z of [.38,.57])box([.45,.40,z],[.14,.12,.022],steel);
@@ -116,6 +179,6 @@ export function createCockpit(){
   const phoneArrived=phone.update(root.visible?dt:0);
   return {speed,rpm,gear,steering:wheelTurn.rotation.z,phoneArrived};
  }
- return {root,wheel,wheelTurn,eye:new THREE.Vector3(-.39,1.08,.015),update,mirrorTarget,rearCamera,resetPhone:()=>phone.reset(),
-  info:()=>({reference:'carro/carro_14_interna.JPG',steering:wheelTurn.rotation.z,speed:lastSpeed,mirror:[768,192],visible:root.visible,phone:phone.info()})};
+ return {root,wheel,wheelTurn,controls,eye:new THREE.Vector3(-.39,1.08,.015),update,mirrorTarget,rearCamera,resetPhone:()=>phone.reset(),
+  info:()=>({reference:'carro/carro_14_interna.JPG',steering:wheelTurn.rotation.z,speed:lastSpeed,mirror:[768,192],visible:root.visible,phone:phone.info(),controls:controls.info()})};
 }

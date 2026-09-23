@@ -14,7 +14,7 @@ MODULES = (
     'race-roster.js',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'cockpit.js',
-    'driver.js', 'driver-rig.js', 'driver-helmet.js', 'family-phone.js',
+    'driver.js', 'driver-rig.js', 'driver-controls.js', 'driver-helmet.js', 'family-phone.js',
     'immersive-mode.js', 'immersive-state.js', 'immersive-visuals.js',
     'skid-marks.js', 'track-surface.js', 'tyre-smoke.js', 'sky.js', 'landscape.js',
     'style.css', 'immersive.css', 'abertura.css', 'index.html', 'sobre.html',

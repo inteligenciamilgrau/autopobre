@@ -14,9 +14,9 @@ import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar,clamp,wrap,recognitionInput} from './physics.js?v=20260913-burnout';
 import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
-import {createCockpit} from './cockpit.js?v=20260913-family';
+import {createCockpit} from './cockpit.js?v=20260923-controls';
 import {CameraReturn} from './camera-return.js';
-import {createDriver} from './driver.js?v=20260913-inward';
+import {createDriver} from './driver.js?v=20260923-controls';
 import {SkidMarks} from './skid-marks.js?v=20260913-burnout';
 import {TyreSmoke} from './tyre-smoke.js';
 import {ImmersiveMode} from './immersive-mode.js';
@@ -357,7 +357,7 @@ function hud(){
  $('lap').textContent=`${Math.min(car.laps+1,immersive.active?1:immersive.freeTotalLaps)} / ${immersive.active?1:immersive.freeTotalLaps}`;$('racePosition').textContent=`${immersive.active?immersive.state.result?.position??immersive.state.position:immersive.freePosition}º / ${GRID_SIZE}`;$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);const rejected=car.lastLapValid===false&&car.clock-car.lapStart<10;$('valid').textContent=rejected?'Volta não contou · trecho cortado ou incompleto':car.lapValid?'Volta válida':'Volta inválida · trecho cortado';$('valid').hidden=car.lapValid&&!rejected;$('valid').style.color=car.lapValid&&!rejected?'#e2fb57':'#ffb789';
  $('surface').textContent=automatic?'RECONHECIMENTO AUTOMÁTICO':p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=location(p.s);drawMap();
 }
-let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0;
+let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0,frameImpact=0;
 // Adaptive resolution: slower GPUs trade sharpness for a steady frame rate.
 const resolution={max:Math.min(devicePixelRatio,touchDevice?1:1.5),min:touchDevice?.6:.7,frame:1/60,timer:0};
 function adaptResolution(rawDt){
@@ -369,15 +369,17 @@ function updateCountdown(){const count=immersive?.active?(immersive.state.phase=
 function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;menu(true);}
- if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);}immersive?.stepFree(1/120,command);}skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
+ if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}immersive?.stepFree(1/120,command);}skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  skidMarks.flush();
  tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
- carAudio.update(car,pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input(),skid,paused,mode);
+ // The same command drives the engine sound and the driver's hands and feet.
+ const driveCommand=pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input();
+ carAudio.update(car,driveCommand,skid,paused,mode);
  carAudio.updateScene({...immersive?.audioScene(),speed:Math.hypot(car.vx,car.vy),onRoad:car.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
- updateCar(dt);updateCamera(dt);if(cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ updateCar(dt);updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  immersive?.update(paused?0:dt,camera);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
  raceResults.update(immersive,paused,$('settings').open);
@@ -490,7 +492,7 @@ async function loadCircuit(){
 
  data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/pista.json')).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);
  roadSurface=await createTrackSurface(renderer,data);
- if(!driver){driver=await createDriver(cockpit.wheel,cockpit.wheelTurn);carBody.add(driver.root);}
+ if(!driver){driver=await createDriver(cockpit);carBody.add(driver.root);}
  terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];
  if(circuit.id==='curvelo'){
   const groundMaterial=terrainMaterial(terrainTextures,landscapeField,{mobile:touchDevice});groundMaterial.userData.terrain=true;

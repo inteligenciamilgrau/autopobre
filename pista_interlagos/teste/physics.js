@@ -18,7 +18,8 @@ export function steerLimit(speed){
 export const GEAR_RPM_PER_KMH=[0,110,72,52,40,32.2];
 export const IDLE_RPM=950,REDLINE_RPM=7000;
 const TORQUE_CURVE=[[0,190],[1000,215],[2500,300],[4000,360],[5000,352],[5500,338],[6500,280],[7000,240],[7400,0]];
-const SHIFT_UP_RPM=6650,SHIFT_DOWN_RPM=3100,SHIFT_TIME=.16;
+export const SHIFT_UP_RPM=6650,SHIFT_DOWN_RPM=3100;
+const SHIFT_TIME=.16;
 // Newton-metres at the crank to m/s2 at the car: gear ratio, 90% driveline, 0.316 m tyre, 1250 kg.
 const TORQUE_TO_ACCEL=.1191*.9/.316/1250;
 // Opala CdA of about 0.9 m2 at sea-level air density, over 1250 kg.
