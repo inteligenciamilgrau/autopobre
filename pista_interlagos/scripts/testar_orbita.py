@@ -1,4 +1,4 @@
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track
 """Interacao real no Edge e orientacao dos eixos das rodas exportadas."""
 import json
 import math
@@ -17,7 +17,7 @@ with sync_playwright() as p:
     browser = p.chromium.launch(
         executable_path=browser_executable(),
         headless=True,
-        args=['--enable-webgl', '--ignore-gpu-blocklist', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'])
+        args=browser_args())
     page = browser.new_page(viewport={'width': 1440, 'height': 900})
     # This suite exercises the drag fallback; native capture has its own suite.
     page.add_init_script("Object.defineProperty(Element.prototype,'requestPointerLock',{value:undefined,configurable:true})")
@@ -31,9 +31,9 @@ with sync_playwright() as p:
     def offset(s):
         return [a-b for a,b in zip(s['position'], s['target'])]
     try:
-        page.goto('http://127.0.0.1:8799/pista_interlagos/teste/', wait_until='networkidle', timeout=120000)
-        wait_js(page,'window.interlagos?.ready', timeout=120000);page.uncheck("#immersiveMode")
-        page.click('#start')
+        open_menu(page);race_options(page,immersive=False);enter_track(page)
+        # The grid starts ~70 m back; the gantry check needs the car on the timing line.
+        page.evaluate('interlagos.reposition(0)')
         page.keyboard.down('KeyS')
         # Cada gesto percorre 90 graus com rotateSpeed=.8 e altura=900.
         for i in range(4):
@@ -83,9 +83,7 @@ with sync_playwright() as p:
         check('target_follows_reset', math.dist(reset['target'],[reset['car'][0],reset['car'][1]+.85,reset['car'][2]])<1e-6)
         # Verifica as duas teclas contra os eixos reais das rodas nas duas pinturas.
         for livery in ['assinaturas_omp','seiva_danilo']:
-            page.click('#menuButton'); page.select_option('#livery',livery)
-            wait_js(page,'(v)=>interlagos.state.livery===v', arg=livery)
-            page.click('#start'); page.keyboard.down('KeyS')
+            race_options(page,livery=livery);enter_track(page); page.keyboard.down('KeyS')
             for key,sign in [('KeyA',1),('KeyD',-1)]:
                 page.keyboard.down(key)
                 wait_js(page,'(s)=>interlagos.car.steer*s>.3',arg=sign)
@@ -94,14 +92,14 @@ with sync_playwright() as p:
                 report['steering'].append({'livery':livery,'key':key,**snap})
                 check(f'{livery}_{key}_front_direction',all(w['angle']*sign>.29 and abs(w['angle']-snap['steer'])<1e-6 for w in snap['wheels'] if w['front']))
                 check(f'{livery}_{key}_rear_straight',all(abs(w['angle'])<1e-6 for w in snap['wheels'] if not w['front']))
-            page.keyboard.up('KeyS'); page.click('#menuButton')
+            page.keyboard.up('KeyS'); page.keyboard.press('KeyP'); wait_js(page,'interlagos.state.paused')
             for spin in [0,.8,2.4,5.9,-1.7]:
                 page.evaluate('(s)=>{interlagos.car.spin=s;interlagos.car.steer=.4}',spin)
                 frame()
                 ws=page.evaluate('interlagos.wheelSnapshot()')
                 check(f'{livery}_spin_{spin}_no_camber_or_yaw_reversal',all(abs(w['axle'][1])<1e-6 and abs(w['angle']-(.4 if w['front'] else 0))<1e-6 for w in ws))
-            page.click('#start')
-        page.click('#menuButton'); page.select_option('#camera','chase'); page.click('#start')
+            enter_track(page)
+        race_options(page,camera='chase');enter_track(page)
         modes=[]
         for _ in range(5):
             page.keyboard.press('KeyC'); modes.append(page.evaluate('interlagos.state.mode'))

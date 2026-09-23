@@ -2,23 +2,23 @@
 from pathlib import Path
 import json
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, enter_track
 ROOT=Path(__file__).resolve().parents[1]
 report={'checks':{},'errors':[]}
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  context=browser.new_context(viewport={'width':844,'height':390},is_mobile=True,has_touch=True,device_scale_factor=2)
  page=context.new_page();page.set_default_timeout(90000);page.on('pageerror',lambda e:report['errors'].append(str(e)))
  def shot(name):page.screenshot(path=str(ROOT/'renders'/f'mobile_{name}.png'))
  def center(selector):
   b=page.locator(selector).bounding_box();return {'x':b['x']+b['width']/2,'y':b['y']+b['height']/2}
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
-  check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio<=1'));shot('abertura')
+  open_menu(page);shot('abertura')
   page.tap('#settingsButton');check('settings_fit_landscape',page.evaluate("()=>{const r=document.querySelector('#settings').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.right<=innerWidth}"));shot('config')
-  page.uncheck('#immersiveMode');page.tap('#settingsBack');page.tap('#start');wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
+  page.uncheck('#immersiveMode');page.tap('#settingsBack');enter_track(page,tap=True);wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
+  check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio<=1'))
   session=context.new_cdp_session(page);points=[dict(center('#touchPedals'),y=page.locator('#touchPedals').bounding_box()['y']+18,id=1),dict(center('#touchSteering'),x=page.locator('#touchSteering').bounding_box()['x']+23,id=2)]
   session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':points});wait_js(page,"interlagos.mobileInfo().throttle>.9&&interlagos.mobileInfo().steering<-.5")
   wait_js(page,'Math.hypot(interlagos.car.vx,interlagos.car.vy)>1');check('simultaneous_gas_and_steering',True);shot('corrida')
@@ -26,7 +26,7 @@ with sync_playwright() as p:
   session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[dict(center('#touchHandbrake'),id=3)]});check('handbrake_held',page.evaluate("interlagos.mobileInfo().pressed.includes('Space')"));session.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
   page.tap('#touchCamera');check('camera_button_works',page.evaluate('interlagos.state.mode')!='chase')
   page.set_viewport_size({'width':390,'height':844});wait_js(page,'interlagos.state.paused');check('portrait_prompt_pauses_game',page.is_visible('#rotatePhone'));shot('girar')
-  page.set_viewport_size({'width':667,'height':375});page.tap('#settingsButton');page.check('#immersiveMode');page.tap('#settingsBack');page.tap('#start')
+  page.set_viewport_size({'width':667,'height':375});page.tap('#settingsButton');page.check('#immersiveMode');page.tap('#settingsBack');enter_track(page,tap=True)
   page.evaluate("async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}")
   wait_js(page,"fixtureMode.visual.followPosition!=null");check('viewport_fills_after_rotation',page.evaluate("()=>{const r=document.querySelector('#touchControls').getBoundingClientRect();return Math.abs(r.width-innerWidth)<2&&Math.abs(r.height-innerHeight)<2&&Math.abs(visualViewport.width-innerWidth)<2}"));shot('boxes')
   page.evaluate("()=>{fixtureMode.state.talk(0);fixtureMode.ui();}");wait_js(page,"document.querySelector('[data-action=\"joke:0\"]')");page.tap('[data-action="joke:0"]');check('touch_dialogue_donates_and_closes',page.evaluate('fixtureMode.state.fan===null&&fixtureMode.state.donors.includes(0)'))

@@ -1,24 +1,26 @@
 """Browser QA for the 15-car roster, branding and results on desktop/mobile."""
 from pathlib import Path
-from browser_config import browser_executable,wait_js
+from browser_config import browser_executable,browser_args,wait_js,open_menu,race_options,enter_track
 from playwright.sync_api import sync_playwright
 import json
 ROOT=Path(__file__).resolve().parents[1]
 report={'errors':[],'views':[]}
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  for mobile,w,h in [(False,1280,720),(True,844,390)]:
   context=browser.new_context(viewport={'width':w,'height':h},is_mobile=mobile,has_touch=mobile)
   page=context.new_page();page.set_default_timeout(120000)
   page.on('pageerror',lambda e:report['errors'].append(str(e)))
   page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
+  open_menu(page)
   assert page.evaluate("document.querySelector('.old-stock-opening').naturalWidth>0")
   page.screenshot(path=str(ROOT/f'renders/oldstock_abertura_{mobile}.png'))
-  page.click('#settingsButton');page.uncheck('#immersiveMode');page.click('.grid-roster summary')
+  race_options(page,immersive=False);enter_track(page)
+  # The roster is filled once the circuit has loaded: read it from the pause settings.
+  page.click('#touchMenu' if mobile else '#menuButton');page.click('#tab-race');page.click('.grid-roster summary')
   assert page.locator('#gridRoster li').count()==15 and 'Kleber Eletric' in page.inner_text('#gridRoster')
   page.screenshot(path=str(ROOT/f'renders/oldstock_pilotos_{mobile}.png'))
-  page.click('#settingsBack');page.click('#start')
+  page.click('#settingsResume');wait_js(page,'!interlagos.state.paused')
   info=page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return old.call(this)};interlagos.immersiveInfo();fixtureMode.stepFree=()=>{};interlagos.car.step=()=>{};const scene=fixtureMode.visual.root.parent,boards=scene.getObjectByName('Outdoors_AutoPobre_OldStock'),kleber=fixtureMode.visual.rivals.find(o=>o.userData.entry.number==='70');return {rivals:fixtureMode.field.info().rivals,numbers:fixtureMode.visual.rivals.map(o=>o.userData.entry.number),billboards:boards.children.length,kleberLogo:!!kleber.getObjectByName('OldStock_no_Opala70'),lead:fixtureMode.field.gridLeadIn,positions:fixtureMode.rivals.map(r=>r.car.surface.s),L:fixtureMode.data.meta.reconstructed_xy_m};}""")
   assert len(info['rivals'])==14 and len(set(info['numbers']))==14 and '99' not in info['numbers']
   assert all(s>info['L']-78 and s<info['L']-4 for s in info['positions'])
@@ -35,7 +37,7 @@ with sync_playwright() as p:
   wait_js(page,'interlagos.state.paused&&fixtureMode.freeFinished')
   assert '15º de 15' in page.inner_text('#raceResult') and page.locator('#finishingOrder li').count()==15
   page.screenshot(path=str(ROOT/f'renders/oldstock_resultado_{mobile}.png'))
-  page.click('#resultsSettings');page.check('#immersiveMode');page.click('#settingsBack');page.click('#resultsContinue')
+  page.click('#resultsSettings');page.check('#immersiveMode');page.click('#settingsClose');page.click('#resultsContinue')
   page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.state.phase='prepare';fixtureMode.sync();}")
   assert len(page.evaluate('fixtureMode.rivals'))==14
   page.evaluate("()=>{fixtureMode.state.phase='race';fixtureMode.state.finish(15);fixtureMode.sync();}")

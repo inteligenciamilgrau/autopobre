@@ -7,13 +7,15 @@ import threading
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable
+from browser_config import browser_executable, browser_args, wait_js, enter_track
 from publicacao import ROOT, PUBLIC_FILES, contained_file, security_headers
 from servidor import Handler
 
 
 def main():
     dist = ROOT / 'dist'
+    if not (dist / 'index.html').is_file():
+        raise SystemExit('Build the release first: python pista_interlagos/scripts/preparar_publicacao.py')
     report = {'checks': {}, 'browser_errors': []}
 
     def check(name, value):
@@ -75,8 +77,7 @@ def main():
             check('security_headers', response.headers['X-Content-Type-Options'] == 'nosniff' and "frame-ancestors 'none'" in response.headers['Content-Security-Policy'])
             check('no_python_version', 'Python' not in response.headers.get('Server', ''))
         with sync_playwright() as p:
-            browser = p.chromium.launch(executable_path=browser_executable(), headless=True,
-                args=['--enable-webgl', '--ignore-gpu-blocklist', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'])
+            browser = p.chromium.launch(executable_path=browser_executable(), headless=True, args=browser_args())
             page = browser.new_page(viewport={'width':1280, 'height':800})
             page.set_default_timeout(120000)
             page.on('pageerror', lambda error: report['browser_errors'].append(str(error)))
@@ -92,32 +93,32 @@ def main():
             page.goto(base, wait_until='networkidle')
             page.wait_for_selector('#start:not([disabled])')
             check('release_ready_in_subdirectory', True)
-            check('logo_visible', page.locator('.opening-brand img').is_visible())
+            check('logo_visible', page.locator('.opening-brand img:not(.old-stock-opening)').is_visible())
             check('immersive_selected_by_default', page.is_checked('#immersiveMode'))
             page.click('#settingsButton');page.uncheck('#immersiveMode')
             page.select_option('#camera', 'aerial')
             page.select_option('#livery', 'seiva_danilo')
-            page.wait_for_selector('#skinButton:not([disabled])')
             page.click('#tab-audio');page.locator('#volume').fill('23'); page.click('#mute')
             page.reload(wait_until='networkidle'); page.wait_for_selector('#start:not([disabled])')
             check('free_mode_persists', not page.is_checked('#immersiveMode'))
-            check('camera_and_livery_restored', page.evaluate("interlagos.state.mode==='aerial'&&interlagos.state.livery==='seiva_danilo'"))
+            check('camera_and_livery_restored', page.input_value('#camera')=='aerial' and page.input_value('#livery')=='seiva_danilo')
             check('audio_preferences_restored', page.input_value('#volume')=='23' and page.locator('#mute').get_attribute('aria-pressed')=='true')
-            page.click('#start'); page.click('#cockpitButton'); page.click('#skinButton')
+            enter_track(page, pilot='Piloto seguranca'); page.click('#cockpitButton'); page.click('#skinButton')
             page.wait_for_selector('#skinButton:not([disabled])')
             page.reload(wait_until='networkidle'); page.wait_for_selector('#start:not([disabled])')
-            check('track_buttons_preferences_restored', page.evaluate("interlagos.state.mode==='cockpit'&&interlagos.state.livery==='assinaturas_omp'"))
-            page.click('#start')
+            check('track_buttons_preferences_restored', page.input_value('#camera')=='cockpit' and page.input_value('#livery')=='assinaturas_omp')
+            enter_track(page)
             page.click('#cockpitButton')
             page.evaluate("interlagos.setLivery('seiva_danilo')")
             check('second_skin', page.locator('#skinButton').inner_text().find('Seiva') >= 0)
             check('invalid_livery_rejected', page.evaluate("async()=>{try{await interlagos.setLivery('../../.env');return false}catch{return true}}"))
             page.click('#menuButton'); page.click('#tab-race');page.check('#immersiveMode')
             page.reload(wait_until='networkidle'); page.wait_for_selector('#start:not([disabled])')
-            check('immersive_choice_persists_without_autostart', page.is_checked('#immersiveMode') and not page.evaluate('interlagos.immersiveInfo().active'))
-            page.click('#start')
+            check('immersive_choice_persists_without_autostart', page.is_checked('#immersiveMode') and not page.evaluate('interlagos.ready'))
+            enter_track(page)
             check('immersive_starts', page.evaluate("interlagos.immersiveInfo().phase==='crowd'"))
             page.click('#menuButton'); page.click('#tab-race');page.uncheck('#immersiveMode');page.click('#settingsBack');page.click('#tour')
+            wait_js(page, 'interlagos.ready&&!interlagos.state.paused')
             check('normal_mode_returns', not page.evaluate('interlagos.immersiveInfo().active'))
             page.click('#menuButton')
             page.screenshot(path=str(ROOT / '.audit-local/security_release.png'))
@@ -132,6 +133,7 @@ def main():
         for server in (local, release):
             server.shutdown(); server.server_close()
         report.setdefault('passed', False)
+        (ROOT / '.audit-local').mkdir(exist_ok=True)
         (ROOT / '.audit-local/security_checks.json').write_text(json.dumps(report, indent=2), encoding='utf-8')
         print(json.dumps(report, indent=2))
 

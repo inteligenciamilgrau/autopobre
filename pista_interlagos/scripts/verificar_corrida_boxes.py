@@ -1,4 +1,4 @@
-from browser_config import browser_executable,wait_js
+from browser_config import browser_executable,browser_args,wait_js,open_menu,enter_track
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -6,17 +6,17 @@ ROOT=Path(__file__).resolve().parents[1]
 report={'checks':{},'errors':[]}
 def check(name,value):report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1440,'height':900});page.set_default_timeout(90000)
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.add_init_script("Object.defineProperty(Element.prototype,'requestPointerLock',{value:undefined,configurable:true})")
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
+  open_menu(page)
   page.click('#settingsButton');check('dedicated_modal_settings',page.evaluate("document.querySelector('#settings').matches(':modal')"))
   page.screenshot(path=str(ROOT/'renders/configuracoes_corrida.png'));page.click('#tab-controls');page.screenshot(path=str(ROOT/'renders/configuracoes_controles.png'))
   page.set_viewport_size({'width':390,'height':844});page.screenshot(path=str(ROOT/'renders/configuracoes_mobile.png'))
   check('settings_fit_mobile',page.evaluate("()=>{const r=document.querySelector('#settings').getBoundingClientRect();return r.left>=0&&r.right<=innerWidth&&r.top>=0&&r.bottom<=innerHeight}"))
-  page.set_viewport_size({'width':1440,'height':900});page.click('#settingsBack');page.click('#start')
+  page.set_viewport_size({'width':1440,'height':900});page.click('#settingsBack');enter_track(page)
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
   wait_js(page,"fixtureMode.visual.followPosition!==null&&fixtureMode.visual.followPosition!==undefined")
   before=page.evaluate('interlagos.immersiveInfo().hero');camera_before=page.evaluate('interlagos.cameraSnapshot().position')
@@ -33,7 +33,7 @@ with sync_playwright() as p:
   page.evaluate('''async()=>{const {FANS,JOKES}=await import('./immersive-state.js');const m=fixtureMode,s=m.state;for(let i=0;i<FANS.length;i++){s.talk(i);s.joke(JOKES.findIndex(j=>j.topic===FANS[i].taste));}m.action('close');m.action('prepare');}''');wait_js(page,"interlagos.immersiveInfo().phase==='prepare'")
   page.screenshot(path=str(ROOT/'renders/grid_compra_gasolina.png'))
   check('fuel_purchase_has_rear_camera_and_revving_grid',page.evaluate('''()=>{const m=fixtureMode,c=m.car,p=interlagos.cameraSnapshot().position;return (p[0]-c.x)*Math.cos(c.heading)+(-p[2]-c.y)*Math.sin(c.heading)<-6&&m.visual.rivals.every(x=>x.visible)&&interlagos.audioInfo().effects.loops.rival0>0;}'''))
-  page.click('#menuButton');page.click('#tab-race');page.uncheck('#immersiveMode');page.click('#settingsBack');page.click('#start')
+  page.click('#menuButton');page.click('#tab-race');page.uncheck('#immersiveMode');page.click('#settingsBack');enter_track(page)
   wait_js(page,'interlagos.immersiveInfo().field.rivals.every(r=>r.speed>1)');check('normal_mode_has_fourteen_moving_rivals',len(page.evaluate('interlagos.immersiveInfo().field.rivals'))==14 and not page.evaluate('interlagos.immersiveInfo().active'))
   check('fuel_gauge_visible_in_normal_race',page.is_visible('#fuelGauge') and page.evaluate("document.querySelector('#fuelBar').value>0"))
   page.evaluate('fixtureMode.freeFuel=.6');wait_js(page,"document.querySelector('#fuelGauge').classList.contains('reserve')");check('fuel_reserve_warning',page.inner_text('#fuelStatus')=='RESERVA');page.screenshot(path=str(ROOT/'renders/corrida_mapa_combustivel.png'))

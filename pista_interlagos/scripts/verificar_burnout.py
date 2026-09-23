@@ -1,4 +1,4 @@
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -7,13 +7,13 @@ report={'errors':[],'checks':{}}
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1120,'height':720});page.set_default_timeout(90000)
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle',timeout=120000);wait_js(page,'window.interlagos?.ready',timeout=120000);page.uncheck("#immersiveMode")
-  page.evaluate('interlagos.reposition(600)');page.click('#start');page.keyboard.down('Space')
+  open_menu(page);race_options(page,immersive=False);enter_track(page);wait_race_start(page)
+  page.evaluate('interlagos.reposition(600)');page.keyboard.down('Space')
   check('handbrake_without_throttle_no_smoke',page.evaluate('interlagos.smokeInfo().active===0'))
   start=page.evaluate('({x:interlagos.car.x,y:interlagos.car.y})')
   page.keyboard.down('KeyW');wait_js(page,'interlagos.smokeInfo().active>60&&interlagos.car.rearSlipSpeed>18')
@@ -27,8 +27,7 @@ with sync_playwright() as p:
   check('launch_with_wheelspin',page.evaluate('interlagos.car.rearSlipSpeed>1'))
   page.screenshot(path=str(ROOT/'renders/burnout_arrancada.png'));page.keyboard.up('KeyW')
   page.evaluate('interlagos.reset()');check('reset_clears_smoke',page.evaluate('interlagos.smokeInfo().active===0'))
-  page.click('#menuButton');page.select_option('#livery','seiva_danilo');wait_js(page,"interlagos.state.livery==='seiva_danilo'")
-  page.select_option('#camera','orbit');page.evaluate('interlagos.reposition(600)');page.click('#start')
+  race_options(page,livery='seiva_danilo',camera='orbit');page.evaluate('interlagos.reposition(600)');enter_track(page)
   page.keyboard.down('Space');page.keyboard.down('KeyW');page.keyboard.down('KeyA')
   wait_js(page,'interlagos.car.yaw>.9&&interlagos.smokeInfo().active>50')
   check('left_donut_second_skin',page.evaluate('interlagos.car.rearSlipSpeed>15&&interlagos.telemetry().speed>5'))
@@ -38,7 +37,7 @@ with sync_playwright() as p:
   page.keyboard.up('KeyD');page.keyboard.up('Space');page.keyboard.up('KeyW');page.click('#menuButton')
   state=page.evaluate('interlagos.smokeInfo()');page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
   check('pause_freezes_smoke',state==page.evaluate('interlagos.smokeInfo()'))
-  page.evaluate('interlagos.reposition(600)');page.select_option('#camera','cockpit');page.click('#start');page.keyboard.down('Space');page.keyboard.down('KeyW')
+  race_options(page,camera='cockpit');page.evaluate('interlagos.reposition(600)');enter_track(page);page.keyboard.down('Space');page.keyboard.down('KeyW')
   wait_js(page,'interlagos.smokeInfo().active>50')
   check('smoke_mirror_current',page.evaluate('interlagos.cockpitInfo().mirrorFrame===interlagos.cockpitInfo().renderedFrame'))
   page.screenshot(path=str(ROOT/'renders/burnout_retrovisor.png'));page.keyboard.up('Space');page.keyboard.up('KeyW')

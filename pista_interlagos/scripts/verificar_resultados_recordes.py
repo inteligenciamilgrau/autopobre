@@ -1,11 +1,11 @@
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable,wait_js
+from browser_config import browser_executable,browser_args,wait_js
 import json
 ROOT=Path(__file__).resolve().parents[1]
 errors=[]
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  for mobile,immersive in [(True,True),(False,False)]:
   context=browser.new_context(viewport={'width':844 if mobile else 1280,'height':390 if mobile else 820},is_mobile=mobile,has_touch=mobile)
   page=context.new_page();page.set_default_timeout(120000);page.on('pageerror',lambda e:(errors.append(str(e)),print(str(e),flush=True)))

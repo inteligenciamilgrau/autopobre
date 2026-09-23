@@ -1,4 +1,4 @@
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -7,16 +7,16 @@ report={'errors':[],'checks':{}}
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1440,'height':900});page.set_default_timeout(120000)
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
  def info():return page.evaluate('interlagos.cockpitInfo().phone')
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready');page.uncheck("#immersiveMode")
-  check('no_message_in_menu',info()['count']==0)
-  page.select_option('#camera','cockpit');page.click('#start');page.keyboard.down('Space')
+  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton')
+  check('no_message_at_start',info()['count']==0)
+  page.keyboard.down('Space')
   wait_js(page,'interlagos.cockpitInfo().phone.active')
   check('requested_first_message',info()['message']['text']=='Buscar filha na escola');report['first']=info()
   page.screenshot(path=str(ROOT/'renders/celular_interna.png'))
@@ -29,7 +29,7 @@ with sync_playwright() as p:
   check('hands_still_reach_wheel',page.evaluate('interlagos.driverInfo().arms.every(a=>a.reachable)'))
   page.keyboard.up('KeyA');page.keyboard.up('Space');page.keyboard.press('KeyP')
   before=info();frame();frame();check('pause_keeps_phone_state',before==info())
-  page.select_option('#livery','seiva_danilo');wait_js(page,"interlagos.state.livery==='seiva_danilo'");check('skin_change_preserves_message',info()==before)
+  race_options(page,livery='seiva_danilo');check('skin_change_preserves_message',info()==before)
   page.click('#start');page.keyboard.down('Space');page.screenshot(path=str(ROOT/'renders/celular_seiva.png'));page.keyboard.up('Space')
   page.click('#cockpitButton');frame();before=info();frame();frame();check('external_view_preserves_schedule',before==info())
   page.evaluate('interlagos.reset()');check('reset_clears_phone',info()['count']==0 and info()['message'] is None)

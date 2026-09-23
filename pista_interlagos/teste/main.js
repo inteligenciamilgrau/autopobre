@@ -527,8 +527,9 @@ async function loadCircuit(){
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
   driverInfo:()=>driver.info(),
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
-  cockpitInfo:()=>({...cockpit.info(),eyeLocal:carRoot.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
-   renderedFrame,mirrorFrame,mirrorEyeLocal:carRoot.worldToLocal(cockpit.rearCamera.position.clone()).toArray()}),
+  // Interior cameras ride on the sprung body, so report them in its frame.
+  cockpitInfo:()=>({...cockpit.info(),eyeLocal:carBody.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
+   renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray()}),
   viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs}),
   cameraSnapshot:()=>({position:camera.position.toArray(),target:orbit.target.toArray(),car:carRoot.position.toArray(),distance:camera.position.distanceTo(orbit.target),ground:car.sample(camera.position.x,-camera.position.z).z}),
   wheelSnapshot:()=>{carRoot.updateMatrixWorld(true);const inverse=carRoot.getWorldQuaternion(new THREE.Quaternion()).invert();return wheels.map(w=>{const axle=new THREE.Vector3(0,0,1).applyQuaternion(w.obj.getWorldQuaternion(new THREE.Quaternion())).applyQuaternion(inverse);return {name:w.obj.name,front:w.front,angle:Math.atan2(axle.x,axle.z),axle:axle.toArray()};});},

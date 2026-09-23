@@ -1,4 +1,4 @@
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json,math
@@ -7,14 +7,14 @@ report={'errors':[],'checks':{},'views':[]}
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1440,'height':900});page.set_default_timeout(90000)
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle',timeout=120000);wait_js(page,'window.interlagos?.ready',timeout=120000);page.uncheck("#immersiveMode")
-  page.select_option('#camera','cockpit');page.click('#start');page.keyboard.down('KeyS');frame()
+  # The free race starts behind the car; switch to the interior on track.
+  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton');page.keyboard.down('KeyS');wait_race_start(page);frame()
   page.screenshot(path=str(ROOT/'renders/cockpit_largada.png'))
   info=page.evaluate('interlagos.cockpitInfo()');report['views'].append(info)
   check('internal_selected',info['visible'] and not info['externalVisible'])
@@ -27,7 +27,7 @@ with sync_playwright() as p:
   check('speed_display_active',info['speed']>29)
   check('camera_rigid_while_driving',math.dist(info['eyeLocal'],[-.39,1.08,.015])<1e-6)
   page.screenshot(path=str(ROOT/'renders/cockpit_movimento.png'))
-  page.click('#menuButton');page.select_option('#livery','seiva_danilo');wait_js(page,"interlagos.state.livery==='seiva_danilo'");page.evaluate('interlagos.reposition(800)');page.click('#start');page.keyboard.down('KeyS');frame()
+  race_options(page,livery='seiva_danilo');page.evaluate('interlagos.reposition(800)');enter_track(page);page.keyboard.down('KeyS');frame()
   info=page.evaluate('interlagos.cockpitInfo()');check('second_livery_cockpit',info['visible'] and not info['externalVisible']);page.screenshot(path=str(ROOT/'renders/cockpit_seiva.png'));page.keyboard.up('KeyS')
   page.click('#cockpitButton');frame();info=page.evaluate('interlagos.cockpitInfo()');check('external_car_restored',not info['visible'] and info['externalVisible'] and info['fov']==58)
   modes=[]

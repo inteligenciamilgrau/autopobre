@@ -1,11 +1,11 @@
 """Circuit choices must not navigate, build WebGL, fetch race assets or restart music."""
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable,wait_js
+from browser_config import browser_executable,browser_args,wait_js
 import json
 errors=[]
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  context=browser.new_context(viewport={'width':844,'height':390},is_mobile=True,has_touch=True)
  context.add_init_script("""localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false}));
  window.mediaPlayers=[];const NativeAudio=window.Audio;window.Audio=new Proxy(NativeAudio,{construct(target,args){const player=Reflect.construct(target,args);mediaPlayers.push(player);return player;}});

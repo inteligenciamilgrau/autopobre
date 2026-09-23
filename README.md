@@ -39,7 +39,7 @@ Os dois modos têm 14 adversários, contato entre carrocerias com reação à ve
 
 Quem ainda não contribuiu tem um `$` sobre a cabeça. Ao receber a doação, o diálogo fecha e o piloto fica livre para procurar outra pessoa. A sobra da vaquinha é transferida ao saldo acumulado no resultado, inclusive em derrota ou desclassificação. O medidor de combustível mostra litros e reserva nos dois modos; no modo normal, R reposiciona e reabastece. O minimapa mostra o 99 e os 14 adversários, que têm ritmo mais forte e procuram espaço para ultrapassar.
 
-Validação: `testar_eventos_audio.mjs`, `testar_colisoes.mjs`, `testar_saldo.mjs`, `verificar_trilha.py`, `verificar_mp3.py` e `verificar_corrida_boxes.py` e `verificar_mobile.py`, em `pista_interlagos/scripts/`. Os testes do navegador precisam de Playwright e do servidor local iniciado.
+Validação: `testar_eventos_audio.mjs`, `testar_colisoes.mjs`, `testar_saldo.mjs`, `verificar_trilha.py`, `verificar_mp3.py` e `verificar_corrida_boxes.py` e `verificar_mobile.py`, em `pista_interlagos/scripts/`. Os testes do navegador precisam de Playwright e do servidor local iniciado. Eles seguem o fluxo atual do jogo (menu → nome do piloto → **Entrar na pista**, que só então carrega o circuito; contagem 3-2-1 antes de dirigir) por meio de `open_menu`, `race_options`, `enter_track` e `wait_race_start` em `browser_config.py`, e usam a GPU da máquina. Sem GPU, defina `INTERLAGOS_SOFTWARE_GL=1` para forçar o SwiftShader (bem mais lento com a paisagem atual). `verificar_seguranca.py` exige o build (`preparar_publicacao.py`) antes, porque também testa o `dist/`.
 
 ### GitHub Pages
 

@@ -1,4 +1,4 @@
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -7,7 +7,7 @@ report={'errors':[],'checks':{}}
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1440,'height':900});page.set_default_timeout(90000)
  page.add_init_script("Object.defineProperty(Element.prototype,'requestPointerLock',{value:undefined,configurable:true})")
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
@@ -15,15 +15,16 @@ with sync_playwright() as p:
  def info():return page.evaluate('interlagos.audioInfo()')
  def speed(kmh,reset=False):page.evaluate('([v,reset])=>{if(reset)interlagos.reposition(600);const c=interlagos.car;c.vx=Math.cos(c.heading)*v/3.6;c.vy=Math.sin(c.heading)*v/3.6;}',[kmh,reset])
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle',timeout=120000);wait_js(page,'window.interlagos?.ready',timeout=120000)
+  open_menu(page)
   check('silent_before_user_gesture',info()['context']=='locked')
-  page.click('#settingsButton');page.uncheck('#immersiveMode');page.click('#settingsBack')
+  race_options(page,immersive=False)
   page.screenshot(path=str(ROOT/'renders/audio_opcoes.png'))
-  page.click('#start');page.keyboard.down('KeyS');wait_js(page,"interlagos.audioInfo().context==='running'&&interlagos.audioInfo().rms>.001")
+  enter_track(page);page.keyboard.down('KeyS');wait_js(page,"interlagos.audioInfo().context==='running'&&interlagos.audioInfo().rms>.001")
   check('engine_outputs_audio_after_start',info()['rpm']==950 and info()['rms']>.001)
-  page.keyboard.up('KeyS');page.keyboard.down('KeyW');speed(30,True)
-  wait_js(page,'interlagos.audioInfo().rpm>4000');report['accelerating']=info()
-  shifts=info()['shifts'];speed(46);wait_js(page,'(n)=>interlagos.audioInfo().shifts>n',arg=shifts)
+  # Gears come from the physics gearbox: 1st tops out near 60 km/h, 2nd drops back below ~43 km/h.
+  wait_race_start(page);page.keyboard.up('KeyS');page.keyboard.down('KeyW');speed(30,True)
+  wait_js(page,'interlagos.audioInfo().rpm>4000');speed(56);wait_js(page,"interlagos.audioInfo().gear===1&&interlagos.audioInfo().rpm>6000");report['accelerating']=info()
+  shifts=info()['shifts'];speed(64);wait_js(page,'(n)=>interlagos.audioInfo().shifts>n',arg=shifts)
   check('upshift_and_rpm_drop',info()['gear']==2 and info()['rpm']<report['accelerating']['rpm']);page.keyboard.up('KeyW')
   shifts=info()['shifts'];speed(38);wait_js(page,'(n)=>interlagos.audioInfo().shifts>n',arg=shifts)
   check('downshift',info()['gear']==1)
@@ -50,7 +51,7 @@ with sync_playwright() as p:
   sounds=report['offline'];check('audio_graph_has_signal_without_clipping',all(.001<s['rms']<.5 and s['peak']<.99 for s in sounds.values()))
   check('engine_pitch_rises_with_rpm',sounds['engine']['crossings']>sounds['idle']['crossings']*2)
   check('skid_adds_distinct_high_frequency_sound',sounds['skid']['crossings']>sounds['engine']['crossings'])
-  page.reload(wait_until='networkidle');wait_js(page,'window.interlagos?.ready',timeout=120000);page.click('#settingsButton');page.uncheck('#immersiveMode');page.click('#settingsBack')
+  open_menu(page);race_options(page,immersive=False)
   check('volume_persists',abs(info()['volume']-.3)<1e-6)
   check('no_browser_audio_errors',not report['errors'] and not info()['error']);report['passed']=True
  finally:

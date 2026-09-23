@@ -1,5 +1,5 @@
 """Exercise real supplied MP3s through the game's streaming music bus."""
-from browser_config import browser_executable,wait_js
+from browser_config import browser_executable,browser_args,wait_js,open_menu,enter_track
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -7,17 +7,17 @@ ROOT=Path(__file__).resolve().parents[1]
 report={'checks':{},'errors':[]}
 def check(name,value):report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1280,'height':800});page.set_default_timeout(90000)
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready');page.click('#settingsButton');page.click('#tab-audio')
+  open_menu(page);page.click('#settingsButton');page.click('#tab-audio')
   page.locator('#musicVolume').fill('0');page.locator('#effectsVolume').fill('45');wait_js(page,"(interlagos.audioInfo().effects?.counts.engineCatch??0)>0&&interlagos.audioInfo().rms>.0001");check('effects_slider_has_audible_preview',True)
   page.locator('#effectsVolume').fill('0');page.locator('#musicVolume').fill('35')
   wait_js(page,'interlagos.audioInfo().recordings?.available.length>0');available=page.evaluate('interlagos.audioInfo().recordings.available');report['files']=available
   if 'intro.mp3' in available:
    wait_js(page,"interlagos.audioInfo().recordings.file==='intro.mp3'&&interlagos.audioInfo().rms>.001");check('intro_streams_on_opening',True)
-  page.click('#settingsBack');page.click('#start')
+  page.click('#settingsBack');enter_track(page)
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
   if 'patrocinio.mp3' in available:
    wait_js(page,"interlagos.audioInfo().recordings.file==='patrocinio.mp3'&&interlagos.audioInfo().rms>.001");check('sponsor_track_in_paddock',True)

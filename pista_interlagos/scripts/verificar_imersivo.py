@@ -1,4 +1,4 @@
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, enter_track
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -7,7 +7,7 @@ report={'errors':[],'checks':{},'scenario_setup':'Natural first walk/joke; contr
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1280,'height':800});page.set_default_timeout(120000)
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
@@ -15,11 +15,12 @@ with sync_playwright() as p:
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  def shot(name):frame();page.screenshot(path=str(ROOT/'renders'/('imersivo_'+name+'.png')))
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
-  check('immersive_selected_without_autostart',not info()['active'] and page.is_checked('#immersiveMode'))
+  open_menu(page)
+  check('immersive_selected_without_autostart',not page.evaluate('interlagos.ready') and page.is_checked('#immersiveMode'))
+  enter_track(page)
   # Capture the running instance for controlled incident fixtures, without shipping a debug mutation API.
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
-  page.click('#start');check('crowd_phase',info()['phase']=='crowd');shot('torcida')
+  check('crowd_phase',info()['phase']=='crowd');shot('torcida')
   before=info()['hero'];page.keyboard.down('KeyW');wait_js(page,'interlagos.immersiveInfo().nearFan>=0');page.keyboard.up('KeyW');check('walk_to_supporter',info()['hero']!=before)
   page.keyboard.press('KeyE');page.wait_for_selector('[data-action="joke:0"]');fan=info()['nearFan'];topics=['família','oficina','corrida'];tastes=['família','oficina','corrida','família','oficina','corrida'];correct=topics.index(tastes[fan])
   page.click(f'[data-action="joke:{(correct+1)%3}"]');check('bad_joke_no_donation',info()['cash']==0)
@@ -41,7 +42,7 @@ with sync_playwright() as p:
   page.evaluate("()=>{const m=fixtureMode;m.start();m.state.phase='race';m.state.finish(1);m.sync();}");frame();page.click('[data-action="afterPodium"]');page.click('[data-action="box"]');check('winner_disqualified_for_box',info()['result']['status']=='Desclassificado' and info()['prize']==0 and info()['podiumPlace']==6);shot('desclassificado')
   page.evaluate("()=>{const m=fixtureMode;m.start();m.state.phase='race';m.state.finish(1);m.sync();}");frame();page.click('[data-action="afterPodium"]');page.click('[data-action="inspect"]');page.evaluate('''()=>{for(let i=0;i<1100&&fixtureMode.state.phase==='inspection';i++)fixtureMode.step({},1/120);}''');check('winner_gets_prize_but_sixth_podium',info()['result']['position']==1 and info()['podiumPlace']==6 and info()['prize']==600);shot('podio_vitoria')
   page.evaluate('()=>{fixtureMode.state.profile.fund=900;fixtureMode.state.touch();}');frame();page.click('[data-action="blazer"]');check('blazer_released',info()['profile']['released']);shot('blazer_livre')
-  page.click('[data-action="normal"]');check('normal_mode_restored',not info()['active']);page.reload(wait_until='networkidle');wait_js(page,'window.interlagos?.ready');check('garage_progress_persists',info()['profile']['released'] and not info()['active'])
+  page.click('[data-action="normal"]');check('normal_mode_restored',not info()['active']);open_menu(page);enter_track(page);check('garage_progress_persists',info()['profile']['released'] and not info()['active'])
   check('no_browser_errors',not report['errors']);report['passed']=True
  finally:
   report.setdefault('passed',False);(ROOT/'dados/validacao_imersivo_browser.json').write_text(json.dumps(report,ensure_ascii=False,indent=2),encoding='utf-8');print(json.dumps(report,ensure_ascii=False,indent=2),flush=True);browser.close()

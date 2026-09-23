@@ -1,5 +1,5 @@
 """Render every original cue, then verify the real game's mix and scene routing."""
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, enter_track
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -8,7 +8,7 @@ report={'checks':{},'errors':[]}
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1440,'height':900});page.set_default_timeout(90000)
  # Verify the original fallback score even when the owner has supplied MP3s.
  page.route('**/assets/audio/tracks.json',lambda route:route.fulfill(status=200,content_type='application/json',body='[]'))
@@ -19,14 +19,14 @@ with sync_playwright() as p:
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  def event(name):wait_js(page,'name=>(interlagos.audioInfo().effects?.counts[name]??0)>0',arg=name)
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
+  open_menu(page)
   check('locked_before_gesture',info()['context']=='locked')
   page.click('#settingsButton');page.click('#tab-audio');wait_js(page,"interlagos.audioInfo().music?.theme==='opening'&&interlagos.audioInfo().rms>.001")
   check('opening_after_gesture',info()['music']['playing']);page.screenshot(path=str(ROOT/'renders/audio_configuracoes.png'))
   for selector,value in [('volume','60'),('musicVolume','28'),('effectsVolume','75')]:page.locator('#'+selector).fill(value)
   check('independent_controls',info()['volume']==.6 and info()['musicVolume']==.28 and info()['effectsVolume']==.75)
   page.locator('#musicVolume').fill('0');wait_js(page,'!interlagos.audioInfo().music.playing&&interlagos.audioInfo().rms<.00001');check('music_zero_silences_menu',True)
-  page.locator('#musicVolume').fill('28');page.click('#settingsBack');page.click('#start');event('crowdWelcome');wait_js(page,"interlagos.audioInfo().music.theme==='menu'")
+  page.locator('#musicVolume').fill('28');page.click('#settingsBack');enter_track(page);event('crowdWelcome');wait_js(page,"interlagos.audioInfo().music.theme==='menu'")
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
   page.evaluate("()=>{fixtureMode.state.talk(0);fixtureMode.state.joke(0)}");event('donation')
   page.evaluate("()=>{const s=fixtureMode.state;s.phase='starting';s.starter=true;s.pressure=.4;fixtureMode.sync();}");wait_js(page,'interlagos.audioInfo().effects.loops.starter>0');check('starter_loop_matches_crank',True)
@@ -54,11 +54,12 @@ with sync_playwright() as p:
     const data=(await ctx.startRendering()).getChannelData(0);result[name]=metric(data);
    }return result;
   }''')
-  check('all_39_effects_and_5_themes_render',len(report['rendered'])==44)
+  effects=page.evaluate("async()=>(await import('./sound-effects.js')).EFFECT_NAMES.length")
+  check('every_effect_and_5_themes_render',len(report['rendered'])==effects+5)
   check('all_cues_audible_finite_unclipped',all(.00005<v['rms']<.5 and v['peak']<.99 for v in report['rendered'].values()))
   check('five_distinct_compositions',len({report['rendered'][k]['crossings'] for k in ['opening','menu','race','victory','defeat']})==5)
   check('bounded_live_music_voices',info()['music']['peakVoices']<=128)
-  page.reload(wait_until='networkidle');wait_js(page,'window.interlagos?.ready');a=info();check('all_mix_preferences_survive_reload',a['volume']==.6 and a['musicVolume']==.28 and a['effectsVolume']==.75)
+  open_menu(page);a=info();check('all_mix_preferences_survive_reload',a['volume']==.6 and a['musicVolume']==.28 and a['effectsVolume']==.75)
   check('no_browser_errors',not report['errors'] and not a['error']);report['passed']=True
  finally:
   report.setdefault('passed',False);(ROOT/'dados/validacao_trilha.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2),flush=True);browser.close()

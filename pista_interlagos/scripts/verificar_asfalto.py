@@ -1,5 +1,5 @@
 """Visual QA of the asphalt PBR maps and live rival tyre marks."""
-from browser_config import browser_executable,wait_js
+from browser_config import browser_executable,browser_args,wait_js,open_menu,race_options,enter_track
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -7,14 +7,13 @@ import json
 ROOT=Path(__file__).resolve().parents[1]
 report={'errors':[],'views':[]}
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  for mobile,width,height in [(False,1280,720),(True,844,390)]:
   context=browser.new_context(viewport={'width':width,'height':height},is_mobile=mobile,has_touch=mobile,device_scale_factor=1)
   page=context.new_page();page.set_default_timeout(90000)
   page.on('pageerror',lambda e:report['errors'].append(str(e)))
   page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle');wait_js(page,'window.interlagos?.ready')
-  page.click('#settingsButton');page.uncheck('#immersiveMode');page.click('#settingsBack');page.click('#start')
+  open_menu(page);race_options(page,immersive=False);enter_track(page)
   page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();fixtureMode.stepFree=()=>{};interlagos.car.step=()=>{};}""")
   for mode,index in [('hood',85),('chase',700)]:
    page.evaluate("([mode,index])=>{interlagos.reposition(index);const s=document.querySelector('#camera');s.value=mode;s.dispatchEvent(new Event('change'))}",[mode,index])

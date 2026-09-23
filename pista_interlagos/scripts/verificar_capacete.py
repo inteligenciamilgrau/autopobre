@@ -1,4 +1,4 @@
-from browser_config import browser_executable, wait_js
+from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -7,26 +7,26 @@ report={'errors':[],'checks':{}}
 def check(name,value):
  report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
- browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=['--enable-webgl','--ignore-gpu-blocklist','--use-angle=swiftshader','--enable-unsafe-swiftshader'])
+ browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  page=browser.new_page(viewport={'width':1440,'height':900});page.set_default_timeout(90000)
  page.add_init_script("Object.defineProperty(Element.prototype,'requestPointerLock',{value:undefined,configurable:true})")
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  try:
-  page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='networkidle',timeout=120000);wait_js(page,'window.interlagos?.ready',timeout=120000);page.uncheck("#immersiveMode")
+  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton')
   info=page.evaluate('interlagos.driverInfo()');report['driver']=info
   check('helmet_and_balaclava_loaded',info['helmet']['balaclava'] and info['helmet']['visor']=='raised')
   check('helmet_fits_below_roof',info['headHeight']<1.36)
-  page.select_option('#camera','cockpit');page.click('#start');page.keyboard.down('KeyS');frame()
+  page.keyboard.down('KeyS');wait_race_start(page);frame()
   page.screenshot(path=str(ROOT/'renders/capacete_interna.png'))
   page.keyboard.up('KeyS');page.evaluate('()=>{interlagos.reposition(600);const c=interlagos.car;c.vx=Math.cos(c.heading)*12;c.vy=Math.sin(c.heading)*12;}');page.keyboard.down('KeyA')
   wait_js(page,'interlagos.driverInfo().lean<-.035');page.keyboard.up('KeyA');frame()
   info=page.evaluate('interlagos.driverInfo()');check('animation_and_hands_preserved',all(a['reachable'] for a in info['arms']) and info['lean']<-.02)
   page.screenshot(path=str(ROOT/'renders/capacete_curva.png'))
-  page.click('#menuButton');page.select_option('#camera','chase');page.evaluate('interlagos.reposition(600)');page.select_option('#camera','orbit');page.click('#start');page.keyboard.down('KeyS')
+  race_options(page,camera='chase');page.evaluate('interlagos.reposition(600)');race_options(page,camera='orbit');enter_track(page);page.keyboard.down('KeyS')
   page.mouse.move(600,450);page.mouse.down();page.mouse.move(1050,450,steps=8);page.mouse.up();page.mouse.wheel(0,-700);frame();page.screenshot(path=str(ROOT/'renders/capacete_externa.png'));page.keyboard.up('KeyS')
-  page.click('#menuButton');page.select_option('#livery','seiva_danilo');wait_js(page,"interlagos.state.livery==='seiva_danilo'");check('helmet_in_both_liveries',page.evaluate('interlagos.driverInfo().helmet.balaclava'))
+  race_options(page,livery='seiva_danilo');check('helmet_in_both_liveries',page.evaluate('interlagos.driverInfo().helmet.balaclava'))
   # Close-up inspection of the same production asset, without the car obscuring its details.
   report['geometry']=page.evaluate('''async()=>{
    const THREE=await import('three'),{createHelmet}=await import('./driver-helmet.js');
