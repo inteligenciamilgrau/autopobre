@@ -6,26 +6,46 @@ import {recognitionInput} from './physics.js';
 import {CrashParts} from './crash-parts.js';
 import {ImmersiveState,FANS,JOKES,BLAZER_COST} from './immersive-state.js';
 import {ImmersiveVisuals,trackPoint} from './immersive-visuals.js';
+import {footGround} from './on-foot.js';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
-const idle={throttle:0,brake:1,left:0,right:0,handbrake:0,reverse:0};
+const idle={throttle:0,brake:1,left:0,right:0,handbrake:0,reverse:0},still={throttle:0,brake:0,left:0,right:0};
+const touchScreen=()=>document.body.classList.contains('touch-device');
 const money=n=>`R$ ${n.toFixed(2).replace('.',',')}`;
 export class ImmersiveMode {
- constructor({scene,carRoot,car,data,driver,rivalTemplate,skidMarks,resetVehicle,releaseMouse,onNormal}){
-  Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
+ // layout: the circuit's Box 99 (pit-box99.js), whose garage and café the pilot can walk
+ // into before the race; obstacles: walls the walking camera must not pass through.
+ constructor({scene,carRoot,car,data,driver,rivalTemplate,skidMarks,resetVehicle,releaseMouse,onNormal,layout=null,obstacles=[],setView=null,getView=null}){
+  Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal,setView,getView});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
   this.freeCountdown=0;this.goTime=0;this.freeFuel=12;this.freeTotalLaps=3;this.freeFinished=false;this.freePosition=GRID_SIZE;this.freePlayerProgress=0;this.rivalTrails=RIVAL_ROSTER.map(()=>skidMarks?.createTrail());this.field=new RaceField(data,{onStep:(r,i,input,dt)=>this.rivalTrails[i]?.update(r.car,input,dt),onReset:()=>this.rivalTrails.forEach(t=>t?.breakTrails())});this.parts=new CrashParts(scene);this.state=new ImmersiveState(profile);this.visual=new ImmersiveVisuals(scene,carRoot,data,driver,car,rivalTemplate);this.lastPhase='off';this.lastUI='';this.near=-1;this.rivals=this.field.rivals;this.projectile=null;this.towOrigin=0;this.prepLitres=6;this.prepFilm=false;
   this.brand=document.querySelector('.wordmark');this.baseBrand=this.brand.innerHTML;this.baseTitle=document.title;
   this.controls=document.querySelector('footer>div');this.baseControls=this.controls.innerHTML;
   this.panel=document.createElement('section');this.panel.id='immersivePanel';this.panel.className='hidden';this.panel.setAttribute('aria-label','Auto-Pobre Racing');document.body.append(this.panel);
   this.hud=document.createElement('section');this.hud.id='immersiveHud';this.hud.className='hidden';this.hud.innerHTML='<div class="imm-brand">AUTO-POBRE RACING <span id="immPhase"></span></div><div class="imm-meters"><span>GASOLINA <b id="immFuel"></b></span><span>CARRO <b id="immHealth"></b></span><span>VIDRO <b id="immGlass"></b></span><span>NA PISTA <b id="immPosition"></b></span></div><div id="immAlert" role="status"></div>';document.body.append(this.hud);
   this.onPickFan=e=>this.pickFan(e);document.getElementById('view').addEventListener('pointerdown',this.onPickFan);
+  // On foot in the paddock, as in a third-person game: the mouse is captured (no cursor)
+  // from the first key or click and turns the camera; the wheel zooms, Shift runs.
+  Object.assign(this.visual,{layout,obstacles,groundAt:(x,y)=>car.sample(x,y).z-.055});
+  this.walkGround=footGround({car,pit:layout?.pit??null,layout,blocked:pos=>this.visual.blocked(pos)});
+  const view=document.getElementById('view');
+  this.onFootMouse=e=>{if(this.onFoot()&&document.pointerLockElement===view)this.visual.turnView(e.movementX,e.movementY);};
+  this.onFootWheel=e=>{if(this.onFoot())this.visual.zoomView(Math.sign(e.deltaY));};
+  this.onShift=e=>{if(e.code==='ShiftLeft'||e.code==='ShiftRight')this.shift=e.type==='keydown';};this.onBlur=()=>{this.shift=false;};
+  // A capture asked for on foot can arrive after the paddock is over: give it back.
+  this.onLock=()=>{if(document.pointerLockElement!==view)this.footLock=false;else if(this.footLock&&!(this.active&&this.state.phase==='crowd'))document.exitPointerLock();};
+  document.addEventListener('mousemove',this.onFootMouse);view.addEventListener('wheel',this.onFootWheel,{passive:true});document.addEventListener('keydown',this.onShift);document.addEventListener('keyup',this.onShift);window.addEventListener('blur',this.onBlur);
+  document.addEventListener('pointerlockchange',this.onLock);document.addEventListener('pointerlockerror',this.onLock);
   document.getElementById('dqContinue').onclick=()=>{if(this.state.phase==='disqualified')this.start();};
   this.panel.addEventListener('click',e=>{const b=e.target.closest('[data-action]');if(b&&!b.disabled)this.action(b.dataset.action);});
   this.panel.addEventListener('input',e=>{if(e.target.id==='immLitres'){this.prepLitres=Number(e.target.value);this.prepCost();}if(e.target.id==='immFilm'){this.prepFilm=e.target.checked;this.prepCost();}});
  }
- dispose(){this.disable();document.getElementById('view').removeEventListener('pointerdown',this.onPickFan);this.panel.remove();this.hud.remove();document.getElementById('dqContinue').onclick=null;}
+ dispose(){this.disable();const view=document.getElementById('view');view.removeEventListener('pointerdown',this.onPickFan);view.removeEventListener('wheel',this.onFootWheel);document.removeEventListener('mousemove',this.onFootMouse);document.removeEventListener('keydown',this.onShift);document.removeEventListener('keyup',this.onShift);window.removeEventListener('blur',this.onBlur);document.removeEventListener('pointerlockchange',this.onLock);document.removeEventListener('pointerlockerror',this.onLock);this.panel.remove();this.hud.remove();document.getElementById('dqContinue').onclick=null;}
  pickFan(event){
   if(event.button!==0||!this.active||this.state.phase!=='crowd'||!this.camera)return;
-  const rect=event.currentTarget.getBoundingClientRect(),pointer=new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,1-(event.clientY-rect.top)/rect.height*2),ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera);
+  // With the mouse captured the middle of the screen aims; a free cursor points. A
+  // click takes the mouse for the camera (after this one is handled).
+  const view=event.currentTarget,locked=document.pointerLockElement===view,rect=view.getBoundingClientRect(),pointer=locked?new THREE.Vector2():new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,1-(event.clientY-rect.top)/rect.height*2),ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera);
+  if(event.pointerType==='mouse'){this.mouseFree=false;queueMicrotask(()=>this.captureMouse());}
+  if(this.inCar)return;
   const hit=ray.intersectObjects(this.visual.fans.flatMap(f=>[f.person,f.label,...(f.dollar.visible?[f.dollar]:[])]),true)[0];if(!hit)return;
   const index=this.visual.fans.findIndex(f=>{let obj=hit.object;while(obj){if(obj===f.person||obj===f.label||obj===f.dollar)return true;obj=obj.parent;}return false;});if(index<0)return;
   this.state.fan=null;this.state.feedback='';this.state.touch();this.walkToFan=index;
@@ -57,9 +77,29 @@ export class ImmersiveMode {
   }
  }
  allowsPointer(){return ['race','tow','grid','prepare'].includes(this.state.phase);}
- blockingUI(){return this.active&&!this.allowsPointer();}
+ // While the paddock walk still holds the mouse, losing it is not a pause.
+ blockingUI(){return this.active&&(!this.allowsPointer()||!!this.footLock);}
+ onFoot(){return this.active&&this.state.phase==='crowd'&&!this.inCar;}
+ // F beside the Opala in Box 99 gets in, as in GTA: the real car takes its place and
+ // the cockpit view shows the interior (the mouse looks round); F again gets out.
+ enterCar(){
+  const pose=this.visual.ownPose();if(!pose||this.inCar)return false;
+  const c=this.car;c.x=pose.x;c.y=pose.y;c.heading=pose.heading;c.vx=c.vy=c.yaw=0;c.surface=c.sample(c.x,c.y);c.index=c.surface.i;c.settle?.();
+  this.inCar=this.visual.inCar=true;this.walkToFan=null;this.viewBefore=this.getView?.()??'chase';this.visual.restoreCamera();this.setView?.('cockpit');this.state.emitSound('click');return true;
+ }
+ leaveCar(place=true){
+  if(!this.inCar)return false;this.inCar=this.visual.inCar=false;if(place)this.visual.leaveCar(this.walkGround);
+  this.resetVehicle();this.setView?.(this.viewBefore??'chase');this.state.emitSound('click');return true;
+ }
+ // Captures the mouse for the walk (the browser needs a key or click just before). Not
+ // during a conversation, whose jokes are clicked, nor after Tab freed it.
+ captureMouse(){
+  const view=document.getElementById('view');
+  if(!this.active||this.state.phase!=='crowd'||this.state.fan!==null||this.mouseFree||touchScreen()||!view?.requestPointerLock||document.pointerLockElement===view||navigator.userActivation?.isActive===false)return;
+  this.footLock=true;try{view.requestPointerLock()?.catch?.(()=>{this.footLock=false;});}catch{this.footLock=false;}
+ }
  save(){try{localStorage.setItem('opala99-immersive-v1',JSON.stringify(this.state.profile));}catch{}}
- start(){this.freeCountdown=0;this.goTime=0;this.car.condition?.reset();this.finishElapsed=null;this.finishTime=null;this.freeOrder=null;this.recordAssisted=false;this.resetVehicle();this.state.start();this.visual.reset();this.near=-1;this.walkToFan=null;this.footDistance=0;this.projectile=null;this.raceProgress=0;this.previousS=this.car.surface.s;this.field.reset(this.car.surface.s,{grid:true});this.parts.reset();this.rivals=this.field.rivals;this.debrisTimer=6;this.contactCooldown=0;this.sync();}
+ start(){this.freeCountdown=0;this.goTime=0;this.car.condition?.reset();this.finishElapsed=null;this.finishTime=null;this.freeOrder=null;this.recordAssisted=false;this.resetVehicle();this.inCar=this.visual.inCar=false;this.state.start();this.visual.reset();this.near=-1;this.walkToFan=null;this.projectile=null;this.raceProgress=0;this.previousS=this.car.surface.s;this.field.reset(this.car.surface.s,{grid:true});this.parts.reset();this.rivals=this.field.rivals;this.debrisTimer=6;this.contactCooldown=0;this.sync();}
  disable(){this.finishElapsed=null;this.state.disable();this.visual.restoreCamera();this.visual.root.visible=this.visual.damage.visible=false;this.carRoot.visible=true;this.panel.classList.add('hidden');this.hud.classList.add('hidden');document.getElementById('dqScreen').classList.add('hidden');document.body.classList.remove('disqualified-scene','podium-scene','tow-scene');document.body.classList.remove('immersive-mode','immersive-stage');this.brand.innerHTML=this.baseBrand;this.controls.innerHTML=this.baseControls;document.title=this.baseTitle;this.lastPhase='off';}
  sync(){
   const s=this.state;if(s.phase===this.lastPhase)return;this.lastPhase=s.phase;this.lastUI='';
@@ -67,6 +107,7 @@ export class ImmersiveMode {
   this.brand.innerHTML='AUTO-POBRE RACING<span>STEVAN GAIPO · VERSÃO IMERSIVA</span>';document.title='Auto-Pobre Racing com Stevan Gaipo';
   this.controls.innerHTML=this.baseControls.replace('reposicionar','chamar reboque');
   if(this.blockingUI())this.releaseMouse();
+  if(s.phase==='crowd'){this.mouseFree=false;this.captureMouse();}else this.leaveCar(false);
   if(['crowd','prepare','starting','broken','snag','podium'].includes(s.phase))this.stop();
   if(s.phase==='prepare'){this.resetVehicle();this.field.reset(this.car.surface.s,{grid:true});this.rivals=this.field.rivals;}
   if(s.phase==='grid'){this.resetVehicle();this.previousS=this.car.surface.s;}
@@ -102,8 +143,21 @@ export class ImmersiveMode {
   if(!this.active)return false;
   const s=this.state;
   if(code==='KeyR'){s.fail('Volta abandonada: pediu reboque');this.sync();return true;}
-  if(code==='KeyE'&&s.phase==='crowd'){this.action(s.fan===null?'talk':'close');return true;}
-  if(['Digit1','Digit2','Digit3'].includes(code)&&s.phase==='crowd'&&s.fan!==null){this.action('joke:'+(Number(code.at(-1))-1));return true;}
+  if(s.phase==='crowd'){
+   // Keys on foot: Space jumps, C crouches, Tab frees the mouse (and takes it back),
+   // Enter goes to the registration; any other key takes the mouse for the camera.
+   let used=false;
+   if(code==='KeyF'&&s.fan===null&&(this.inCar?this.leaveCar():this.visual.nearCar()&&this.enterCar())){this.captureMouse();return true;}
+   if(this.inCar)return false;
+   if(code==='KeyE'){this.action(s.fan===null?'talk':'close');used=true;}
+   else if(['Digit1','Digit2','Digit3'].includes(code)&&s.fan!==null){this.action('joke:'+(Number(code.at(-1))-1));used=true;}
+   else if(code==='Tab'){this.mouseFree=!!document.pointerLockElement;if(this.mouseFree)document.exitPointerLock();else this.captureMouse();return true;}
+   else if(s.fan===null&&code==='Space'){this.visual.jump();used=true;}
+   else if(s.fan===null&&code==='KeyC'){this.visual.crouch();used=true;}
+   else if(s.fan===null&&['Enter','NumpadEnter'].includes(code)){this.action('prepare');return true;}
+   if(!['Escape','KeyP','KeyM'].includes(code))this.captureMouse();
+   if(used)return true;
+  }
   if(code==='KeyI'&&s.phase==='starting'){this.action('ignite');return true;}
   return false;
  }
@@ -112,7 +166,18 @@ export class ImmersiveMode {
   const s=this.state,c=this.car;this.goTime=Math.max(0,(this.goTime||0)-dt);
   if(!s.active&&this.freeCountdown>0){this.stop();const before=Math.ceil(this.freeCountdown);this.freeCountdown=Math.max(0,this.freeCountdown-dt);if(this.freeCountdown===0){this.goTime=.85;s.emitSound('raceGo');}else if(Math.ceil(this.freeCountdown)<before)s.emitSound('countdown');return true;}
   if(this.finishing){this.stepFinish(input,dt);return true;}if(!s.active)return false;
-  if(s.phase==='crowd'){if(s.fan===null){const before=this.visual.hero.position.clone();let walking=input;if(this.walkToFan!==null&&this.walkToFan!==undefined){if(input.throttle||input.brake||input.left||input.right)this.walkToFan=null;else{const target=this.visual.fans[this.walkToFan].pos,dx=target.x-before.x,dz=target.z-before.z;if(Math.hypot(dx,dz)<2.4){s.talk(this.walkToFan);this.walkToFan=null;}else{const angle=Math.atan2(-dz,dx)-this.visual.hero.rotation.y,turn=Math.atan2(Math.sin(angle),Math.cos(angle));walking={throttle:Math.abs(turn)<.65?1:0,brake:0,left:turn>.05?1:0,right:turn<-.05?1:0};}}}this.visual.walk(walking,dt);this.footDistance+=before.distanceTo(this.visual.hero.position);if(this.footDistance>.8){this.footDistance%=.8;s.emitSound('footstep');}}this.near=this.visual.nearestFan();}
+  if(s.phase==='crowd'&&this.inCar)this.near=-1;
+  else if(s.phase==='crowd'){
+   // A click on a supporter walks the pilot there (any key takes over); while talking he stands.
+   let walking=s.fan===null?input:still;
+   if(s.fan===null&&this.walkToFan!==null&&this.walkToFan!==undefined){
+    if(input.throttle||input.brake||input.left||input.right)this.walkToFan=null;
+    else{const hero=this.visual.hero.position,target=this.visual.fans[this.walkToFan].pos,dx=target.x-hero.x,dz=target.z-hero.z;if(Math.hypot(dx,dz)<2.4){s.talk(this.walkToFan);this.walkToFan=null;walking=still;}else walking=this.visual.toward(Math.atan2(-dz,dx),touchScreen());}
+   }
+   if(this.visual.walk(walking,dt,{shift:!!this.shift,touch:touchScreen(),ground:this.walkGround}))s.emitSound('footstep');
+   // A conversation frees the mouse for the jokes; closing it takes the mouse back.
+   if(s.fan!==null&&this.footLock&&document.pointerLockElement)document.exitPointerLock();
+   this.near=this.visual.nearestFan();}
   else if(s.phase==='starting')s.startEngine(input,dt);
   else if(s.phase==='grid'){const before=Math.ceil(s.countdown);s.countdown-=dt;if(s.countdown<=0){s.startRace();this.goTime=.85;}else if(Math.ceil(s.countdown)<before)s.emitSound('countdown');}
   else if(s.phase==='race'){
@@ -169,12 +234,12 @@ export class ImmersiveMode {
   const names={crowd:'VAQUINHA',prepare:'INSCRIÇÃO',starting:'PARTIDA',grid:'LARGADA',race:'1 VOLTA',broken:'SOCORRO',tow:'REBOQUE',snag:'FITA ENROSCADA',inspection:'PÓS-CORRIDA',podium:'SEXTO, SEMPRE',complete:'ATÉ A PRÓXIMA',disqualified:'A FOTO FICOU'};
   document.getElementById('dqScreen').classList.toggle('hidden',s.phase!=='disqualified');document.getElementById('dqCountdown').textContent='Nova vaquinha em '+Math.max(1,Math.ceil(s.disqualifiedTime))+' s';
   document.getElementById('immPhase').textContent=names[s.phase];document.getElementById('immFuel').textContent=s.fuel.toFixed(1)+' L';document.getElementById('immHealth').textContent=Math.ceil(s.health*100)+'%';document.getElementById('immGlass').textContent=Math.round((1-s.glass)*100)+'%';document.getElementById('immPosition').textContent=s.phase==='podium'?'6º no pódio':s.position+'º / '+GRID_SIZE;
-  document.getElementById('immAlert').textContent=s.phase==='race'?(s.alertTime>0?s.alert:s.tankDetached?'Tanque solto · combustível vazando':s.fuel<1?'Reserva! A gasolina está acabando.':'Guarde distância: o carro da frente pode soltar peças.'):s.phase==='tow'?(s.towGap<3?'FREIE · FITA FROUXA':'Controle o freio quando o caminhão diminuir.'):'';
+  document.getElementById('immAlert').textContent=s.phase==='crowd'?(this.inCar?'F: sair do Opala · o mouse olha em volta':s.fan===null&&this.visual.nearCar()?'F: entrar no Opala 99':''):s.phase==='race'?(s.alertTime>0?s.alert:s.tankDetached?'Tanque solto · combustível vazando':s.fuel<1?'Reserva! A gasolina está acabando.':'Guarde distância: o carro da frente pode soltar peças.'):s.phase==='tow'?(s.towGap<3?'FREIE · FITA FROUXA':'Controle o freio quando o caminhão diminuir.'):'';
   const key=[s.phase,s.revision,this.near,s.fan].join(':');
   if(key!==this.lastUI){this.lastUI=key;let body='';
    if(s.phase==='crowd'){
     if(s.fan!==null){const fan=FANS[s.fan];body=`<div class="social-person"><span class="social-avatar">${fan.name[0]}</span><div><span>CONVERSANDO COM</span><h2>${fan.name}</h2></div><b>◆</b></div><div class="speech-bubble fan-speech" role="status">${s.feedback||'“'+fan.hint+'”'}</div><div class="social-prompt">Escolha sua fala</div><div class="imm-jokes social-choices">${JOKES.map((j,i)=>`<button type="button" data-action="joke:${i}" class="speech-choice"><span>${i+1}</span><div><b>${['Família e boletos','Vida de oficina','Perrengues de piloto'][i]}</b><small>${j.text}</small></div></button>`).join('')}</div><div class="social-help">Clique em uma fala para contar a piada.</div>${this.button('close','Encerrar conversa (E)')}`;}
-    else body=`<div class="imm-eyebrow">ANTES DA CORRIDA</div><h2>Patrocínio? Só na risada.</h2><p>Caminhe pelos boxes até a torcida. Clique em uma pessoa para conversar. Depois, clique na piada que quer contar.</p><strong class="imm-cash">${money(s.cash)}</strong><p>Inscrição: R$ 100 · gasolina: R$ 6,50/L.<br>Junte pelo menos R$ 126 para abrir a preparação.</p><p class="imm-controls">Clique no torcedor · clique na fala para enviar</p>${this.button('talk',this.near<0?'Aproxime-se de um torcedor':'Conversar com '+FANS[this.near].name+' (E)',false,this.near<0)}${this.button('prepare','Ir à inscrição',true,s.cash<126)}<small>O sonho: ganhar para tirar a Blazer da oficina.</small>`;
+    else body=`<div class="imm-eyebrow">ANTES DA CORRIDA</div><h2>Patrocínio? Só na risada.</h2><p>${touchScreen()?'Caminhe pelos boxes até a torcida. Toque em uma pessoa para conversar. Depois, toque na piada que quer contar.':'Ande à vontade pelos boxes, pela garagem do 99 e pela lanchonete da Tia. Chegue perto de um torcedor e aperte E para conversar; depois clique na piada (ou 1, 2, 3).'}</p><strong class="imm-cash">${money(s.cash)}</strong><p>Inscrição: R$ 100 · gasolina: R$ 6,50/L.<br>Junte pelo menos R$ 126 para abrir a preparação.</p><p class="imm-controls">${touchScreen()?'Toque no torcedor · toque na fala para enviar':'W A S D anda · mouse gira a câmera · Shift corre · Espaço pula · C agacha · F entra no Opala · Tab solta o mouse'}</p>${this.button('talk',this.near<0?'Aproxime-se de um torcedor':'Conversar com '+FANS[this.near].name+' (E)',false,this.near<0)}${this.button('prepare','Ir à inscrição'+(touchScreen()?'':' (Enter)'),true,s.cash<126)}<small>O sonho: ganhar para tirar a Blazer da oficina.</small>`;
    }
    if(s.phase==='prepare')body=`<div class="imm-eyebrow">O ORÇAMENTO É APERTADO</div><h2>O que cabe na vaquinha?</h2><p>${CIRCUITS[circuitId(this.data.meta.id)].fuel} Burnout e vazamentos gastam mais.</p><label>Gasolina <input id="immLitres" type="range" min="2" max="12" value="${this.prepLitres}"></label><label class="imm-check"><input id="immFilm" type="checkbox" ${this.prepFilm?'checked':''}> Proteção extra do para-brisa · R$ 30</label><p id="immCost"></p><p>${s.feedback||'Combustível insuficiente termina em reboque.'}</p>${this.button('buy','Pagar e preparar a largada',true)}${this.button('crowd','Voltar à torcida')}`;
    if(s.phase==='starting')body=`<div class="imm-eyebrow">SEM AFOGAR!</div><h2>Hora de acordar o Opala.</h2><p>Dê toques em <b>W</b> para dosar o acelerador. Aperte <b>I</b> para dar partida, mantendo a agulha na faixa verde. Acelerar demais afoga; insistir sem pegar acaba com a bateria.</p><div class="imm-start-gauge"><span></span><i id="immNeedle"></i></div><p id="immStartText"></p>${this.button('ignite','Dar partida (I)',true)}`;

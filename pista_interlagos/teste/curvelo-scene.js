@@ -61,12 +61,8 @@ export function createCurveloScene(data,roadSurface,{groundMaterial=null,gravelM
  const sign=box(0,8.6,0,.45,1.5,20,dark,'Portico_Curvelo',heading);
  function label(text,w,h){const canvas=document.createElement('canvas');canvas.width=1024;canvas.height=128;const ctx=canvas.getContext('2d');ctx.fillStyle='#172b27';ctx.fillRect(0,0,1024,128);ctx.fillStyle='#ffdb32';ctx.font='bold 67px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,512,64,960);const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;return new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map,side:THREE.DoubleSide}));}
  const title=label('CURVELO · AUTO-POBRE RACING',18,1.25);title.rotation.y=-Math.PI/2;title.position.x=-.24;sign.add(title);
- for(let i=0;i<10;i++){
-  const b=point(1165+i*6,-24);
-  box(b.x,b.y+2.7,b.z,5.8,5.4,9,concrete,'Box_Curvelo',b.heading);
-  box(b.x,b.y+5.5,b.z,6,.2,10,roof,'Box_cobertura',b.heading);
- }
- // Stands on the opposite straight; boxes/paddock near the starting grid.
+ // Stands on the opposite straight; the garages stand on the infield behind the service
+ // lane (pit-building.js).
  for(let step=0;step<6;step++){
   const b=point(710,19+step*1.3);box(b.x,b.y+.4+step*.65,b.z,65,.65,1.5,step%2?white:concrete,'Arquibancada_Curvelo',b.heading);
  }

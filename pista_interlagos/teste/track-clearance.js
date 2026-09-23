@@ -1,0 +1,227 @@
+import {TestCar} from './physics.js';
+import {pitGeometry,locatePit} from './pit-lane.js';
+
+// What has to stay clear on the surveyed circuit: the ground below everything
+// paved or built, and the scenery off the roads, garages and grandstands.
+// Plain data, shared by the game and the Node checks.
+
+// The ground stays this far below the road plane; asphalt is drawn 3.5-4 cm above it.
+export const GROUND_CLEARANCE=.07;
+// Garage block and canopy behind the working lane of the pits.
+const GARAGE_DEPTH=21.5,GARAGE_CANOPY=23;
+const steps=(a,b,d)=>{const n=Math.max(1,Math.ceil((b-a)/d-1e-9)),out=[];for(let k=0;k<=n;k++)out.push(a+(b-a)*k/n);return out;};
+const columns=table=>Object.fromEntries(table.columns.map((k,i)=>[k,i]));
+
+function station(data,s){
+ const a=data.samples,L=data.meta.reconstructed_xy_m;s=((s%L)+L)%L;
+ let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(a[m][0]<=s)lo=m;else hi=m-1;}
+ const p=a[lo],q=a[(lo+1)%a.length],u=Math.min(1,(s-p[0])/((lo===a.length-1?L:q[0])-p[0])),m=k=>p[k]+(q[k]-p[k])*u;
+ const tl=Math.hypot(m(7),m(8));
+ return {s,i:lo,x:m(1),y:m(2),z:m(3),width:m(4),bank:m(5),tx:m(7)/tl,ty:m(8)/tl,lx:-m(8)/tl,ly:m(7)/tl};
+}
+function pitStation(pit,s){
+ const c=columns(pit),a=pit.samples;let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(a[m][c.s]<=s)lo=m;else hi=m-1;}
+ const i=Math.min(a.length-2,lo),p=a[i],q=a[i+1],u=Math.max(0,Math.min(1,(s-p[c.s])/(q[c.s]-p[c.s]))),m=k=>p[k]+(q[k]-p[k])*u;
+ return {x:m(c.x),y:m(c.y),z:m(c.z),bank:m(c.bank),lx:m(c.lx),ly:m(c.ly),lo:m(c.lo),hi:m(c.hi)};
+}
+
+// --- Grandstands on the outside of the main straight, before the finish line.
+// The 2017 LiDAR shows the stand there as an ~8.5 m bank: 19 rows climb to its
+// top under a cantilever roof. l runs away from the track, a along it.
+export const STAND=Object.freeze({blocks:6,length:28,firstS:204,rows:19,tread:.85,rise:.42,first:.55,parapet:1.1,wall:.3,gap:12,apron:5.5,roofClear:3.9,roofSlope:.07,overhang:1.8});
+export function standLayout(data){
+ if(data.meta?.id==='curvelo'||!data.pit)return [];
+ const L=data.meta.reconstructed_xy_m,blocks=[],t=data.terrain;
+ const lidar=(x,y)=>{const fx=Math.max(0,Math.min(t.nx-1.001,(x-t.x0)/t.step)),fy=Math.max(0,Math.min(t.ny-1.001,(y-t.y0)/t.step)),i=Math.floor(fx),j=Math.floor(fy),u=fx-i,v=fy-j,k=j*t.nx+i;return (t.z[k]*(1-u)+t.z[k+1]*u)*(1-v)+(t.z[k+t.nx]*(1-u)+t.z[k+t.nx+1]*u)*v;};
+ for(let k=0;k<STAND.blocks;k++){
+  const p=station(data,L-STAND.firstS+k*STAND.length),hw=p.width/2,front=hw+STAND.gap,rows=[];
+  // Each block stands on the highest ground just behind the guardrail (never below the
+  // road edge), so levelling its apron never digs under the rail.
+  const apron=[];for(let a=-STAND.length/2;a<=STAND.length/2;a+=2)apron.push(lidar(p.x+p.tx*a-p.lx*(hw+STAND.apron+.5),p.y+p.ty*a-p.ly*(hw+STAND.apron+.5)));
+  const base=Math.max(p.z-p.bank*hw+.3,...apron.map(z=>z+.05));
+  for(let r=0;r<STAND.rows;r++){const from=front+STAND.wall+r*STAND.tread;rows.push({from,to:from+STAND.tread,top:base+STAND.first+r*STAND.rise});}
+  const back=rows.at(-1).to,top=rows.at(-1).top;
+  blocks.push({s:p.s,x:p.x,y:p.y,tx:p.tx,ty:p.ty,rx:-p.lx,ry:-p.ly,length:STAND.length,base,front,back,top,apron:hw+STAND.apron,rows,
+   roof:{from:front-STAND.overhang,to:back+STAND.wall+.3,backZ:top+STAND.roofClear,slope:STAND.roofSlope}});
+ }
+ return blocks;
+}
+export const standPoint=(b,a,l)=>[b.x+b.tx*a+b.rx*l,b.y+b.ty*a+b.ry*l];
+// Height of what people walk on at distance l: apron, front parapet, rows, back wall.
+export function standSurface(b,l){
+ if(l<b.front)return b.base;
+ if(l<b.front+STAND.wall)return b.base+STAND.parapet;
+ if(l>=b.back)return b.top+STAND.parapet;
+ return b.rows[Math.min(b.rows.length-1,Math.floor((l-b.front-STAND.wall)/STAND.tread))].top;
+}
+export const roofHeight=(b,l)=>b.roof.backZ+(b.roof.to-l)*b.roof.slope;
+
+// --- Bands the scenery keeps off: polylines of [x,y,lx,ly,lo,hi], lo..hi measured
+// along the left vector. Trees keep their usual distance from all of them;
+// billboards keep `margin` extra metres (the stands need their view of the track).
+export function sceneryBands(data){
+ const bands=[{name:'pista',closed:true,margin:0,points:data.samples.map(p=>[p[1],p[2],p[9],p[10],-p[4]/2,p[4]/2])}];
+ const pit=data.pit;
+ if(pit){
+  const c=columns(pit),[g0,g1]=pit.garages;
+  bands.push({name:'pit_lane',margin:0,points:pit.samples.map(p=>[p[c.x],p[c.y],p[c.lx],p[c.ly],p[c.lo],p[c.hi]])});
+  bands.push({name:'boxes',margin:0,points:pit.samples.filter(p=>p[c.s]>=g0-3&&p[c.s]<=g1+3).map(p=>[p[c.x],p[c.y],p[c.lx],p[c.ly],p[c.hi],p[c.hi]+GARAGE_CANOPY])});
+ }
+ for(const b of standLayout(data))
+  bands.push({name:'arquibancada',margin:12,points:[-b.length/2,b.length/2].map(a=>[...standPoint(b,a,0),-b.rx,-b.ry,-b.roof.to,-b.apron])});
+ return bands;
+}
+// Distance from (x,y) to the nearest band, less that band's margin (negative inside).
+export function bandClearance(bands,x,y){
+ let best=Infinity,name=null;
+ for(const band of bands){
+  const a=band.points,n=a.length,last=band.closed?n:n-1;
+  for(let i=0;i<last;i++){
+   const p=a[i],q=a[(i+1)%n],pc=(p[4]+p[5])/2,qc=(q[4]+q[5])/2,ax=p[0]+p[2]*pc,ay=p[1]+p[3]*pc,dx=q[0]+q[2]*qc-ax,dy=q[1]+q[3]*qc-ay;
+   let u=((x-ax)*dx+(y-ay)*dy)/(dx*dx+dy*dy||1e-9);u=u<0?0:u>1?1:u;
+   const e=Math.hypot(x-ax-u*dx,y-ay-u*dy)-((p[5]-p[4])+((q[5]-q[4])-(p[5]-p[4]))*u)/2-band.margin;
+   if(e<best){best=e;name=band.name;}
+  }
+ }
+ return {distance:best,band:name};
+}
+
+// --- Ceilings for the ground: where the terrain must stay below z. Each paved or
+// built patch is a quad with its ceiling given at the corners (linear over the two
+// triangles split along its first diagonal). Terrain and ceiling are both piecewise
+// linear, so the terrain rises furthest above the ceiling at a quad corner, where a
+// quad edge crosses a terrain edge, or at a terrain vertex inside: those are the points.
+export function groundLimits(data){
+ const t=data.terrain,xs=[],ys=[],zs=[],add=(x,y,z)=>{xs.push(x);ys.push(y);zs.push(z);};
+ const gx=x=>(x-t.x0)/t.step,gy=y=>(y-t.y0)/t.step;
+ // Terrain edges are the grid columns, rows and the (i,j)-(i+1,j+1) diagonals.
+ const edge=(p,q)=>{
+  add(...p);const ax=gx(p[0]),ay=gy(p[1]),bx=gx(q[0]),by=gy(q[1]);
+  for(const [a,b] of [[ax,bx],[ay,by],[ay-ax,by-bx]])for(let n=Math.ceil(Math.min(a,b));n<=Math.floor(Math.max(a,b));n++){
+   const u=(n-a)/(b-a);if(u>0&&u<1)add(p[0]+(q[0]-p[0])*u,p[1]+(q[1]-p[1])*u,p[2]+(q[2]-p[2])*u);
+  }
+ };
+ const inside=(p,q,r,x,y)=>{
+  const d=(q[1]-r[1])*(p[0]-r[0])+(r[0]-q[0])*(p[1]-r[1]);if(Math.abs(d)<1e-12)return null;
+  const a=((q[1]-r[1])*(x-r[0])+(r[0]-q[0])*(y-r[1]))/d,b=((r[1]-p[1])*(x-r[0])+(p[0]-r[0])*(y-r[1]))/d,c=1-a-b;
+  return a>=-1e-9&&b>=-1e-9&&c>=-1e-9?a*p[2]+b*q[2]+c*r[2]:null;
+ };
+ const quad=(a,b,c,d)=>{
+  edge(a,b);edge(b,c);edge(c,d);edge(d,a);edge(a,c);
+  const fx=[a,b,c,d].map(p=>gx(p[0])),fy=[a,b,c,d].map(p=>gy(p[1]));
+  for(let j=Math.ceil(Math.min(...fy));j<=Math.floor(Math.max(...fy));j++)for(let i=Math.ceil(Math.min(...fx));i<=Math.floor(Math.max(...fx));i++){
+   const x=t.x0+i*t.step,y=t.y0+j*t.step,z=inside(a,b,c,x,y)??inside(a,c,d,x,y);if(z!==null)add(x,y,z);
+  }
+ };
+ const A=data.samples,N=A.length,probe=new TestCar(data),C=GROUND_CLEARANCE;
+ // Track asphalt, and the painted kerbs laid on the ground beside it (13 right, 14 left).
+ for(let i=0;i<N;i++){
+  const p=A[i],q=A[(i+1)%N],j=(i+1)%N,at=(r,d)=>[r[1]+r[9]*d,r[2]+r[10]*d,r[3]+r[5]*d-C];
+  quad(at(p,-p[4]/2),at(q,-q[4]/2),at(q,q[4]/2),at(p,p[4]/2));
+  for(const [side,flag] of [[-1,13],[1,14]]){
+   if(!(p.length>flag&&p[flag]&&q[flag]))continue;
+   const kerb=(r,k,w)=>{const d=side*(r[4]/2+w),x=r[1]+r[9]*d,y=r[2]+r[10]*d;probe.index=k;return [x,y,Math.min(r[3]+r[5]*d,probe.sample(x,y,k).z-.055)-C];};
+   quad(kerb(p,i,0),kerb(q,j,0),kerb(q,j,1.05),kerb(p,i,1.05));
+  }
+ }
+ const pit=data.pit;
+ if(pit){
+  const c=columns(pit),P=pit.samples,[g0,g1]=pit.garages,at=(r,d,z)=>[r[c.x]+r[c.lx]*d,r[c.y]+r[c.ly]*d,z];
+  for(let i=0;i+1<P.length;i++){
+   const p=P[i],q=P[i+1],plane=(r,d)=>r[c.z]+r[c.bank]*d-C;
+   quad(at(p,p[c.lo],plane(p,p[c.lo])),at(q,q[c.lo],plane(q,q[c.lo])),at(q,q[c.hi],plane(q,q[c.hi])),at(p,p[c.hi],plane(p,p[c.hi])));
+   // Garage floors, level with the working lane.
+   if(q[c.s]>=g0-1&&p[c.s]<=g1+1){
+    const floor=r=>r[c.z]+r[c.bank]*r[c.hi]-.15;
+    quad(at(p,p[c.hi],floor(p)),at(q,q[c.hi],floor(q)),at(q,q[c.hi]+GARAGE_DEPTH,floor(q)),at(p,p[c.hi]+GARAGE_DEPTH,floor(p)));
+   }
+  }
+  // Epoxy floor of Box 99 and the café beside it: it follows the pit-lane plane
+  // (older builds kept it level at mid-depth; stay below both).
+  const b=pit.box99;
+  if(b){
+   const mid=pitStation(pit,b.s),level=mid.z+mid.bank*(b.front+b.depth/2),stations=steps(b.cafe_s-b.bay/2,b.s+b.bay/2,1).map(s=>pitStation(pit,s));
+   const at99=(r,d)=>[r.x+r.lx*d,r.y+r.ly*d,Math.min(level,r.z+r.bank*d)-.05-C],d0=b.front,d1=b.front+.35+b.depth;
+   for(let k=0;k+1<stations.length;k++){const r=stations[k],s=stations[k+1];quad(at99(r,d0),at99(s,d0),at99(s,d1),at99(r,d1));}
+  }
+  // Walls keep their tops above ground.
+  for(const wall of pit.walls)for(let i=0;i+1<wall.points.length;i++){
+   const [x1,y1,z1]=wall.points[i],[x2,y2,z2]=wall.points[i+1],top=wall.height-.3;
+   edge([x1,y1,z1+top],[x2,y2,z2+top]);if(i+2===wall.points.length)add(x2,y2,z2+top);
+  }
+ }
+ // Grandstands: the apron in front, the parapet, every row and the back wall.
+ for(const b of standLayout(data)){
+  const a0=-b.length/2-.3,a1=b.length/2+.3,strip=(l0,l1,z)=>quad([...standPoint(b,a0,l0),z],[...standPoint(b,a1,l0),z],[...standPoint(b,a1,l1),z],[...standPoint(b,a0,l1),z]);
+  strip(b.apron,b.front,b.base-.05);strip(b.front,b.front+STAND.wall,b.base+STAND.parapet-.1);
+  for(const row of b.rows)strip(row.from,row.to,row.top-.1);
+  strip(b.back,b.back+STAND.wall,b.top+STAND.parapet-.1);
+ }
+ return {x:Float64Array.from(xs),y:Float64Array.from(ys),z:Float64Array.from(zs),count:xs.length};
+}
+
+// Ground heights on the terrain grid (row-major, data.terrain), triangulated along
+// the (i,j)-(i+1,j+1) diagonal. Near the roads it is the ground the car drives on
+// (the road profile blending into the LiDAR over 3 m); it is then lowered, as little
+// as possible, until no triangle rises through asphalt, kerbs, floors or stands.
+export function groundTriangle(t,x,y){
+ const fx=(x-t.x0)/t.step,fy=(y-t.y0)/t.step,i=Math.floor(fx),j=Math.floor(fy);
+ if(i<0||j<0||i>=t.nx-1||j>=t.ny-1)return null;
+ const u=fx-i,v=fy-j,a=j*t.nx+i;
+ return u>=v?{k:[a,a+1,a+t.nx+1],w:[1-u,u-v,v]}:{k:[a,a+t.nx+1,a+t.nx],w:[1-v,u,v-u]};
+}
+export function groundHeight(t,heights,x,y){const q=groundTriangle(t,x,y);return q?q.w[0]*heights[q.k[0]]+q.w[1]*heights[q.k[1]]+q.w[2]*heights[q.k[2]]:null;}
+export function fitGround(data,limits=groundLimits(data)){
+ const t=data.terrain,{nx,ny,step,x0,y0}=t,h=Float64Array.from(t.z),A=data.samples,N=A.length,probe=new TestCar(data),reach=16;
+ const hint=new Int32Array(nx*ny).fill(-1),best=new Float64Array(nx*ny).fill(Infinity);
+ for(let i=0;i<N;i++){
+  const p=A[i],q=A[(i+1)%N],r=Math.max(p[4],q[4])/2+reach,dx=q[1]-p[1],dy=q[2]-p[2],len2=dx*dx+dy*dy||1e-9;
+  const i0=Math.max(0,Math.floor((Math.min(p[1],q[1])-r-x0)/step)),i1=Math.min(nx-1,Math.ceil((Math.max(p[1],q[1])+r-x0)/step));
+  const j0=Math.max(0,Math.floor((Math.min(p[2],q[2])-r-y0)/step)),j1=Math.min(ny-1,Math.ceil((Math.max(p[2],q[2])+r-y0)/step));
+  for(let j=j0;j<=j1;j++)for(let k=i0;k<=i1;k++){
+   const x=x0+k*step,y=y0+j*step;let u=((x-p[1])*dx+(y-p[2])*dy)/len2;u=u<0?0:u>1?1:u;
+   const ex=x-p[1]-u*dx,ey=y-p[2]-u*dy,d2=ex*ex+ey*ey,g=j*nx+k;if(d2<best[g]){best[g]=d2;hint[g]=i;}
+  }
+ }
+ const geo=pitGeometry(data);let driven=0;
+ for(let j=0;j<ny;j++)for(let k=0;k<nx;k++){
+  const g=j*nx+k,x=x0+k*step,y=y0+j*step,nearMain=hint[g]>=0&&Math.sqrt(best[g])-A[hint[g]][4]/2<reach;
+  const lane=!nearMain&&geo?locatePit(geo,x,y):null;
+  if(!nearMain&&!(lane&&Math.max(lane.lo-lane.d,lane.d-lane.hi)<reach))continue;
+  h[g]=probe.sample(x,y,nearMain?hint[g]:probe.nearest(x,y,true).i).z-.055;driven++;
+ }
+ const start=Float64Array.from(h);
+ // Each limit point lowers its triangle along the barycentric weights (least change).
+ let passes=0,residual=0;
+ for(passes=1;passes<=80;passes++){
+  residual=0;
+  for(let n=0;n<limits.count;n++){
+   const q=groundTriangle(t,limits.x[n],limits.y[n]);if(!q)continue;
+   const [a,b,c]=q.k,[wa,wb,wc]=q.w,e=wa*h[a]+wb*h[b]+wc*h[c]-limits.z[n];if(e<=5e-4)continue;
+   residual=Math.max(residual,e);const k=e/(wa*wa+wb*wb+wc*wc);h[a]-=k*wa;h[b]-=k*wb;h[c]-=k*wc;
+  }
+  if(residual<=2e-3)break;
+ }
+ let lowered=0,maxLowered=0;for(let g=0;g<h.length;g++){const d=start[g]-h[g];if(d>.01)lowered++;maxLowered=Math.max(maxLowered,d);}
+ return {heights:h,start,stats:{limits:limits.count,driven,lowered,maxLowered,passes,residual}};
+}
+
+// Writes fitted heights into the GLB terrain (same grid) and re-triangulates it
+// along the fitted diagonal. Returns false when the mesh is not that grid.
+export function applyGroundHeights(geometry,data,heights){
+ const t=data.terrain,pos=geometry.attributes.position,index=geometry.index?.array,grid=new Int32Array(t.nx*t.ny).fill(-1);
+ if(pos.count!==t.nx*t.ny||!index||index.length!==(t.nx-1)*(t.ny-1)*6)return false;
+ for(let v=0;v<pos.count;v++){
+  const fx=(pos.getX(v)-t.x0)/t.step,fy=(-pos.getZ(v)-t.y0)/t.step,k=Math.round(fx),j=Math.round(fy);
+  if(Math.abs(fx-k)>.01||Math.abs(fy-j)>.01||k<0||j<0||k>=t.nx||j>=t.ny)return false;grid[j*t.nx+k]=v;
+ }
+ if(grid.includes(-1))return false;
+ for(let g=0;g<grid.length;g++)pos.setY(grid[g],heights[g]);
+ let n=0;
+ for(let j=0;j<t.ny-1;j++)for(let k=0;k<t.nx-1;k++){
+  const a=grid[j*t.nx+k],b=grid[j*t.nx+k+1],c=grid[(j+1)*t.nx+k+1],d=grid[(j+1)*t.nx+k];
+  index[n++]=a;index[n++]=b;index[n++]=c;index[n++]=a;index[n++]=c;index[n++]=d;
+ }
+ geometry.index.needsUpdate=pos.needsUpdate=true;geometry.computeVertexNormals();geometry.computeBoundingBox();geometry.computeBoundingSphere();
+ return true;
+}

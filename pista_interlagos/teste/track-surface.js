@@ -1,6 +1,26 @@
 import * as THREE from 'three';
 import {TestCar,clamp,wrap,GUARDRAIL_CLEARANCE,guardrailClearance,guardrailSections} from './physics.js';
-import {pitLane,pitGeometry,locatePit} from './pit-lane.js';
+import {pitLane} from './pit-lane.js';
+import {sceneryBands,bandClearance} from './track-clearance.js';
+
+// Billboards stand this far (metres) from roads, garages and the grandstands' margin.
+export const BOARD_CLEARANCE=6.5;
+// Sixteen boards facing the approaching drivers, alternating sides. Each keeps off
+// every road, out of the garages and out of the grandstands' view: it tries the
+// other side, then slides along the track.
+export function billboardSpots(data){
+ const length=data.meta.reconstructed_xy_m,bands=sceneryBands(data),spots=[];
+ for(let i=0;i<16;i++){
+  const start=i===0?length-30:i===1?70:230+(i-2)*(length-480)/14;let spot=null;
+  search:for(const shift of [0,12,-12,24,-24,36,-36,48,-48,60,-60])for(const side of [i%2?1:-1,i%2?-1:1]){
+   const s=((start+shift)%length+length)%length,index=Math.max(0,data.samples.findIndex(q=>q[0]>=s)),p=data.samples[index];
+   const offset=side*(p[4]/2+guardrailClearance(data,p[0],side)+5),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
+   spot={index,p,side,x,y,clearance:bandClearance(bands,x,y).distance};if(spot.clearance>BOARD_CLEARANCE)break search;
+  }
+  spots.push(spot);
+ }
+ return spots;
+}
 
 export async function createTrackBranding(data){
  const loader=new THREE.TextureLoader(),[oldStock,game]=await Promise.all([
@@ -12,15 +32,9 @@ export async function createTrackBranding(data){
  const white=new THREE.MeshStandardMaterial({color:0xffffff,roughness:1}),dark=new THREE.MeshStandardMaterial({color:0x142a27,roughness:1});
  const artwork=[new THREE.MeshBasicMaterial({map:oldStock}),new THREE.MeshBasicMaterial({map:game,transparent:true})];
  for(const material of [white,dark,...artwork]){material.polygonOffset=true;material.polygonOffsetFactor=artwork.includes(material)?-4:-2;material.polygonOffsetUnits=artwork.includes(material)?-4:-2;}
- const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
- for(let i=0;i<16;i++){
-  const s=i===0?length-30:i===1?70:230+(i-2)*(length-480)/14;
-  const index=Math.max(0,data.samples.findIndex(p=>p[0]>=s)),p=data.samples[index];let side=i%2?1:-1;
-  const place=side=>{const offset=side*(p[4]/2+guardrailClearance(data,p[0],side)+5);return [p[1]-p[8]*offset,p[2]+p[7]*offset];};
-  // Keep the boards off the pit lane and out of the garages.
-  const pitGeo=pitGeometry(data),inPits=([x,y])=>{const lane=pitGeo&&locatePit(pitGeo,x,y);return !!lane&&lane.d>lane.lo-4&&lane.d<lane.hi+26;};
-  if(inPits(place(side)))side=-side;
-  const [x,y]=place(side);probe.index=index;const ground=probe.sample(x,y).z;
+ const probe=new TestCar(data),spots=billboardSpots(data);
+ for(const [i,{index,p,side,x,y}] of spots.entries()){
+  probe.index=index;const ground=probe.sample(x,y).z;
   const board=new THREE.Group();board.name=i%2?'Outdoor_AutoPobre':'Outdoor_OldStock';board.position.set(x,ground,-y);
   // Face the approaching driver, rather than presenting the edge of the sign.
   const fx=-p[7]*.8+p[8]*side*.6,fz=p[8]*.8+p[7]*side*.6;board.rotation.y=Math.atan2(fx,fz);
@@ -101,11 +115,12 @@ export function createGuardrails(data){
    const p=strip[i],offset=side*(p[4]/2+guardrailClearance(data,p[0],side)),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
    probe.index=Math.min(a.length-1,Math.floor(p[0]/L*a.length));const surface=probe.sample(x,y);probe.index=surface.i;const ground=surface.z;
    for(const [height,ridge] of profile)positions.push(x+p[8]*side*ridge,ground+height,-y+p[7]*side*ridge);
-   if(!(to===L&&i===strip.length-1))postPoints.push({x,y:ground+.475,z:-y,heading:Math.atan2(p[8],p[7])});
+   // Posts reach 1 m into the ground, so they meet it where a bank beside the road was cut back.
+   if(!(to===L&&i===strip.length-1))postPoints.push({x,y:ground,z:-y,heading:Math.atan2(p[8],p[7])});
    if(i>0){segments++;for(let j=0;j<profile.length-1;j++){const k=base+(i-1)*profile.length+j,b=k+profile.length;indices.push(k,b,k+1,b,b+1,k+1);}}
   }
  }
- const posts=new THREE.InstancedMesh(new THREE.BoxGeometry(.12,1.05,.14),metal,postPoints.length),matrix=new THREE.Matrix4(),q=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
+ const posts=new THREE.InstancedMesh(new THREE.BoxGeometry(.12,2,.14),metal,postPoints.length),matrix=new THREE.Matrix4(),q=new THREE.Quaternion(),scale=new THREE.Vector3(1,1,1);
  postPoints.forEach((p,i)=>{q.setFromAxisAngle(new THREE.Vector3(0,1,0),p.heading);matrix.compose(new THREE.Vector3(p.x,p.y,p.z),q,scale);posts.setMatrixAt(i,matrix);});
  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();geometry.computeBoundingSphere();
  const rails=new THREE.Mesh(geometry,metal);rails.name=closed?'Guardrail_continuo':'Guardrail_por_trechos';rails.castShadow=rails.receiveShadow=true;posts.name='Postes_guardrail';posts.castShadow=posts.receiveShadow=true;posts.computeBoundingSphere();root.add(rails,posts);

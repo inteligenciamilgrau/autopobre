@@ -81,6 +81,16 @@ with sync_playwright() as p:
   page.mouse.move(700,899,steps=6);frame();page.mouse.move(700,0,steps=12);frame()
   check('aerial_orbit_keeps_car_centred',page.evaluate("interlagos.state.mode==='orbit'") and sideways(snap())<.02)
   page.keyboard.press('KeyP');wait_js(page,'!document.pointerLockElement && interlagos.state.paused')
+  # Over the start line the gantry and pit wall stand between the aerial orbit and the car: it keeps flying up there.
+  race_options(page,camera='aerial');page.evaluate('interlagos.reposition(0)');enter_track(page);page.keyboard.down('KeyS');page.mouse.click(700,440)
+  wait_js(page,'!!document.pointerLockElement && interlagos.viewControls().pointerLocked');frame()
+  height=lambda:(lambda c:math.dist(c['position'],[c['car'][0],c['car'][1]+.85,c['car'][2]]))(snap())
+  aerial=height();x,y,seen=700,440,[]
+  for tilt in (440,140):
+   y=tilt;page.mouse.move(x,y,steps=3);frame()
+   for _ in range(18):x+=140;page.mouse.move(x,y,steps=2);frame();seen.append(height())
+  check('aerial_orbit_ignores_walls',min(seen)>.97*aerial)
+  page.keyboard.up('KeyS');page.keyboard.press('KeyP');wait_js(page,'!document.pointerLockElement && interlagos.state.paused')
   # Another click recaptures; leaving the window releases and clears held controls.
   race_options(page,camera='hood');enter_track(page);page.mouse.click(700,440);wait_js(page,'!!document.pointerLockElement && interlagos.viewControls().pointerLocked')
   page.mouse.move(880,450,steps=2);frame();check('hood_supports_head_look',page.evaluate("interlagos.state.mode==='hood'") and abs(controls()['yaw'])>.1)

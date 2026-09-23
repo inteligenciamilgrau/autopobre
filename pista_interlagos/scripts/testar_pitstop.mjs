@@ -2,7 +2,7 @@ import assert from 'node:assert/strict';
 import {CarCondition,CAR_PARTS,PitService} from '../teste/car-condition.js';
 import {TestCar,steerLimit,clamp,wrap} from '../teste/physics.js';
 import {createCurveloData} from '../teste/curvelo-data.js';
-import {pitLane,inPitBox} from '../teste/pit-lane.js';
+import {pitLane,inPitBox,CURVELO_PIT} from '../teste/pit-lane.js';
 import {ImmersiveMode} from '../teste/immersive-mode.js';
 import {ImmersiveState} from '../teste/immersive-state.js';
 import {RaceField} from '../teste/race-field.js';
@@ -52,7 +52,13 @@ for(const p of CAR_PARTS){const q=broken.quote(p.id,'proper');if(q)broken.applyR
 // Realism off (the game default): impacts and wear leave the car as new, and switching off repairs it.
 const unbreakable=new CarCondition({enabled:false});unbreakable.impact(30,1,0);unbreakable.wear(10,{offRoad:true,speed:40,spin:8});assert.equal(unbreakable.health,1);assert(Math.abs(speedAfter(unbreakable)-full)<.001,'no damage without the realism setting');
 const switched=new CarCondition();switched.damage('motor',.7);switched.setEnabled(false);assert.equal(switched.health,1);switched.setEnabled(true);switched.damage('motor',.5);assert.equal(switched.quality.motor,.5);
-const car=new TestCar(data),row=data.samples.find(p=>p[0]>=20);car.index=data.samples.indexOf(row);car.x=row[1]+row[9]*20;car.y=row[2]+row[10]*20;car.surface=car.sample(car.x,car.y);assert(car.surface.pit&&car.surface.onRoad&&inPitBox(car.surface));
+// Box 99's service box: on the working lane (garage half of the service lane), at s = 20.
+const car=new TestCar(data),row=data.samples.find(p=>p[0]>=20);car.index=data.samples.indexOf(row);car.x=row[1]+row[9]*21.65;car.y=row[2]+row[10]*21.65;car.surface=car.sample(car.x,car.y);assert(car.surface.pit&&car.surface.onRoad&&inPitBox(car.surface));
+{const middle=new TestCar(data);middle.x=row[1]+row[9]*20;middle.y=row[2]+row[10]*20;middle.index=car.index;assert(!inPitBox(middle.sample(middle.x,middle.y)),'the fast lane is not the service box');}
+// Curvelo's garages: the doors stop a car, Box 99 is open to the back wall and its floor is pit surface.
+{const P=CURVELO_PIT,push=(d,s)=>{const t=new TestCar(data),r=data.samples.find(p=>p[0]>=s);t.reset(data.samples.indexOf(r));t.x=r[1]+r[9]*d;t.y=r[2]+r[10]*d;t.heading=Math.atan2(r[10],r[9]);t.vx=Math.cos(t.heading)*4;t.vy=Math.sin(t.heading)*4;t.surface=t.sample(t.x,t.y);let hit=0;for(let i=0;i<360;i++){t.step({left:0,right:0,throttle:.35,brake:0,reverse:0,handbrake:0},1/120);hit=Math.max(hit,t.wallImpactSpeed);}return {hit,d:t.surface.d,pit:t.surface.pit};};
+ const door=push(21,P.box-2*P.bay);assert(door.hit>1&&door.d<P.offset+P.halfWidth+.6,'a closed garage door stops the car: '+JSON.stringify(door));
+ const open=push(21,P.box);assert(open.d>P.offset+P.halfWidth+8&&open.pit,'Box 99 is open and paved: '+JSON.stringify(open));}
 const m=Object.create(ImmersiveMode.prototype);Object.assign(m,{car,data,state:new ImmersiveState(),field:new RaceField(data),contacts(){},freeTotalLaps:3,freePlayerProgress:0});m.rivals=m.field.rivals;
 const before=car.clock,progress=m.rivals[0].progress;for(let i=0;i<600;i++)m.stepPit(1/120);assert(Math.abs(car.clock-before-5)<1e-7);assert(m.rivals[0].progress>progress+10,'rivals and clock keep running at the pit');
 

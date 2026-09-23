@@ -10,7 +10,9 @@ export function normalizePreferences(value){
   camera:CAMERA_MODES.includes(source.camera)?source.camera:'chase',
   circuit:circuitId(source.circuit),
   // Car damage and wear (power, brakes, grip) is an opt-in realism setting.
-  damage:typeof source.damage==='boolean'?source.damage:false
+  damage:typeof source.damage==='boolean'?source.damage:false,
+  // Lakes with reflections and wind ripples cost an extra scene render per frame: opt-in.
+  realisticWater:typeof source.realisticWater==='boolean'?source.realisticWater:false
  };
 }
 function browserStorage(){try{return globalThis.localStorage;}catch{return null;}}

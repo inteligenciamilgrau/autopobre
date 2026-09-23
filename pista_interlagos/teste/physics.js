@@ -48,7 +48,7 @@ export const SUSPENSION_WHEELS=Object.freeze([[FRONT_AXLE,HALF_TRACK],[FRONT_AXL
 // front and rear overhangs (about 19 and 15 degrees of approach and departure),
 // the sills and the floor, whose lowest point is the exhaust. Nose, tail,
 // shoulders, beltline and roof touch only when the car is upset.
-const HULL=[[2.25,.75,-.28],[2.25,-.75,-.28],[-2.05,.8,-.27],[-2.05,-.8,-.27],[.2,.93,-.34],[.2,-.93,-.34],[1,0,-.36],[0,0,-.36],[-1.4,0,-.41],
+export const HULL=[[2.25,.75,-.28],[2.25,-.75,-.28],[-2.05,.8,-.27],[-2.05,-.8,-.27],[.2,.93,-.34],[.2,-.93,-.34],[1,0,-.36],[0,0,-.36],[-1.4,0,-.41],
  [2.42,.7,0],[2.42,-.7,0],[-2.35,.8,-.1],[-2.35,-.8,-.1],[2.3,.85,.28],[2.3,-.85,.28],[-2.3,.85,.28],[-2.3,-.85,.28],[.2,.95,.4],[.2,-.95,.4],[.35,.66,.86],[.35,-.66,.86],[-1.05,.66,.86],[-1.05,-.66,.86]];
 // The underbody skids over grass and soil; bodywork and roof scrape harder.
 const LOW_HULL=9,UNDERBODY_FRICTION=.3,HULL_FRICTION=.5;
@@ -97,7 +97,9 @@ export function guardrailClearance(data,s,side){
 export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.pitGeo=pitGeometry(data);this.axes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};this.reset();}
  resetGrid(){const target=this.data.meta.reconstructed_xy_m-GRID_START_BACK;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));this.awaitingStart=true;}
- reset(index=0){this.awaitingStart=false;const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.rpm=IDLE_RPM;this.shiftTimer=0;this.shifts=0;this.longAccel=0;this.latAccel=0;this.rightings=0;this.rightedAt=null;this.crashImpactSpeed=0;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.settle();}
+ reset(index=0){this.awaitingStart=false;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.shifts=0;this.rightings=0;this.rightedAt=null;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.recover(index);}
+ // Put the car back at rest on the centre line, keeping its clock, laps and race progress.
+ recover(index=this.index){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.rpm=IDLE_RPM;this.shiftTimer=0;this.longAccel=0;this.latAccel=0;this.crashImpactSpeed=0;this.settle();}
  // Seat the body on its wheels at the current position and heading: level with
  // the ground under the four tyres, and clear of any bank under the body.
  settle(){
@@ -157,7 +159,7 @@ export class TestCar {
   // Off the asphalt the car sits on the LiDAR terrain, so it must also lean and roll with it.
   if(blend>0){const e=1.5,tx2=(this.terrain(x+e,y)-this.terrain(x-e,y))/(2*e),ty2=(this.terrain(x,y+e)-this.terrain(x,y-e))/(2*e);gx+=(tx2-gx)*blend;gy+=(ty2-gy)*blend;}
   const service=pitLane(this.data,s);
-  if(service&&Math.abs(d-service.offset)<=service.halfWidth&&d>width/2){pit=true;bank=grade=gx=gy=0;}
+  if(service&&d>=service.offset-service.halfWidth&&d<=service.reach&&d>width/2){pit=true;bank=grade=gx=gy=0;}
   const z=service&&pit?3.055:roadz*(1-blend)+this.terrain(x,y)*blend+.055;
   return {i:q.i,u:q.u,s:s>L-.01?0:s,d,z,width,bank,grade,gx,gy,tx,ty,lx,ly,pit,pitS,pitD,onRoad:pit||Math.abs(d)<width/2};
  }

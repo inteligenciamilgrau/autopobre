@@ -1,15 +1,14 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {structureMaterial} from './landscape.js';
+import {canvasTexture} from './pit-textures.js';
+import {createPitBuildings} from './pit-building.js';
 
 // Pit lane of Interlagos from data.pit: the lane and its painted gore and merge,
 // markings, the pit wall with its debris fence, the walls along the exit road
-// and the garage block with its membrane canopy (heights from the 2017 LiDAR).
-// Buildings are simplified volumes; lane geometry follows the 20 cm orthophoto.
-function canvasTexture(draw,w,h){
- const canvas=document.createElement('canvas');canvas.width=w;canvas.height=h;draw(canvas.getContext('2d'),w,h);
- const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=8;return map;
-}
+// the garage block with its roof terrace and membrane canopy (heights from the
+// 2017 LiDAR), and Box 99 with the Lanchonete da Tia (pit-box99.js). Buildings are
+// simplified volumes; lane geometry follows the 20 cm orthophoto.
 function geometryFrom(positions,uvs,indices,extra){
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));
  if(uvs)g.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
@@ -86,8 +85,14 @@ export function createInterlagosPit(data,roadSurface,textures){
  fenceMap.wrapS=fenceMap.wrapT=THREE.RepeatWrapping;
  const fence=new THREE.MeshStandardMaterial({name:'Alambrado_boxes',map:fenceMap,transparent:true,alphaTest:.3,side:THREE.DoubleSide,roughness:.5,metalness:.4});
  const wallParts=[],fenceParts=[],posts=[];
- for(const wall of pit.walls){
-  const pts=wall.points,positions=[],indices=[],fenceSide=wall.fence_side??0;
+ // Along the garage fronts the outer wall lies where the doors are: the doors show and
+ // its data still stops the cars, so only the stretches beyond the building are drawn.
+ const nearestS=(x,y)=>{let best=Infinity,s=0;for(const p of a){const d=(p[c.x]-x)**2+(p[c.y]-y)**2;if(d<best){best=d;s=p[c.s];}}return s;};
+ const runsOf=wall=>{if(wall.name!=='Muro_externo_boxes')return [wall.points];const runs=[];let run=[];for(const q of wall.points){const s=nearestS(q[0],q[1]);if(s>pit.garages[0]+.3&&s<pit.garages[1]-.3){if(run.length>1)runs.push(run);run=[];}else run.push(q);}if(run.length>1)runs.push(run);return runs;};
+ for(const wall of pit.walls)for(const pts of runsOf(wall)){
+  // Box 99 walls are drawn with their rooms; their collision still comes from the data.
+  if(wall.name.startsWith('Box99'))continue;
+  const positions=[],indices=[],fenceSide=wall.fence_side??0;
   const fencePos=[],fenceUv=[],fenceIdx=[];let run=0;
   for(let i=0;i<pts.length;i++){
    const [x,y,z,thickness]=pts[i],half=thickness/2,[x0,y0]=pts[Math.max(0,i-1)],[x1,y1]=pts[Math.min(pts.length-1,i+1)],tx=x1-x0,ty=y1-y0,len=Math.hypot(tx,ty)||1,nx=-ty/len,ny=tx/len;
@@ -108,72 +113,8 @@ export function createInterlagosPit(data,roadSurface,textures){
  const walls=new THREE.Mesh(mergeGeometries(wallParts,false),concrete);walls.name='Muro_boxes';walls.castShadow=walls.receiveShadow=true;root.add(walls);obstacles.push(walls);
  if(fenceParts.length){const f=new THREE.Mesh(mergeGeometries(fenceParts,false),fence);f.name='Alambrado_muro_boxes';root.add(f);}
  if(posts.length){const inst=new THREE.InstancedMesh(new THREE.BoxGeometry(.08,1,.08),metal,posts.length),m=new THREE.Matrix4();posts.forEach((p,i)=>{m.makeScale(1,p.h,1).setPosition(p.x,p.z,-p.y);inst.setMatrixAt(i,m);});inst.name='Postes_alambrado';inst.castShadow=true;inst.computeBoundingSphere();root.add(inst);}
- // --- Garage block: 8 m, ~21 m deep, with a white membrane canopy at ~13.5 m.
- {
-  const doors=structureMaterial(mat('Metal',0x39424a,{metalness:.35,roughness:.5}),textures),glass=structureMaterial(mat('Vidros_boxes',0x0d1b20,{roughness:.1,metalness:.4}),textures);
-  const membrane=new THREE.MeshStandardMaterial({name:'Cobertura_membrana',color:0xf4f3ee,roughness:.75,side:THREE.DoubleSide});
-  const parts={block:[],doors:[],glass:[],canopy:[]},signs=[];
-  const box=(list,p,d,s,w,depth,h,z0)=>{const g=new THREE.BoxGeometry(w,h,depth),heading=Math.atan2(p[c.ty],p[c.tx]),o=at(p,d);g.rotateY(heading);g.translate(o.x+p[c.tx]*s,p[c.z]+z0+h/2,o.z-p[c.ty]*s);list.push(g);};
-  // Box 99 and the café next to it are open: floor above and back rooms only.
-  const b99=pit.box99,open=new Set(b99?[b99.index,b99.index-1]:[]);
-  for(let b=0;b<bays;b++){
-   const s=pit.garages[0]+(b+.5)*bay,p=lerp(s),front=(open.has(b)?b99.front:p[c.hi])+.35;
-   if(open.has(b)){box(parts.block,p,front+10.5,0,bay,21,3,5.2);box(parts.block,p,front+18.75,0,bay,4.5,5.5,-.3);}
-   else{box(parts.block,p,front+10.5,0,bay,21,8.2,-.3);box(parts.doors,p,front-.04,0,bay-2.4,.12,4.6,0);}
-   box(parts.glass,p,front-.04,0,bay-1.2,.14,1.9,5.3);
-   // Canopy: two sloped membrane panels per bay meeting at a ridge across the lane side.
-   const heading=Math.atan2(p[c.ty],p[c.tx]),base=p[c.z];
-   for(const side of [-1,1]){
-    const g=new THREE.PlaneGeometry(bay/2,24);g.rotateX(-Math.PI/2);g.rotateZ(-side*.28);
-    g.translate(side*bay/4,base+13.4-.35,0);g.rotateY(heading);const o=at(p,front+10);g.translate(o.x,0,o.z);parts.canopy.push(g);
-   }
-   signs.push({p,front,label:b===b99?.index?'99':b===b99?.index-1?'TIA':String(b+1).padStart(2,'0')});
-  }
-  for(const [list,material,name] of [[parts.block,concrete,'Box_garagens'],[parts.doors,doors,'Box_portas'],[parts.glass,glass,'Box_janelas'],[parts.canopy,membrane,'Box_cobertura_membrana']]){
-   const g=mergeGeometries(list,false);list.forEach(x=>x.dispose());const m=new THREE.Mesh(g,material);m.name=name;m.castShadow=m.receiveShadow=true;root.add(m);if(name!=='Box_cobertura_membrana')obstacles.push(m);
-  }
-  // Garage numbers above the doors.
-  const numbers=canvasTexture((ctx,w,h)=>{ctx.fillStyle='#1b2a2c';ctx.fillRect(0,0,w,h);ctx.fillStyle='#f4f1e4';ctx.font='bold 44px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';signs.forEach((q,i)=>ctx.fillText(q.label,(i%8+.5)*w/8,(Math.floor(i/8)+.5)*h/4));},512,256);
-  signs.forEach((q,i)=>{
-   const g=new THREE.PlaneGeometry(1.6,.8),uv=g.attributes.uv;for(let k=0;k<uv.count;k++)uv.setXY(k,(i%8+uv.getX(k))/8,1-(Math.floor(i/8)+1-uv.getY(k))/4);
-   const m=new THREE.Mesh(g,new THREE.MeshBasicMaterial({map:numbers}));const o=at(q.p,q.front-.12,5);m.position.set(o.x,q.p[c.z]+4.95,o.z);
-   m.rotation.y=Math.atan2(q.p[c.ty],q.p[c.tx]);m.name='Numero_box';root.add(m);
-  });
- }
- // --- Box 99: the team garage, open for the car, with the Lanchonete da Tia beside it.
- let box=null;
- if(pit.box99){
-  const b=pit.box99,p=lerp(b.s),heading=Math.atan2(p[c.ty],p[c.tx]),floorZ=p[c.z]+p[c.bank]*(b.front+b.depth/2);
-  const place=(mesh,sv,d,y,turn=0)=>{const r=lerp(sv),o=at(r,d);mesh.position.set(o.x,floorZ+y,o.z);mesh.rotation.y=heading+turn;root.add(mesh);return mesh;};
-  const floor=new THREE.Mesh(new THREE.BoxGeometry(2*b.bay-.4,.1,b.depth),mat('Piso_epoxi_box99',0x8f989b,{roughness:.32,metalness:.05}));
-  floor.receiveShadow=true;floor.name='Piso_box99';place(floor,(b.s+b.cafe_s)/2,b.front+.35+b.depth/2,0);
-  // Yellow bay outline and a big 99 at the entrance.
-  const stripe=mat('Faixa_box99',0xf0c419,{polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
-  for(const side of [-1,1])place(new THREE.Mesh(new THREE.BoxGeometry(.15,.02,b.depth-1),stripe),b.s+side*(b.bay/2-.6),b.front+.35+b.depth/2,.06);
-  const paint=canvasTexture((ctx,w,h)=>{ctx.clearRect(0,0,w,h);ctx.fillStyle='#f0c419';ctx.font='bold 200px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('99',w/2,h/2+10);},256,256);
-  const number=new THREE.Mesh(new THREE.PlaneGeometry(2.2,2.2),new THREE.MeshStandardMaterial({map:paint,transparent:true,roughness:.5,depthWrite:false,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));
-  number.rotation.order='YXZ';number.rotation.x=-Math.PI/2;place(number,b.s,b.front+1.4,.061).name='Pintura_99';
-  // Ceiling lights, tyres and a tool chest.
-  const light=new THREE.MeshBasicMaterial({color:0xfff6dc});
-  for(const sv of [b.s-3.5,b.s+3.5,b.cafe_s])for(const d of [4,9,14])place(new THREE.Mesh(new THREE.BoxGeometry(2.4,.05,.45),light),sv,b.front+d,5.12);
-  const rubber=mat('Pneus_box99',0x1c1d1f,{roughness:.8}),tyre=new THREE.CylinderGeometry(.33,.33,.24,20);
-  for(const [ds,dd,count] of [[4.9,14.8,5],[4.1,14.9,4],[4.9,13.9,3]])for(let k=0;k<count;k++){const t=place(new THREE.Mesh(tyre,rubber),b.s+ds,b.front+dd,.17+k*.25);t.castShadow=true;}
-  const chest=place(new THREE.Mesh(new THREE.BoxGeometry(1.2,1.05,.6),mat('Carrinho_ferramentas',0xb3202a,{roughness:.45,metalness:.3})),b.s+5.5,b.front+9,.58);chest.castShadow=true;
-  // Rail between the garage and the café (its collision comes from the data walls).
-  const railMat=structureMaterial(mat('Metal',0xc9ced1,{metalness:.6,roughness:.35}),textures);
-  for(const [d0,d1] of [[.6,4.3],[5.7,b.depth]]){place(new THREE.Mesh(new THREE.BoxGeometry(.06,.06,d1-d0),railMat),b.s-b.bay/2,b.front+(d0+d1)/2,1.05);for(let d=d0;d<=d1+.01;d+=1.6)place(new THREE.Mesh(new THREE.BoxGeometry(.06,1.05,.06),railMat),b.s-b.bay/2,b.front+d,.53);}
-  // Signs over the opening and on the café storefront.
-  const board=(text,sub,bg,fg)=>canvasTexture((ctx,w,h)=>{ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);ctx.fillStyle=fg;ctx.textAlign='center';ctx.font='bold 110px sans-serif';ctx.fillText(text,w/2,h*.5);ctx.font='bold 44px sans-serif';ctx.fillText(sub,w/2,h*.85);},1024,256);
-  const sign=(map,sv,y,w,h)=>place(new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map})),sv,b.front+.1,y);
-  sign(board('BOX 99','AUTO-POBRE RACING · OPALA 99','#d82125','#fff4d8'),b.s,5.75,8.4,2.1).name='Placa_box99';
-  sign(board('LANCHONETE DA TIA','CAFÉ · PÃO DE QUEIJO · DOCE DE LEITE','#754627','#ffe2a0'),b.cafe_s,3.1,8,2).name='Placa_lanchonete';
-  // Pit stop station: +x into the garage, -z toward the café; the car parks nose in.
-  const anchor=at(p,b.front+6);
-  box={anchor:{x:anchor.x,y:floorZ+.06,z:anchor.z,heading:heading+Math.PI/2},label:'INTERLAGOS · BOX 99',title:'Cuida do Opala!',name:'Box 99 de Interlagos',
-   inBox:surface=>!!surface.pit&&surface.pitS!==null&&Math.abs(surface.pitS-b.s)<b.bay/2-1.3&&surface.pitD>b.front+2&&surface.pitD<b.front+b.depth-1,
-   // Walking limits for the rail (with its walkway) and the café storefront, in station coordinates.
-   obstacles:[[-3.55,-b.bay/2,1.85,.2],[4.85,-b.bay/2,5.15,.2],[-5.8,-b.bay/2-1.15,.25,1.15]]};
- }
+ // --- Garage row, Box 99 with the Lanchonete da Tia, crew and people (pit-building.js).
+ const {box}=createPitBuildings({pit,c,lerp,at,root,obstacles,textures});
  // --- Signs at the entry and on the pit wall.
  {
   const board=(text,sub,bg,fg)=>canvasTexture((ctx,w,h)=>{ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);ctx.fillStyle=fg;ctx.textAlign='center';ctx.font='bold 92px sans-serif';ctx.fillText(text,w/2,h*.47);ctx.font='bold 46px sans-serif';ctx.fillText(sub,w/2,h*.82);},512,256);

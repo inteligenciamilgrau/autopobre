@@ -20,7 +20,7 @@ export class Synth {
  stop(tag=null,fade=.025){const t=this.ctx.currentTime;for(const v of this.voices){if(tag&&v.tag!==tag)continue;v.level.gain.cancelScheduledValues(t);v.level.gain.setTargetAtTime(0,t,fade/3);try{v.source.stop(t+fade);}catch{}}}
 }
 
-export const EFFECT_NAMES=Object.freeze(['pitRepair','pitCoffee','click','paint','crowdWelcome','talk','donation','badJoke','noDonation','paper','fuelFill','denied','ignition','engineCatch','countdown','raceGo','flooded','batteryDead','fuelEmpty','breakdown','collision','debrisFly','debrisMiss','glassHit','glassBreak','tankDrop','towArrive','towBrake','strapSnag','strapFree','towWarning','finish','judgeStart','judgeCheck','judgeApprove','disqualified','podiumWin','podiumLoss','blazer','footstep','reserve']);
+export const EFFECT_NAMES=Object.freeze(['pitRepair','pitCoffee','click','paint','crowdWelcome','talk','donation','badJoke','noDonation','paper','fuelFill','denied','ignition','engineCatch','countdown','raceGo','flooded','batteryDead','fuelEmpty','breakdown','collision','debrisFly','debrisMiss','glassHit','glassBreak','tankDrop','towArrive','towBrake','strapSnag','strapFree','towWarning','finish','judgeStart','judgeCheck','judgeApprove','disqualified','podiumWin','podiumLoss','blazer','footstep','reserve','sip','bite','splash','wade']);
 
 export class SoundEffects {
  constructor(ctx,world,ui,noise){
@@ -35,7 +35,7 @@ export class SoundEffects {
  }
  play(name,options={},ui=false){
   if(!EFFECT_NAMES.includes(name))return false;
-  const t=this.ctx.currentTime,minGap={collision:.3,glassHit:.15,footstep:.2,click:.06,towBrake:1.5,towWarning:2.5}[name]??.08;
+  const t=this.ctx.currentTime,minGap={collision:.3,glassHit:.15,footstep:.2,click:.06,towBrake:1.5,towWarning:2.5,splash:.35,wade:.22}[name]??.08;
   if(t-(this.last[name]??-100)<minGap)return false;
   this.last[name]=t;this.counts[name]=(this.counts[name]||0)+1;
   const rack=ui?this.ui:this.world,pan=clamp(options.pan??0,-1,1),strength=clamp(options.strength??1,.2,1.5);
@@ -85,6 +85,12 @@ export class SoundEffects {
    case 'podiumLoss':noise(.8,.055,530);chime([370,330,294],.045,.25);break;
    case 'blazer':noise(.08,.12,650);chime([587,740,880,1175],.085);note(65,1.1,.11,'sawtooth',.5,130,850);break;
    case 'footstep':noise(.08,.1,650);note(95,.09,.045,'sine',0,45);break;
+   // A sip of coffee (slurp and gulp) and a bite of pão de queijo in the pits.
+   case 'sip':noise(.22,.05,1500);noise(.12,.04,900,.18);note(210,.12,.05,'sine',.34,120);break;
+   case 'bite':noise(.07,.09,3200);noise(.06,.07,2600,.09);noise(.1,.05,1800,.2);break;
+   // The Opala in a lake: a heavy splash with a thump and bubbles; water swishing past the wheels.
+   case 'splash':note(70,.35,.14,'sine',0,38,420);noise(.9,.2,900);noise(.55,.15,2600,.03);for(let i=0;i<6;i++)note(480+(i*173)%620,.07,.028,'sine',.14+i*.075,900+(i*211)%700,3200,(i%3-1)*.4);break;
+   case 'wade':noise(.34,.075,1100);noise(.24,.05,2300,.06);note(260,.12,.018,'sine',.05,430,2000);break;
   }
   return true;
  }

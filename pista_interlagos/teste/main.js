@@ -1,6 +1,7 @@
 import {PitStop} from './pitstop.js';
 import {pitLane} from './pit-lane.js';
 import {createInterlagosPit} from './interlagos-pit.js';
+import {createCurveloPit} from './pit-building.js';
 import {CIRCUITS,selectedCircuit,mapProjection} from './circuits.js';
 import {createCurveloData} from './curvelo-data.js';
 import {createCurveloScene} from './curvelo-scene.js';
@@ -27,6 +28,9 @@ import {CarAudio} from './car-audio.js?v=20260913-immersive';
 import {PlayerPreferences,CAMERA_MODES} from './player-preferences.js';
 import {createSky,SUN_DIRECTION} from './sky.js';
 import {createLandscape,loadTerrainTextures,buildTrackField,readOrtho,terrainMaterial,structureMaterial,createCrowd} from './landscape.js';
+import {LakeContact} from './lake-contact.js';
+import {fitGround,applyGroundHeights,groundHeight} from './track-clearance.js';
+import {createGrandstands} from './interlagos-stands.js';
 const $=id=>document.getElementById(id);
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;let mobile;
 const preferences=new PlayerPreferences();
@@ -55,6 +59,8 @@ $('livery').value=preferences.values.livery;
 $('camera').value=preferences.values.camera;
 $('carDamage').checked=preferences.values.damage;
 $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked});pitstop?.setDamage(preferences.values.damage);};
+$('realisticWater').checked=preferences.values.realisticWater;
+$('realisticWater').onchange=()=>{preferences.update({realisticWater:$('realisticWater').checked});landscape?.setRealisticWater(preferences.values.realisticWater);};
 $('tour').disabled=preferences.values.immersive;
 function chooseImmersive(value){
  $('immersiveMode').checked=value;$('tour').disabled=value;
@@ -62,7 +68,7 @@ function chooseImmersive(value){
 }
 $('immersiveMode').onchange=()=>chooseImmersive($('immersiveMode').checked);
 const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');
-let sky,landscape,landscapeField,terrainTextures;
+let sky,landscape,landscapeField,terrainTextures,lakeContact=null;
 let renderer;
 const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,6500);
 const orbit=new OrbitControls(camera,$('view'));
@@ -129,7 +135,9 @@ const keys=new Set(),clock=new THREE.Clock(),matrix=new THREE.Matrix4(),forward=
 const wheelForward=new THREE.Vector3(),wheelUp=new THREE.Vector3(0,1,0),wheelAxle=new THREE.Vector3(),wheelMatrix=new THREE.Matrix4(),wheelTurn=new THREE.Quaternion(),wheelSpin=new THREE.Quaternion(),axleAxis=new THREE.Vector3(0,0,1);
 function status(text){$('status').textContent=text;$('status').classList.toggle('hidden',!text);}
 function flattenStatic(root){
- const retired=[];root.traverse(ob=>{if(/^(Muro_protecao|Zebras_)/.test(ob.name))retired.push(ob);});retired.forEach(ob=>ob.removeFromParent());
+ // The GLB's walls, kerbs and step-only grandstands are rebuilt from the data (Curvelo's stands stay).
+ // GLTFLoader drops the dot from Blender's numbered names: Arquibancada.001 arrives as Arquibancada001.
+ const retired=[];root.traverse(ob=>{if(/^(Muro_protecao|Zebras_|Arquibancada\d*$)/.test(ob.name))retired.push(ob);});retired.forEach(ob=>ob.removeFromParent());
  root.updateMatrixWorld(true);const batches=new Map(),structures=new Map(),standTops=[];
  root.traverse(ob=>{if(!ob.isMesh||ob.isInstancedMesh)return;
   if(Array.isArray(ob.material)){ob.receiveShadow=true;return;}
@@ -187,7 +195,8 @@ async function cycleLivery(){
  try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
-function reset(nearest=false){mobile?.setHandbrake(false);if(nearest)car.reset(car.index);else car.resetGrid();if(immersive&&!immersive.active)immersive.resetField();driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
+// nearest (R key): only the player's car goes back on track; rivals, laps and fuel carry on.
+function reset(nearest=false){mobile?.setHandbrake(false);if(nearest)car.recover();else{car.resetGrid();if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
 function location(s){const sections=data.meta.sections||names;let name=sections[0][1];for(const [d,n] of sections)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
@@ -328,7 +337,8 @@ document.addEventListener('pointerlockchange',()=>{
 });
 document.addEventListener('pointerlockerror',lockFailed);
 document.addEventListener('mousemove',e=>{
- if(!pointerLocked||paused||(!e.movementX&&!e.movementY))return;
+ // On foot (pit stop, story-mode paddock) the mouse belongs to the walking camera.
+ if(!pointerLocked||paused||pitstop?.opened||immersive?.onFoot()||(!e.movementX&&!e.movementY))return;
  if(isInside()){
   headLook.yaw=clamp(headLook.yaw+e.movementX*.0025,-1.45,1.45);
   headLook.pitch=clamp(headLook.pitch-e.movementY*.0025,-.60,.45);
@@ -341,7 +351,7 @@ document.addEventListener('mousemove',e=>{
 $('view').addEventListener('pointermove',e=>{if(!pointerLocked&&e.buttons)cameraReturn.manual(performance.now());});
 window.addEventListener('pointerup',()=>$('view').classList.remove('dragging'));
 $('view').addEventListener('pointercancel',()=>$('view').classList.remove('dragging'));
-$('view').addEventListener('wheel',e=>{if(ready&&!paused){if(immersive?.active&&immersive.state.phase==='prepare')previewOrbit=true;if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}orbitFromView();cameraReturn.manual(performance.now());}},{capture:true,passive:true});
+$('view').addEventListener('wheel',e=>{if(ready&&!paused&&!pitstop?.opened&&!immersive?.onFoot()){if(immersive?.active&&immersive.state.phase==='prepare')previewOrbit=true;if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}orbitFromView();cameraReturn.manual(performance.now());}},{capture:true,passive:true});
 // Follow cameras sit behind the smoothed heading and look ahead of the car.
 const followsCar=m=>m==='chase'||m==='close'||m==='aerial';
 function followPose(m,p,vel){
@@ -352,7 +362,7 @@ function followPose(m,p,vel){
 function updateCamera(dt){
  if(pitstop?.opened)return;
  const phase=immersive?.active?immersive.state.phase:'free';if(phase!==previewPhase){previewPhase=phase;previewOrbit=false;}
- if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
+ if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)&&!immersive.inCar){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  const p=carRoot.position,vel=Math.hypot(car.vx,car.vy);
  if(gridPreview()&&!(phase==='prepare'&&previewOrbit)){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
@@ -397,7 +407,8 @@ function updateCamera(dt){
   camera.position.y=Math.max(camera.position.y,ground+.3);
   cameraRayDirection.subVectors(camera.position,orbit.target);
   cameraRay.far=cameraRayDirection.length();cameraRay.set(orbit.target,cameraRayDirection.normalize());
-  const obstruction=cameraRay.intersectObjects(cameraObstacles,false)[0];
+  // An orbit that began in the aerial view keeps flying up there; only the nearer orbits come in past walls.
+  const obstruction=orbit.maxDistance>ORBIT_MAX_DISTANCE?null:cameraRay.intersectObjects(cameraObstacles,false)[0];
   if(obstruction)camera.position.copy(orbit.target).addScaledVector(cameraRayDirection,Math.max(.2,obstruction.distance-.3));
   aimOrbit();orbitSeen.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));
  } else {
@@ -455,10 +466,10 @@ function lapBanner(dt){
 function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;menu(true);}
- if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}immersive?.stepFree(1/120,command);}skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
+ if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}immersive?.stepFree(1/120,command);}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  skidMarks.flush();
- tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);
+ tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);lakeContact?.update(paused?0:dt,renderer.domElement.height);
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  // The same command drives the engine sound and the driver's hands and feet.
  const driveCommand=pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input();
@@ -505,11 +516,11 @@ $('settingsButton').onclick=openSettings;
 mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(nextCameraMode());},onSkin:cycleLivery,onReset:()=>{if(ready&&!immersive.finishing){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
 document.addEventListener('keydown',e=>{
  if(lapRecords.dialog.open)return;
- if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape'||e.code==='KeyP')openSettings();else if(pitstop.coffee&&!paused){if(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(e.code==='KeyE'&&!e.repeat){e.preventDefault();pitstop.interact();}}return;}
+ if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape'||e.code==='KeyP')openSettings();else if(!paused){if(pitstop.coffee&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(!e.repeat&&pitstop.handleKey(e.code))e.preventDefault();}return;}
  if($('settings').open){if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}return;}
  if(['INPUT','SELECT'].includes(e.target.tagName)&&!['Escape','KeyP'].includes(e.code))return;
  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();keys.add(e.code);if(e.repeat||!ready)return;
- if(!paused&&immersive?.handleKey(e.code))return;
+ if(!paused&&immersive?.handleKey(e.code)){e.preventDefault();return;}
  if(e.code==='KeyC')setCameraMode(nextCameraMode());
  if(e.code==='KeyR'&&!immersive.finishing)reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
@@ -564,7 +575,7 @@ function clearCircuit(){
  landscapeField?.texture.dispose();landscapeField=null;landscape?.dispose();landscape=null;
  roadSurface=null;loadedCircuit=null;raceResults.mode=null;raceResults.snapshot=null;raceResults.root.hidden=true;renderer?.renderLists.dispose();
  if(skidMarks){skidMarks.breakTrails();skidMarks.count=skidMarks.total=skidMarks.cursor=0;skidMarks.geometry.setDrawRange(0,0);}
- tyreSmoke?.reset();accumulator=0;followInitialized=false;
+ tyreSmoke?.reset();lakeContact=null;accumulator=0;followInitialized=false;
  window.interlagos={ready:false,audioInfo:()=>carAudio.info()};
 }
 async function loadCircuit(){
@@ -587,9 +598,17 @@ async function loadCircuit(){
  }else{
   const track=await loader.loadAsync('../exports/interlagos_pista.glb');let ortho=null;
   // The orthophoto stays as land-cover data and far-distance colour; close up it becomes grass, woods, paving and water.
-  track.scene.traverse(o=>{if(!o.isMesh||o.material?.name!=='GeoSampa_Ortofoto_2020')return;const photo=o.material;ortho=readOrtho(photo.map,o.geometry);o.material=terrainMaterial(terrainTextures,landscapeField,{ortho:photo.map,mobile:touchDevice});o.material.userData.terrain=true;photo.map=null;photo.dispose();});
-  standTops=flattenStatic(track.scene);
+  // The ground is the one the car drives on, lowered wherever it would rise through asphalt, kerbs, pit floors or stands.
+  const groundFit=fitGround(data);
+  track.scene.traverse(o=>{if(!o.isMesh||o.material?.name!=='GeoSampa_Ortofoto_2020')return;const photo=o.material;ortho=readOrtho(photo.map,o.geometry);if(!applyGroundHeights(o.geometry,data,groundFit.heights))console.warn('Terreno do GLB fora da grade de pista.json; relevo sem ajuste.');o.material=terrainMaterial(terrainTextures,landscapeField,{ortho:photo.map,mobile:touchDevice});o.material.userData.terrain=true;photo.map=null;photo.dispose();});
+  // Lakes come out of the orthophoto: their beds, already dug in the physics ground, are dug into the
+  // visible terrain too, before flattenStatic copies it into the static batches.
   landscape=createLandscape({data,field:landscapeField,ortho,mobile:touchDevice});
+  if(landscape.digLakeBeds(groundFit.heights))track.scene.traverse(o=>{if(o.material?.userData.terrain)applyGroundHeights(o.geometry,data,groundFit.heights);});
+  if(landscape.stats.water){lakeContact=new LakeContact({water:landscape.water,mobile:touchDevice,onSound:(name,options)=>carAudio.effect(name,options)});scene.add(lakeContact.mesh);}
+  const legacyStands=flattenStatic(track.scene).length;
+  const stands=createGrandstands(data,terrainTextures,(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y));scene.add(stands.root);cameraObstacles.push(...stands.obstacles);standTops=stands.rows;
+  Object.assign(landscape.stats,{ground:groundFit.stats,stands:stands.stats,legacyStands});
  }
  scene.add(landscape.root);
  const crowd=createCrowd(standTops,{mobile:touchDevice});scene.add(crowd.root);landscape.stats.fans=crowd.count;if(!model||activeLivery!==$('livery').value)await setLivery($('livery').value);
@@ -597,25 +616,28 @@ async function loadCircuit(){
  scene.add(createCurbs(data));
  // Surveyed pit lane: entry after the Cafe, garages, exit around the S do Senna.
  let pitLayout=null;if(data.pit){const pitLaneScene=createInterlagosPit(data,roadSurface,terrainTextures);scene.add(pitLaneScene.root);cameraObstacles.push(...pitLaneScene.obstacles);pitLayout=pitLaneScene.box;}
+ // Curvelo: the same garage row and Box 99, on the infield behind its service lane.
+ else if(circuit.id==='curvelo'){const pitScene=createCurveloPit(data,terrainTextures);scene.add(pitScene.root);cameraObstacles.push(...pitScene.obstacles);pitLayout=pitScene.box;}
  const branding=await createTrackBranding(data);scene.add(branding.root);
  restBodyPose();
- immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
+ immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
  // Box 99: Curvelo's service lane, or the surveyed garage at Interlagos.
- if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
+ if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
  pitstop?.setDamage(preferences.values.damage);
+ landscape.setRealisticWater(preferences.values.realisticWater);
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');
  const oldStockMaterial=new THREE.MeshBasicMaterial({map:branding.oldStock,polygonOffset:true,polygonOffsetFactor:-2});
  for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.64,.43),oldStockMaterial);decal.position.set(.95,.75,side*.941);decal.rotation.y=side<0?Math.PI:0;decal.name='OldStock_no_Opala70';kleber.add(decal);}
  const roster=$('gridRoster');roster.replaceChildren();for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':` · Ritmo ${entry.level}/100`}`;roster.append(row);}
  // Compile the new programs while the loading label is still shown, instead of
  // freezing the first race frame (D3D shader compilation is slow on Windows).
- updateCar(1);updateCamera(1);try{await renderer.compileAsync(scene,camera);}catch(err){console.warn(err);}
+ updateCar(1);updateCamera(1);try{await renderer.compileAsync(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}
  ready=true;loadedCircuit=circuit.id;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;$('start').textContent='Entrar na pista →';
  window.interlagos={ready:true,circuit:circuit.id,car,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),pitInfo:()=>pitstop?.info()??null,
   audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),
-  skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),
+  skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),waterInfo:()=>landscape.waterInfo(),lakeInfo:()=>lakeContact?.info()??null,waterAt:(x,y)=>landscape.water.at(x,y),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
   driverInfo:()=>driver.info(),
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),

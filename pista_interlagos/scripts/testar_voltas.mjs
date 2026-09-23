@@ -29,4 +29,10 @@ grid.rivals[0].progress=3*L+grid.gridLeadIn+1;grid.step(gridCar,1/120,3);assert(
 const gridDriven=new TestCar(data);gridDriven.resetGrid();let crossed=false;
 for(let i=0;i<120*900&&gridDriven.laps<3;i++){gridDriven.step(recognitionInput(gridDriven),1/120);if(!gridDriven.awaitingStart&&!crossed){crossed=true;assert.equal(gridDriven.lastLapValid,null);assert.equal(gridDriven.laps,0);}}
 assert.equal(gridDriven.laps,3,'physical start behind the line followed by three valid laps');
+const rescued=new TestCar(data);for(let i=0;i<120*900&&(rescued.laps<1||rescued.surface.s<600);i++)rescued.step(recognitionInput(rescued),1/120);
+const kept={laps:rescued.laps,best:rescued.best,clock:rescued.clock,lapStart:rescued.lapStart,nextCheckpoint:rescued.nextCheckpoint,s:rescued.surface.s};
+rescued.x+=rescued.surface.lx*9;rescued.y+=rescued.surface.ly*9;rescued.vx=rescued.vy=15;rescued.settle();rescued.recover();
+assert.deepEqual({laps:rescued.laps,best:rescued.best,clock:rescued.clock,lapStart:rescued.lapStart,nextCheckpoint:rescued.nextCheckpoint},{laps:kept.laps,best:kept.best,clock:kept.clock,lapStart:kept.lapStart,nextCheckpoint:kept.nextCheckpoint},'R keeps the lap count, best lap and race clock');
+assert(Math.hypot(rescued.vx,rescued.vy)===0&&Math.abs(rescued.surface.d)<.5&&Math.abs(rescued.surface.s-kept.s)<5,'R puts the car at rest on the centre line where it was');
+for(let i=0;i<120*900&&rescued.laps<2;i++)rescued.step(recognitionInput(rescued),1/120);assert.equal(rescued.laps,2,'the recovered lap still counts');
 console.log('Laps passed: runoff, small excursions, actual shortcuts, invalid laps, recovery, reverse, checkpoints, three-lap rivals and three complete simulated laps.');

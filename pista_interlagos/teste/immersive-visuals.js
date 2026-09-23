@@ -2,7 +2,24 @@ import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {FANS,strapPath} from './immersive-state.js';
 import {RIVAL_ROSTER} from './race-roster.js';
+import {createPeople,setPose,POSES,OUTFITS} from './pit-crew.js';
+import {curveloPitFrame,serviceSpot,garageBays,pitPoint} from './pit-lane.js';
+import {footState,stepOnFoot,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
 const up=new THREE.Vector3(0,1,0);
+// The small white 99 on the Opala's tail is part of its 'Branco' mesh: rivals drop the
+// triangles on the tail panel (x < -2.05 m, car frame) and carry their own number there.
+function withoutTail(g){
+ const pos=g.attributes.position,n=g.index?g.index.count:pos.count,at=i=>g.index?g.index.getX(i):i,keep=[];
+ for(let i=0;i+2<n;i+=3){const a=at(i),b=at(i+1),c=at(i+2);if((pos.getX(a)+pos.getX(b)+pos.getX(c))/3>-2.05)keep.push(a,b,c);}
+ if(g.index){g.setIndex(keep);return g;}
+ const out=new THREE.BufferGeometry();
+ for(const [name,attr] of Object.entries(g.attributes)){
+  // Same array type as the other meshes of the batch (mergeGeometries needs it).
+  const raw=!attr.isInterleavedBufferAttribute,arr=raw?new attr.array.constructor(keep.length*attr.itemSize):new Float32Array(keep.length*attr.itemSize);
+  keep.forEach((v,k)=>{for(let j=0;j<attr.itemSize;j++)arr[k*attr.itemSize+j]=raw?attr.array[v*attr.itemSize+j]:attr.getComponent(v,j);});out.setAttribute(name,new THREE.BufferAttribute(arr,attr.itemSize,raw&&attr.normalized));
+ }
+ g.dispose();return out;
+}
 const leanRotation=new THREE.Quaternion(),leanEuler=new THREE.Euler(),poseForward=new THREE.Vector3(),poseUp=new THREE.Vector3(),poseSide=new THREE.Vector3(),poseMatrix=new THREE.Matrix4();
 export function trackPoint(data,s,offset=0){
  const a=data.samples,L=data.meta.reconstructed_xy_m;s=((s%L)+L)%L;
@@ -16,36 +33,42 @@ export class ImmersiveVisuals {
   this.materials={};this.time=0;
   this.stage=new THREE.Group();this.root.add(this.stage);const anchor=trackPoint(data,35,-32);
   anchor.y=Math.max(...[-13,13].flatMap(x=>[-11,11].map(z=>car.sample(anchor.x+x,-anchor.z-z).z)))+.2;this.stage.position.set(anchor.x,anchor.y,anchor.z);
-  this.crowd=new THREE.Group();this.podium=new THREE.Group();this.stage.add(this.crowd,this.podium);
+  this.podium=new THREE.Group();this.stage.add(this.podium);
   this.box(this.stage,[0,-1.5,0],[26,3,23],0x353d3d);
   for(const z of [-10.5,10.5])this.box(this.stage,[0,.02,z],[25,.04,.18],0xeedbbb);
   this.tag(this.podium,'AUTO-POBRE RACING',[-7,4.8,0],10,1.1,'#e7b454','#142329');
   this.tag(this.podium,'STEVAN GAIPO · TODO MUNDO TEM UMA CONTA PRA PAGAR',[-7,3.85,0],10,.48,'#ffffff','#142329');
+  // Before the race the pilot passes the hat round in front of the circuit's own pit
+  // garages (pit-building.js): rivals' cars parked at their teams' doors, the Opala 99
+  // inside Box 99 and six supporters on the working lane. The group is not turned, so
+  // the hero's yaw stays a world heading; `lane` converts to lane coordinates.
+  this.people=createPeople();this.crowd=new THREE.Group();this.crowd.name='Vaquinha_nos_boxes';this.root.add(this.crowd);
+  const pit=data.pit??(data.meta.id==='curvelo'?curveloPitFrame(data):null);this.lane=this.crowdFrame(pit,anchor);this.crowd.position.copy(this.lane.origin);
+  const L=this.lane,outfits=[{top:0x76a67b,bottom:0x2b3a55,hat:'cap',hatColor:0x2f7d4a,skin:0xc68e6a},{top:0xd69569,bottom:0x3b3f45,hairStyle:'long',hair:0x5a3a22,skin:0xe0b08f},{top:0xab7daf,bottom:0x3b3f45,hairStyle:'bun',hair:0x3b2a1a,glasses:true,skin:0xd8a27e,belly:.4},{top:0xb3a77a,bottom:0x2b3a55,hat:'cap',hatColor:0xc4232a,skin:0xb77a55},{top:0x77888f,bottom:0x1b1d20,hairStyle:'curly',skin:0x6b4128},{top:0x7492c9,bottom:0x2d3338,mustache:true,hairStyle:'bald',skin:0x8d5a3b}];
+  // Supporters ahead of the pilot, between the parked cars, turned toward him.
+  const spots=[[4,-1.4,.2,'ready'],[6.5,1,-.5,'stand'],[9.5,-.4,.35,'folded'],[16.5,1.1,-.3,'stand'],[19,-1.2,.4,'folded'],[22,.6,0,'ready']];
   this.fans=FANS.map((fan,i)=>{
-   const pos=new THREE.Vector3(-5+(i%3)*3,0,i<3?-1:5),person=this.human([0x76a67b,0xd69569,0x7492c9,0xb3a77a,0x77888f,0xab7daf][i]);person.position.copy(pos);person.rotation.y=i<3?-Math.PI/2:Math.PI/2;this.crowd.add(person);
-   const label=this.tag(this.crowd,fan.name,[pos.x,2.1,pos.z],1.8,.30),dollar=this.tag(this.crowd,'$',[pos.x,2.65,pos.z],.43,.56,'#ffe380','#19452b');
-   const reaction=this.tag(this.crowd,'HAHA! + R$ '+fan.gift,[pos.x,3.15,pos.z],2.4,.45,'#203823','#c7ed9c');reaction.visible=false;
-   return {pos,person,label,dollar,reaction,cheerUntil:0};
+   const [x,dd,turn,idle]=spots[i],pos=L.point(x,L.spotD+dd),person=this.people.person(outfits[i]);person.position.copy(pos);person.rotation.y=L.heading+Math.PI+(dd>0?.5:-.5)+turn;setPose(person,POSES[idle]);this.crowd.add(person);
+   const label=this.tag(this.crowd,fan.name,[pos.x,pos.y+2.1,pos.z],1.8,.30),dollar=this.tag(this.crowd,'$',[pos.x,pos.y+2.65,pos.z],.43,.56,'#ffe380','#19452b');
+   const reaction=this.tag(this.crowd,'HAHA! + R$ '+fan.gift,[pos.x,pos.y+3.15,pos.z],2.4,.45,'#203823','#c7ed9c');reaction.visible=false;
+   return {pos,person,label,dollar,reaction,cheerUntil:0,idle,shown:idle};
   });
   this.socialMarker=new THREE.Mesh(new THREE.OctahedronGeometry(.18),new THREE.MeshStandardMaterial({color:0x86e37c,emissive:0x28651f,roughness:.3}));this.crowd.add(this.socialMarker);
-  this.hero=this.human(0xd82125);this.crowd.add(this.hero);this.hero.position.set(5,0,3);
-  const helmet=driver.root.getObjectByName('Capacete_preto_vermelho_balaclava');if(helmet){this.hero.userData.head.visible=false;const h=helmet.clone();h.position.set(0,1.62,0);this.hero.add(h);}
-  this.tag(this.hero,'99',[0,1.18,.19],.27,.28,'#fff','#971719');
+  // The pilot, out of the car in his cap; limbs listed left leg, left arm, right leg, right arm.
+  this.hero=this.people.person(OUTFITS.driver);this.crowd.add(this.hero);const rig=this.hero.userData.rig.limbs;this.hero.userData.limbs=[rig[-1].leg,rig[-1].arm,rig[1].leg,rig[1].arm];
+  this.heroStart=L.point(-1.5,L.spotD);this.heroYaw=L.heading;this.hero.position.copy(this.heroStart);this.hero.rotation.y=this.heroYaw;this.foot=footState(this.heroYaw,{floor:this.crowd.position.y+this.heroStart.y});
   this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName);group.userData.entry=entry;this.root.add(group);return group;});
   this.parked=[];
-  // Pit garage frontage, open bays and parked cars before the race.
-  this.box(this.crowd,[0,.015,0],[25,.03,22],0x555a5b);
-  this.box(this.crowd,[0,2.5,-10.5],[25,5,.3],0x3d494f);
-  this.box(this.crowd,[0,5,-7.2],[25,.18,7],0x778183);
-  for(let i=0;i<4;i++){
-   const x=-9+i*6;
-   this.box(this.crowd,[x,2.4,-7.2],[.22,4.8,6.6],0x818989);
-   this.box(this.crowd,[x+2.6,.025,-4.2],[.06,.035,8],0xe3bf54);
-   this.tag(this.crowd,'BOX '+String(i+1).padStart(2,'0'),[x+2.5,4.35,-4.1],3.7,.55,'#f4d16c','#172b30');
-   const entry=RIVAL_ROSTER[[9,0,1,4][i]],parked=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName);parked.position.set(x+2.5,0,-7);parked.rotation.y=-Math.PI/2;this.crowd.add(parked);this.parked.push({x:x+2.5,z:-7});
-   this.box(this.crowd,[x+.65,.45,-9.5],[.7,.9,.65],0x9d3c32);
+  if(pit){
+   // The four teams nearest Box 99 park nose in at their garage doors.
+   const {bay,team}=garageBays(pit,RIVAL_ROSTER.length);
+   for(const [b,k] of [...team.entries()].sort((m,n)=>m[1]-n[1]).slice(0,4)){
+    const sv=pit.garages[0]+(b+.5)*bay,x=sv-pit.box99.s,d=pitPoint(pit,sv).hi+.35-2.75,entry=RIVAL_ROSTER[k],parked=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName);
+    parked.position.copy(L.point(x,d));parked.rotation.y=L.heading+Math.PI/2;this.crowd.add(parked);this.parked.push({x,d});
+   }
+   const own=this.ownCar(rivalTemplate);own.position.copy(L.point(0,pit.box99.front+6.5,.05));own.rotation.y=L.heading-Math.PI/2;this.crowd.add(own);this.ownSpot={x:0,d:pit.box99.front+6.5};this.own=own;
   }
-  this.tag(this.crowd,'PADDOCK · VAQUINHA ANTES DA LARGADA',[0,4.65,-10.2],9,.5,'#f5d279','#1a292b');
+  this.banner(this.crowd,'PADDOCK · VAQUINHA ANTES DA LARGADA',L.point(12,L.bounds.d1-.1,6.3),L.heading,9,.55,'#f5d279','#1a292b');
   this.truck=this.truckModel();this.root.add(this.truck);
   const strapGeometry=new THREE.BufferGeometry();strapGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(25*2*3),3));const indices=[];for(let i=0;i<24;i++)indices.push(i*2,i*2+1,i*2+2,i*2+1,i*2+3,i*2+2);strapGeometry.setIndex(indices);
   this.strap=new THREE.Mesh(strapGeometry,new THREE.MeshBasicMaterial({color:0xe9b640,side:THREE.DoubleSide}));this.strap.frustumCulled=false;this.root.add(this.strap);
@@ -58,16 +81,15 @@ export class ImmersiveVisuals {
   this.crackedGlass=new THREE.Mesh(glassGeometry,new THREE.MeshBasicMaterial({map:this.crackTexture,transparent:true,side:THREE.DoubleSide,depthWrite:false,opacity:.9}));this.damage.add(this.crackedGlass);this.lastGlass=-1;
   this.debris=new THREE.Mesh(new THREE.IcosahedronGeometry(.085,0),this.mat(0x655a4d));this.root.add(this.debris);
   const leakGeometry=new THREE.BufferGeometry();leakGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(240*3),3));this.leak=new THREE.Points(leakGeometry,new THREE.PointsMaterial({color:0x4b341b,size:.22,transparent:true,opacity:.55,depthWrite:false}));this.leak.frustumCulled=false;this.root.add(this.leak);this.leakCount=0;this.leakCursor=0;this.leakTimer=0;
-  this.judge=this.human(0xe9e5d5);this.root.add(this.judge);this.tag(this.judge,'JUIZ',[0,2.0,0],1.2,.38,'#fff','#37536a');
+  this.judge=this.people.person({top:0xe9e5d5,bottom:0x2d3338,hat:'cap',hatColor:0x37536a,glasses:true});this.root.add(this.judge);this.tag(this.judge,'JUIZ',[0,2.0,0],1.2,.38,'#fff','#37536a');
   this.closedPark=this.tag(this.root,'PARQUE FECHADO · AGUARDE A VISTORIA',[0,0,0],6,.7,'#fff','#285e69');
   this.pitSign=this.tag(this.root,'BOXES',[0,0,0],5,.7,'#fff','#8e4736');
-  const heroData=this.hero.userData;this.hero.userData={};this.podiumHero=this.hero.clone();this.hero.userData=heroData;
-  this.podiumHero.userData={limbs:this.podiumHero.children.filter(o=>o.name.startsWith('Membro_'))};this.podium.add(this.podiumHero);
+  this.podiumHero=this.people.person(OUTFITS.driver);const cheer=this.podiumHero.userData.rig.limbs;this.podiumHero.userData.limbs=[cheer[-1].leg,cheer[-1].arm,cheer[1].leg,cheer[1].arm];this.podium.add(this.podiumHero);
   for(let i=0;i<6;i++){
    const height=[1.65,1.4,1.2,.95,.72,.45][i],z=i===0?0:i%2===1?(i+1)/2*2.8:-i/2*2.8;
    this.box(this.podium,[-2,height/2,z],[2,height,2.45],i===5?0xc89642:0x576a6c).name='Podio_'+(i+1);
    this.tag(this.podium,`${i+1}º`,[-.75,height*.5,z],.8,.8,'#fff',i===5?'#8c5923':'#314447');
-   if(i<5){const h=this.human([0x51789d,0x847452,0x836672,0x70856b,0x767a7c][i]);h.position.set(-2,height,z);this.podium.add(h);}
+   if(i<5){const color=RIVAL_ROSTER[i].color,h=this.people.person({top:color,bottom:0x2d3338,trim:0xf4f1ea,hat:'cap',hatColor:color,skin:[0xc68e6a,0x8d5a3b,0xe0b08f,0x6b4128,0xb77a55][i]});setPose(h,POSES[i%2?'folded':'stand']);h.position.set(-2,height,z);this.podium.add(h);}
    else this.podiumHero.position.set(-2,height,z);
   }
   this.tag(this.podium,'A FOTO É SEMPRE EM SEXTO.',[-2,4.2,0],9,.7,'#f7c75b','#15272b');
@@ -76,12 +98,50 @@ export class ImmersiveVisuals {
   this.blazer=this.car(0x294c62,'BLAZER');this.blazer.scale.set(1.06,1.18,1.05);this.blazer.position.set(-6.8,.1,-5);this.podium.add(this.blazer);
   this.tag(this.podium,'OFICINA · BLAZER',[-5.8,3.5,-5],4,.55,'#f7d99b','#213c47');
  }
+ // Paddock frame at the Box 99 service box: local points (unturned group) from lane
+ // coordinates (x along the lane from Box 99, d across it) and back, and walking limits.
+ crowdFrame(pit,fallback){
+  if(!pit)return {origin:new THREE.Vector3(fallback.x,fallback.y,fallback.z),heading:0,spotD:0,point:(x,d,y=0)=>new THREE.Vector3(x,y,-d),lane:v=>({x:v.x,d:-v.z}),bounds:{x0:-8,x1:8,d0:-8,d1:8}};
+  const spot=serviceSpot(pit),b=pit.box99,o=pitPoint(pit,b.s,spot.d),ux=Math.cos(o.heading),uy=Math.sin(o.heading),edge=pitPoint(pit,b.s);
+  return {origin:new THREE.Vector3(o.x,o.y,o.z),heading:o.heading,spotD:spot.d,
+   point:(x,d,y=0)=>{const p=pitPoint(pit,b.s+x,d);return new THREE.Vector3(p.x-o.x,p.y-o.y+y,p.z-o.z);},
+   lane:v=>({x:v.x*ux-v.z*uy,d:spot.d-v.x*uy-v.z*ux}),bounds:{x0:-30,x1:30,d0:edge.lo+.5,d1:b.front-.15}};
+ }
+ // Where the rivals' numbers go, from the Opala 99's own stickers (Adesivo_*_99 on the
+ // rear quarters, Decal_teto_99 read from the driver's side, the small 99 left of centre
+ // on the tail). A grid is cast onto the body once per model, so each sticker follows
+ // its curves 6 mm off the paint.
+ numberPlates(template,detail){
+  this.plateShapes??=new WeakMap();let list=this.plateShapes.get(template);if(list)return list;
+  const body=[];detail.parent.updateMatrixWorld(true);detail.traverse(o=>{if(o.isMesh&&o.visible)body.push(o);});
+  // Cast in world space (the clone keeps the model's own transform), stored car-local.
+  const ray=new THREE.Raycaster(),V=(x,y,z)=>new THREE.Vector3(x,y,z),scale=detail.matrixWorld.getMaxScaleOnAxis();
+  const bend=(center,right,up,w,h)=>{
+   const normal=right.clone().cross(up),inward=normal.clone().negate(),nx=12,ny=6,pos=[],uv=[],index=[];
+   for(let j=0;j<=ny;j++)for(let i=0;i<=nx;i++){
+    const p=center.clone().addScaledVector(right,(i/nx-.5)*w).addScaledVector(up,(j/ny-.5)*h);ray.set(detail.localToWorld(p.clone().addScaledVector(normal,1.5)),inward.clone().transformDirection(detail.matrixWorld));ray.far=1.8*scale;
+    const hit=ray.intersectObjects(body,false)[0];if(hit)p.copy(detail.worldToLocal(hit.point.clone())).addScaledVector(normal,.006);pos.push(p.x,p.y,p.z);uv.push(i/nx,j/ny);
+    if(i&&j){const a=(j-1)*(nx+1)+i-1,c=j*(nx+1)+i-1;index.push(a,a+1,c+1,a,c+1,c);}
+   }
+   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(index);g.computeVertexNormals();return g;
+  };
+  list=[bend(V(-1.835,.667,-.86),V(-1,0,0),V(0,1,0),.57,.45),bend(V(-1.906,.67,.86),V(1,0,0),V(0,1,0),.57,.45),bend(V(-.19,1.3,0),V(-1,0,0),V(0,0,1),.94,.74),bend(V(-2.18,.69,-.29),V(0,0,1),V(0,1,0),.2,.156)];
+  this.plateShapes.set(template,list);return list;
+ }
+ // The team's own Opala for the paddock: the player's model, livery and cage.
+ ownCar(template){
+  if(!template)return this.car(0x151515,'99');const root=template.clone(true),structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
+  root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});root.name='Opala_99_no_box';return root;
+ }
  mat(color){return this.materials[color]??=(new THREE.MeshStandardMaterial({color,roughness:.76}));}
  box(parent,p,size,color){const o=new THREE.Mesh(new THREE.BoxGeometry(...size),this.mat(color));o.position.set(...p);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;}
- tag(parent,text,p,w=3,h=.5,fg='#fff',bg='#192d30'){
+ labelTexture(text,w,h,fg,bg){
   const c=document.createElement('canvas');c.width=1024;c.height=Math.max(128,Math.round(1024*h/w));const ctx=c.getContext('2d');ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`bold ${Math.round(c.height*.55)}px Arial`;ctx.fillText(text,512,c.height/2,970);
-  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:tex,depthWrite:false}));sprite.position.set(...p);sprite.scale.set(w,h,1);parent.add(sprite);return sprite;
+  const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;return tex;
  }
+ tag(parent,text,p,w=3,h=.5,fg='#fff',bg='#192d30'){const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:this.labelTexture(text,w,h,fg,bg),depthWrite:false}));sprite.position.set(...p);sprite.scale.set(w,h,1);parent.add(sprite);return sprite;}
+ // A flat banner fixed to a wall, facing `heading` (a sprite this wide turns into the wall).
+ banner(parent,text,p,heading,w,h,fg,bg){const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:this.labelTexture(text,w,h,fg,bg)}));m.position.copy(p);m.rotation.y=heading;parent.add(m);return m;}
  human(color){
   const root=new THREE.Group(),limbs=[];
   this.box(root,[0,1.13,0],[.33,.58,.46],color);this.box(root,[0,.82,0],[.3,.2,.4],color===0xd82125?color:0x252c33);
@@ -125,7 +185,8 @@ export class ImmersiveVisuals {
    if(o.isMesh){
     const mats=Array.isArray(o.material)?o.material:[o.material];
     o.castShadow=mats.some(m=>!m.transparent||m.opacity>=.95);o.receiveShadow=true;
-    if(mats.some(m=>m.name.startsWith('Adesivo'))){o.visible=false;return;}
+    // The Opala 99's number stickers (sides, roof) give way to the rival's own number.
+    if(mats.some(m=>m.name.startsWith('Adesivo')||m.name==='Decal_teto_99')){o.visible=false;return;}
     const recolor=m=>{if(!['Pintura_preta','Faixa_amarela','Branco'].includes(m.name))return m;if(!materials.has(m)){const c=m.clone();c.color.setHex(m.name==='Pintura_preta'?color:0xe4e4d5);materials.set(m,c);}return materials.get(m);};
     o.material=Array.isArray(o.material)?mats.map(recolor):recolor(o.material);
    }
@@ -134,18 +195,18 @@ export class ImmersiveVisuals {
   // Batch fixed bodywork by material; preserve separate wheel pivots for animation.
   root.updateMatrixWorld(true);const inverse=root.matrixWorld.clone().invert(),batches=new Map(),parts=[];
   root.traverse(o=>{if(!o.isMesh||!o.visible||Array.isArray(o.material)||o.children.length)return;let parent=o.parent;while(parent&&parent!==root){if(pivots.some(p=>p.obj===parent))return;parent=parent.parent;}parts.push(o);});
-  for(const o of parts){const geometry=o.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld));geometry.deleteAttribute('tangent');if(!geometry.attributes.uv)geometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));const key=o.material.uuid;if(!batches.has(key))batches.set(key,{material:o.material,geometries:[],objects:[]});const batch=batches.get(key);batch.geometries.push(geometry);batch.objects.push(o);}
+  for(const o of parts){let geometry=o.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld));geometry.deleteAttribute('tangent');if(o.material.name==='Branco')geometry=withoutTail(geometry);if(!geometry.attributes.uv)geometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));const key=o.material.uuid;if(!batches.has(key))batches.set(key,{material:o.material,geometries:[],objects:[]});const batch=batches.get(key);batch.geometries.push(geometry);batch.objects.push(o);}
   for(const batch of batches.values()){const geometry=mergeGeometries(batch.geometries,false);if(geometry){const mesh=new THREE.Mesh(geometry,batch.material);mesh.castShadow=!batch.material.transparent||batch.material.opacity>=.95;mesh.receiveShadow=true;root.add(mesh);batch.objects.forEach(o=>o.removeFromParent());}batch.geometries.forEach(g=>g.dispose());}
   // Level of detail: beyond ~40 m the car is one vertex-coloured mesh (one draw call).
   const detail=new THREE.Group();detail.name='Rival_detalhe';while(root.children.length)detail.add(root.children[0]);root.add(detail);
   const far=this.farProxy(color);root.add(far);root.userData.detail=detail;root.userData.far=far;
-  this.tag(root,number,[0,1.65,0],.65,.36,'#fff','#243a3d');
   const label=name?this.tag(root,name,[0,2.08,0],2.7,.30,'#fff','#172a2ddb'):null;
-  // Actual numerals on both doors and the rear, including leading zero and #312.
-  const canvas=document.createElement('canvas');canvas.width=512;canvas.height=256;const ctx=canvas.getContext('2d');ctx.fillStyle='#152420';ctx.fillRect(0,0,512,256);ctx.fillStyle='#fff';ctx.font='italic 900 205px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(number,256,139,480);
-  const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;const plate=new THREE.MeshBasicMaterial({map,polygonOffset:true,polygonOffsetFactor:-2});
-  for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.92,.46),plate);decal.position.set(-.18,.75,side*.938);decal.rotation.y=side<0?Math.PI:0;decal.name='Numero_oficial_'+number;detail.add(decal);}
-  const rear=new THREE.Mesh(new THREE.PlaneGeometry(.58,.28),plate);rear.position.set(-2.345,.70,-.30);rear.rotation.y=-Math.PI/2;detail.add(rear);
+  // The rival's own number where the Opala 99 carries its 99 (those stickers are
+  // hidden): big on both rear quarters and on the roof, small on the tail. White
+  // italic numerals outlined in black, so they read on every paint; one texture each.
+  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=200;const ctx=canvas.getContext('2d');ctx.font='italic 900 170px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=16;ctx.strokeStyle='#101314';ctx.strokeText(number,128,108,228);ctx.fillStyle='#f4f3ee';ctx.fillText(number,128,108,228);
+  const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;const sticker=new THREE.MeshStandardMaterial({map,transparent:true,depthWrite:false,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+  this.numberPlates(template,detail).forEach((g,i)=>{const decal=new THREE.Mesh(g,sticker);decal.name=['Numero_lateral_','Numero_lateral_','Numero_teto_','Numero_traseiro_'][i]+number;decal.renderOrder=2;detail.add(decal);});
   root.userData.wheels=pivots;root.userData.nameLabel=label;return root;
  }
  truckModel(){const root=new THREE.Group();this.box(root,[0,.66,0],[4.9,.35,2],0xe5b13f);this.box(root,[1.5,1.25,0],[1.65,1,1.9],0xe3c271);this.box(root,[1.55,1.54,0],[1.72,.35,1.91],0x354951);this.box(root,[-.5,1.1,0],[2.4,.22,1.8],0x535c5d);for(const x of [-1.5,1.65])for(const z of [-1,1]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.38,.38,.25,16).rotateX(Math.PI/2),this.mat(0x171a1c));w.position.set(x,.4,z);root.add(w);}this.tag(root,'REBOQUE · SEM PRESSA',[0,2.2,0],3.5,.5,'#222','#e5b13f');return root;}
@@ -154,17 +215,41 @@ export class ImmersiveVisuals {
  // Rivals ride the same rigid body as the player: jumps, spins and rollovers show.
  setCarPose(obj,c){if(!c.pose){this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});return;}const p=c.pose();obj.position.set(p.x,p.z,-p.y);poseForward.set(p.forward[0],p.forward[2],-p.forward[1]);poseUp.set(p.up[0],p.up[2],-p.up[1]);poseSide.crossVectors(poseForward,poseUp).normalize();obj.quaternion.setFromRotationMatrix(poseMatrix.makeBasis(poseForward,poseUp,poseSide));}
  setPose(obj,p){obj.position.set(p.x,p.y,p.z);const f=new THREE.Vector3(Math.cos(p.heading),p.grade||0,-Math.sin(p.heading)).normalize(),n=new THREE.Vector3(-(p.grade||0)*Math.cos(p.heading)+(p.bank||0)*Math.sin(p.heading),1,(p.grade||0)*Math.sin(p.heading)+(p.bank||0)*Math.cos(p.heading)).normalize(),side=new THREE.Vector3().crossVectors(f,n).normalize();n.crossVectors(side,f);obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(f,n,side));}
- reset(){this.fans.forEach(f=>{f.cheerUntil=0;f.reaction.visible=false;f.dollar.visible=true;});this.followPosition=null;this.followYaw=Math.PI*.75;this.walkCycle=0;this.hero.rotation.y=this.followYaw;this.hero.position.set(5,0,3);this.leakCount=this.leakCursor=this.leakTimer=0;this.leak.geometry.setDrawRange(0,0);this.lastGlass=-1;}
- walk(input,dt){
-  const forward=input.throttle-input.brake;this.hero.rotation.y+=(input.left-input.right)*2.2*dt;
-  const dx=Math.cos(this.hero.rotation.y)*forward,dz=-Math.sin(this.hero.rotation.y)*forward,n=Math.max(1,Math.hypot(dx,dz));
-  this.hero.position.x=THREE.MathUtils.clamp(this.hero.position.x+dx/n*3*dt,-8,8);this.hero.position.z=THREE.MathUtils.clamp(this.hero.position.z+dz/n*3*dt,-8,8);
-  for(const parked of this.parked){const dx=this.hero.position.x-parked.x,dz=this.hero.position.z-parked.z;if(Math.abs(dx)<1.3&&Math.abs(dz)<2.7){const xDepth=1.3-Math.abs(dx),zDepth=2.7-Math.abs(dz);if(xDepth<zDepth)this.hero.position.x=parked.x+Math.sign(dx||1)*1.3;else this.hero.position.z=parked.z+Math.sign(dz||1)*2.7;}}
-  if(forward)this.walkCycle+=dt*9;
-  // Limb order is left leg, left arm, right leg, right arm: contralateral gait.
-  const swing=forward?Math.sin(this.walkCycle)*.38:0;
-  this.hero.userData.limbs.forEach((limb,i)=>{const target=swing*([1,-1,-1,1][i]);limb.rotation.z+=(target-limb.rotation.z)*(1-Math.exp(-dt*18));});
+ reset(){this.fans.forEach(f=>{f.cheerUntil=0;f.reaction.visible=false;f.dollar.visible=true;});this.followPosition=null;this.hero.rotation.y=this.heroYaw;this.hero.position.copy(this.heroStart);this.foot=footState(this.heroYaw,{floor:this.crowd.position.y+this.heroStart.y});this.leakCount=this.leakCursor=this.leakTimer=0;this.leak.geometry.setDrawRange(0,0);this.lastGlass=-1;}
+ // On foot in the paddock (on-foot.js), as in the pit stop's stroll: free to walk
+ // anywhere, into Box 99 and the café too; ground is ImmersiveMode's footGround.
+ walk(input,dt,{shift=false,touch=false,ground=null}={}){return stepOnFoot(this.foot,this.hero,input,dt,{shift,touch,ground,origin:this.crowd.position});}
+ // The rivals parked at their garages, the Opala in Box 99 and the supporters are
+ // solid (world positions; a step away from a supporter is always allowed).
+ blocked(pos,from=pos){
+  const local=pos.clone().sub(this.crowd.position),back=from.clone().sub(this.crowd.position),q=this.lane.lane(local);
+  if([...this.parked,...(this.ownSpot?[this.ownSpot]:[])].some(p=>Math.abs(q.x-p.x)<1.3&&Math.abs(q.d-p.d)<2.7))return true;
+  return this.fans.some(f=>{const a=Math.hypot(local.x-f.pos.x,local.z-f.pos.z);return a<.55&&a<Math.hypot(back.x-f.pos.x,back.z-f.pos.z);});
  }
+ // Input that walks toward a world heading: sideways to the camera on a desktop; on
+ // touch screens the view turns toward it first, as the steering pad does.
+ toward(heading,touch=false){
+  const r=Math.atan2(Math.sin(heading-this.foot.yaw),Math.cos(heading-this.foot.yaw));
+  if(touch)return {throttle:Math.abs(r)<.65?1:0,brake:0,left:r>.05?1:0,right:r<-.05?1:0};
+  const f=Math.cos(r),l=Math.sin(r);return {throttle:Math.max(0,f),brake:Math.max(0,-f),left:Math.max(0,l),right:Math.max(0,-l)};
+ }
+ // The team's Opala in Box 99: close enough to get in (F), and where it stands (data
+ // coordinates and heading) for the real car to take its place.
+ nearCar(){return !!this.own&&this.hero.position.distanceTo(this.own.position)<3.4;}
+ ownPose(){if(!this.own)return null;const p=this.own.getWorldPosition(new THREE.Vector3());return {x:p.x,y:-p.z,heading:this.own.rotation.y};}
+ // Out of the car by the driver's door (the other side if a wall is in the way).
+ leaveCar(ground){
+  const c=this.ownPose();if(!c)return;const o=this.crowd.position;
+  for(const side of [1,-1]){
+   const p=new THREE.Vector3(c.x-Math.sin(c.heading)*1.55*side,0,-c.y-Math.cos(c.heading)*1.55*side),floor=ground?ground(p,this.foot.floor,p):this.foot.floor;if(floor===null)continue;
+   this.hero.position.set(p.x-o.x,floor-o.y,p.z-o.z);this.foot.floor=floor;break;
+  }
+  this.foot.lift=this.foot.vz=0;this.foot.yaw=this.hero.rotation.y=c.heading;this.followPosition=null;
+ }
+ turnView(dx,dy){turnFootView(this.foot,dx,dy);}
+ zoomView(k){zoomFootView(this.foot,k);}
+ jump(){return footJump(this.foot);}
+ crouch(){this.foot.crouch=!this.foot.crouch;}
  nearestFan(){let best=-1,d=2.5;this.fans.forEach((f,i)=>{const distance=this.hero.position.distanceTo(f.pos);if(distance<d){best=i;d=distance;}});this.nearSocial=best;return best;}
  showDonation(index){const f=this.fans[index];if(f){f.cheerUntil=this.time+2.3;f.dollar.visible=false;f.reaction.visible=true;}}
  drawCracks(value){
@@ -182,10 +267,10 @@ export class ImmersiveVisuals {
  updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
  update(state,car,dt,rivals,projectile,towOrigin){
   this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;
-  const staged=['crowd','podium'].includes(state.phase);this.stage.visible=staged;this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged;
+  const staged=['crowd','podium'].includes(state.phase);this.stage.visible=state.phase==='podium';this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged||!!this.inCar;if(this.own)this.own.visible=!this.inCar;if(this.inCar)this.hero.visible=false;
   this.rivals.forEach((obj,i)=>{obj.visible=['prepare','starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
   const selected=state.fan??this.nearSocial;this.socialMarker.visible=state.phase==='crowd'&&Number.isInteger(selected)&&!!this.fans[selected];if(this.socialMarker.visible){this.socialMarker.position.copy(this.fans[selected].pos).add(new THREE.Vector3(.4,2.85,0));this.socialMarker.rotation.y=this.time*1.5;}
-  this.fans.forEach((f,i)=>{const laughing=this.time<f.cheerUntil||state.fan===i&&state.feedback.includes('risada');f.person.rotation.z=laughing?Math.sin(this.time*9)*.08:0;f.dollar.visible=!state.donors.includes(i);f.reaction.visible=this.time<f.cheerUntil;f.reaction.position.y=3.15+Math.max(0,2.3-(f.cheerUntil-this.time))*.15;f.label.material.color.setHex(state.donors.includes(i)?0xc4eb93:0xffffff);});
+  this.fans.forEach((f,i)=>{const laughing=this.time<f.cheerUntil||state.fan===i&&state.feedback.includes('risada'),pose=laughing?'cheer':f.idle;if(f.shown!==pose){setPose(f.person,POSES[pose]);f.shown=pose;}f.person.rotation.z=laughing?Math.sin(this.time*9)*.08:0;f.dollar.visible=!state.donors.includes(i);f.reaction.visible=this.time<f.cheerUntil;f.reaction.position.y=3.15+Math.max(0,2.3-(f.cheerUntil-this.time))*.15;f.label.material.color.setHex(state.donors.includes(i)?0xc4eb93:0xffffff);});
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);
   this.tankTethers.visible=state.tankDetached;const ta=this.tankTethers.geometry.attributes.position;for(let i=0;i<2;i++){ta.setXYZ(i*2,-1.6,.24,(i-.5)*.6);ta.setXYZ(i*2+1,this.tank.position.x+.24,this.tank.position.y,(i-.5)*.6);}ta.needsUpdate=true;
   this.drawCracks(state.glass);this.crackedGlass.visible=state.glass>0;
@@ -201,8 +286,12 @@ export class ImmersiveVisuals {
   this.judge.visible=state.phase==='inspection';this.closedPark.visible=this.pitSign.visible=state.phase==='inspection';
   if(this.judge.visible){const c=Math.cos(car.heading),s=Math.sin(car.heading),a=state.inspection*.65;this.judge.position.set(car.x+c*Math.cos(a)*2.7-s*2,car.surface.z,-car.y-s*Math.cos(a)*2.7-c*2);this.judge.rotation.y=car.heading;this.closedPark.position.set(car.x,car.surface.z+3.5,-car.y);const pit=trackPoint(this.data,45,11);this.pitSign.position.set(pit.x,pit.y+2,pit.z);}
   this.garageDoor.position.y=state.profile.released?4.2:1.3;this.blazer.position.x=state.profile.released?-3.9:-6.8;
-  if(state.phase==='podium')this.podiumHero.userData.limbs?.forEach((limb,i)=>{if(i%2)limb.rotation.z=-2.3+Math.sin(this.time*3)*.12;});
+  if(state.phase==='podium')this.podiumHero.userData.limbs?.forEach((limb,i)=>{if(i%2)limb.rotation.z=2.7+Math.sin(this.time*3)*.12;});
  }
  restoreCamera(){if(this.cameraRef&&this.savedFov!==undefined){this.cameraRef.fov=this.savedFov;this.cameraRef.updateProjectionMatrix();this.savedFov=undefined;}}
- camera(camera,state,dt=1/60){if(state.active&&['crowd','podium'].includes(state.phase)){if(this.savedFov===undefined){this.savedFov=camera.fov;this.cameraRef=camera;}camera.fov=58;camera.updateProjectionMatrix();if(state.phase==='crowd'){const hero=this.hero.getWorldPosition(new THREE.Vector3()),yaw=this.hero.rotation.y;this.followYaw??=yaw;this.followYaw+=Math.atan2(Math.sin(yaw-this.followYaw),Math.cos(yaw-this.followYaw))*(1-Math.exp(-dt*6));const target=hero.clone().add(new THREE.Vector3(-Math.cos(this.followYaw)*5.2,3.2,Math.sin(this.followYaw)*5.2));if(!this.followPosition)this.followPosition=target.clone();this.followPosition.lerp(target,1-Math.exp(-dt*9));camera.position.copy(this.followPosition);camera.up.copy(up);camera.lookAt(hero.add(new THREE.Vector3(Math.cos(this.followYaw)*.9,1.15,-Math.sin(this.followYaw)*.9)));}else{this.followPosition=null;const framing=document.body.classList.contains('touch-device')?-5:-3;camera.fov=46;camera.updateProjectionMatrix();camera.position.copy(this.stage.position).add(new THREE.Vector3(20,7.5,framing));camera.up.copy(up);camera.lookAt(this.stage.position.clone().add(new THREE.Vector3(-2,1.8,framing)));}}else this.restoreCamera();}
+ camera(camera,state,dt=1/60){if(state.active&&['crowd','podium'].includes(state.phase)&&!this.inCar){if(this.savedFov===undefined){this.savedFov=camera.fov;this.cameraRef=camera;}camera.fov=58;camera.updateProjectionMatrix();if(state.phase==='crowd'){
+   // Third person behind the pilot, turned by the mouse (ImmersiveMode); the view widens
+   // while he runs, and a wall between them brings the camera in front of it.
+   const s=this.foot;this.footFov=(this.footFov??58)+((s.running?65:58)-(this.footFov??58))*(1-Math.exp(-dt*5));camera.fov=this.footFov;camera.updateProjectionMatrix();
+   this.followPosition=placeFootCamera(camera,s,this.hero.getWorldPosition(new THREE.Vector3()),{layout:this.layout,obstacles:this.obstacles,ground:this.groundAt,dt,follow:this.followPosition,body:this.hero});}else{this.followPosition=null;const framing=document.body.classList.contains('touch-device')?-5:-3;camera.fov=46;camera.updateProjectionMatrix();camera.position.copy(this.stage.position).add(new THREE.Vector3(20,7.5,framing));camera.up.copy(up);camera.lookAt(this.stage.position.clone().add(new THREE.Vector3(-2,1.8,framing)));}}else this.restoreCamera();}
 }

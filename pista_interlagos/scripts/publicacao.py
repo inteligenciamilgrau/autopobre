@@ -8,15 +8,15 @@ ROOT = Path(__file__).resolve().parents[2]
 GAME = 'pista_interlagos/teste/'
 MODULES = (
     'pilot-profile.js', 'ai-records.js', 'ai-record-references.js',
-    'car-condition.js', 'pit-lane.js', 'interlagos-pit.js', 'pitstop.js', 'pitstop.css',
-    'circuits.js', 'curvelo-data.js', 'curvelo-scene.js',
+    'car-condition.js', 'pit-lane.js', 'interlagos-pit.js', 'pit-building.js', 'pit-box99.js', 'pit-crew.js', 'pit-textures.js', 'on-foot.js', 'pitstop.js', 'pitstop.css',
+    'circuits.js', 'curvelo-data.js', 'curvelo-scene.js', 'track-clearance.js', 'interlagos-stands.js',
     'race-results.js', 'race-results.css', 'lap-records.js',
     'race-roster.js',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'cockpit.js', 'cockpit-materials.js',
     'driver.js', 'driver-rig.js', 'driver-controls.js', 'driver-helmet.js', 'family-phone.js',
     'immersive-mode.js', 'immersive-state.js', 'immersive-visuals.js',
-    'skid-marks.js', 'track-surface.js', 'tyre-smoke.js', 'sky.js', 'landscape.js',
+    'skid-marks.js', 'track-surface.js', 'tyre-smoke.js', 'sky.js', 'landscape.js', 'lake-contact.js',
     'style.css', 'immersive.css', 'abertura.css', 'index.html', 'sobre.html',
     'favicon.svg', 'favicon.ico', 'apple-touch-icon.png',
 )

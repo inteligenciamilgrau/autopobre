@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import {TestCar,recognitionInput,steerLimit,clamp,wrap} from '../teste/physics.js';
-import {pitGeometry,locatePit} from '../teste/pit-lane.js';
+import {pitGeometry,locatePit,serviceSpot,inServiceSpot} from '../teste/pit-lane.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url))),L=data.meta.reconstructed_xy_m;
 data.meta.id='interlagos';
 const pit=data.pit,c=Object.fromEntries(pit.columns.map((k,i)=>[k,i])),P=pit.samples;
@@ -106,9 +106,25 @@ for(const wall of pit.walls.filter(w=>w.name.startsWith('Muro')))for(const [x,y]
  const lane=locatePit(geo,x,y);if(!lane||lane.s>pit.garages[0]-15&&lane.s<pit.garages[1]+10)continue;
  assert(lane.d<lane.lo-.35||lane.d>lane.hi+.35,`${wall.name} stands off the paved lane at ${lane.s.toFixed(0)} m`);
 }
-// Box 99: open garage the car drives into nose first, parking where the pit stop opens.
-const b99=pit.box99,station=(sv,d)=>{const k=Math.min(P.length-2,P.findIndex(p=>p[c.s]>=sv)),p=P[k];return [p[c.x]+p[c.lx]*d+p[c.tx]*(sv-p[c.s]),p[c.y]+p[c.ly]*d+p[c.ty]*(sv-p[c.s])];};
-const inBox=q=>q.pit&&Math.abs(q.pitS-b99.s)<b99.bay/2-1.3&&q.pitD>b99.front+2&&q.pitD<b99.front+b99.depth-1;
+// Box 99: in the race the car stops on the painted service box, on the working lane
+// in front of the garage and along the lane, coming in from the fast lane.
+const b99=pit.box99,spot=serviceSpot(pit),station=(sv,d)=>{const k=Math.min(P.length-2,P.findIndex(p=>p[c.s]>=sv)),p=P[k];return [p[c.x]+p[c.lx]*d+p[c.tx]*(sv-p[c.s]),p[c.y]+p[c.ly]*d+p[c.ty]*(sv-p[c.s])];};
+const at99=P.find(p=>p[c.s]>=b99.s),fastD=sv=>{const p=P.find(q=>q[c.s]>=sv);return (p[c.lane_lo]+p[c.fast_hi])/2;};
+assert(Math.abs(spot.s-b99.s)<.01&&spot.d-spot.width/2>=at99[c.fast_hi]&&spot.d+spot.width/2<=b99.front+.01,'service box painted on the working lane in front of Box 99');
+const stop=new TestCar(data);{const [x,y]=station(b99.s-45,fastD(b99.s-45)),p=P.find(q=>q[c.s]>=b99.s-45);stop.x=x;stop.y=y;stop.heading=Math.atan2(p[c.ty],p[c.tx]);stop.index=stop.nearest(x,y,true).i;stop.surface=stop.sample(x,y);stop.settle?.();}
+const toSpot=[...[-40,-32,-24,-16].map(ds=>station(b99.s+ds,fastD(b99.s+ds))),...[-9,-4,0,6,12].map(ds=>station(b99.s+ds,spot.d))];
+let toBox=0,stopHits=0;
+for(let i=0;i<120*40;i++){
+ const r=follow(stop,toSpot,toBox,4);toBox=r.k;const q=stop.surface;
+ if(q.pitS!==null&&q.pitS>spot.s-.6){r.input.throttle=0;r.input.brake=1;}
+ stop.step(r.input,1/120);if(stop.wallImpactSpeed>1)stopHits++;
+ if(q.pitS>spot.s-1.5&&Math.hypot(stop.vx,stop.vy)<.03)break;
+}
+assert.equal(stopHits,0,'pulls into the service box without touching a wall');
+assert(inServiceSpot(spot,stop.surface),'stopped in the painted box: '+JSON.stringify({ds:stop.surface.pitS-spot.s,dd:stop.surface.pitD-spot.d}));
+assert(Math.abs(wrap(stop.heading-spot.heading))<.35,'parked along the lane, not nose into the garage');
+// The garage behind stays open and driveable, but the pit stop does not open inside it.
+const inGarage=q=>q.pit&&Math.abs(q.pitS-b99.s)<b99.bay/2-1.3&&q.pitD>b99.front+2&&q.pitD<b99.front+b99.depth-1;
 const garage=new TestCar(data),lane0=P.find(p=>p[c.s]>=b99.s-30);
 garage.x=lane0[c.x]+lane0[c.lx]*(lane0[c.lane_lo]+lane0[c.fast_hi])/2;garage.y=lane0[c.y]+lane0[c.ly]*(lane0[c.lane_lo]+lane0[c.fast_hi])/2;garage.heading=Math.atan2(lane0[c.ty],lane0[c.tx]);
 garage.index=garage.nearest(garage.x,garage.y,true).i;garage.surface=garage.sample(garage.x,garage.y);garage.settle?.();
@@ -121,7 +137,8 @@ for(let i=0;i<120*40;i++){
  if(g>=route.length-2&&Math.hypot(garage.vx,garage.vy)<.05&&depth>b99.front+4)break;
 }
 assert.equal(garageHits,0,'drives into Box 99 without touching the walls');
-assert(inBox(garage.surface),'parked inside Box 99: '+JSON.stringify({s:garage.surface.pitS,d:garage.surface.pitD}));
+assert(inGarage(garage.surface),'parked inside Box 99: '+JSON.stringify({s:garage.surface.pitS,d:garage.surface.pitD}));
+assert(!inServiceSpot(spot,garage.surface),'inside the garage is not the service box');
 // The rail keeps the car out of the café; a closed garage stays closed.
 const push=(car,heading,frames)=>{car.heading=heading;car.vx=Math.cos(heading)*4;car.vy=Math.sin(heading)*4;let hit=0;for(let i=0;i<frames;i++){car.step({left:0,right:0,throttle:.35,brake:0,reverse:0,handbrake:0},1/120);hit=Math.max(hit,car.wallImpactSpeed);}return hit;};
 const toCafe=push(garage,Math.atan2(lane0[c.ty],lane0[c.tx])+Math.PI,240);
