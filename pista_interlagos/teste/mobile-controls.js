@@ -3,7 +3,7 @@ export class MobileControls {
   this.enabled=enabled;this.pressed=new Set();this.pointers=new Map();this.phase='';this.handbrake=false;this.steering=0;this.steeringPosition=0;this.steerPointer=null;
   document.body.classList.toggle('touch-device',enabled);
   this.root=document.getElementById('touchControls');
-  this.cameraGuards=[...this.root.querySelectorAll('.touch-steering,.touch-pedals,#touchHandbrake,#touchReverse,.touch-toolbar')];
+  this.cameraGuards=[...this.root.querySelectorAll('.touch-steering,.touch-pedals,#touchHandbrake,#touchReverse,#touchLookBack,.touch-toolbar')];
   this.steerPad=document.getElementById('touchSteering');this.steerThumb=document.getElementById('steeringThumb');
   this.pedalPad=document.getElementById('touchPedals');this.pedalThumb=document.getElementById('pedalThumb');this.pedalPointer=null;this.throttle=this.brake=0;this.pedalPosition=.65;
   const pedalAt=event=>{const rect=this.pedalPad.getBoundingClientRect();this.setPedals((event.clientY-rect.top-22)/(rect.height-44));};

@@ -6,7 +6,7 @@ import {wrap} from './physics.js';
 
 // Seated model based on geracoes_piloto/v01_omp_oli; +X front, -Z left.
 // Suit UVs use the approved portrait; the helmet uses the new in-car photo.
-// The right hand shifts and pulls the handbrake, the boots work the pedals
+// The right hand works the gear lever, the boots work the pedals
 // (choreography in driver-controls.js, body dynamics in driver-rig.js).
 const THIGH=.371,SHIN=.379;
 // Boot frame: heel contact at the origin, toes along +X, sole on y=0.
@@ -105,7 +105,7 @@ export async function createDriver(cockpit){
   const back=shoulder.clone().sub(p);back.addScaledVector(axis,-back.dot(axis)).normalize();
   basis.makeBasis(new THREE.Vector3().crossVectors(axis,back),axis,back);q.setFromRotationMatrix(basis);return {p,q};
  }
- const handPose=(target,shoulder)=>target==='knob'?leverPose(controls.knobGrip,shoulder):target==='handbrake'?leverPose(controls.handbrakeGrip,shoulder):anchorPose(right.anchor);
+ const handPose=(target,shoulder)=>target==='knob'?leverPose(controls.knobGrip,shoulder):anchorPose(right.anchor);
  const handState={id:-1,from:null,p:new THREE.Vector3(),q:new THREE.Quaternion(),away:0};
  function moveRightHand(hand,shoulder,dt){
   const target=handPose(hand.to,shoulder);

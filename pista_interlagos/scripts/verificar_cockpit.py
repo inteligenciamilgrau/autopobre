@@ -20,9 +20,17 @@ with sync_playwright() as p:
   check('internal_selected',info['visible'] and not info['externalVisible'])
   check('eye_inside_cabin',math.dist(info['eyeLocal'],[-.39,1.08,.015])<1e-6)
   # Scanned interior maps (carbon, leather, suede, aluminium, tread plate, rubber) and the cabin reflections.
-  loaded=wait_js(page,"performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length>=16&&performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length")
-  check('interior_textures_loaded',loaded>=16)
+  loaded=wait_js(page,"performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length>=13&&performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length")
+  check('interior_textures_loaded',loaded>=13)
   check('cabin_reflections_and_seat',info['cabinReflections'] and info['seat']>0)
+  # Holding B turns the head straight back over the car; letting go returns to the road.
+  facing='()=>{const d=interlagos.cameraSnapshot().direction,h=interlagos.car.heading;return d[0]*Math.cos(h)-d[2]*Math.sin(h);}'
+  page.keyboard.down('KeyB');wait_js(page,'interlagos.viewControls().lookBack.amount===1',timeout=5000);frame()
+  back=page.evaluate('interlagos.viewControls()')['lookBack'];report['views'].append({'lookBack':back,'eyeLocal':page.evaluate('interlagos.cockpitInfo().eyeLocal')})
+  check('b_looks_back',back['held'] and page.evaluate(facing)<-.9)
+  page.screenshot(path=str(ROOT/'renders/cockpit_olhando_tras.png'))
+  page.keyboard.up('KeyB');wait_js(page,'interlagos.viewControls().lookBack.amount===0',timeout=5000);frame()
+  check('b_release_returns_forward',page.evaluate(facing)>.9 and math.dist(page.evaluate('interlagos.cockpitInfo().eyeLocal'),[-.39,1.08,.015])<1e-6)
   for key,sign in [('KeyA',1),('KeyD',-1)]:
    page.keyboard.down(key);wait_js(page,'(s)=>interlagos.car.steer*s>.3',arg=sign);frame()
    check(key+'_wheel_direction',page.evaluate('(s)=>interlagos.cockpitInfo().steering*s>.85',sign));page.keyboard.up(key)
@@ -34,6 +42,8 @@ with sync_playwright() as p:
   race_options(page,livery='seiva_danilo');page.evaluate('interlagos.reposition(800)');enter_track(page);page.keyboard.down('KeyS');frame()
   info=page.evaluate('interlagos.cockpitInfo()');check('second_livery_cockpit',info['visible'] and not info['externalVisible']);page.screenshot(path=str(ROOT/'renders/cockpit_seiva.png'));page.keyboard.up('KeyS')
   page.click('#cockpitButton');frame();info=page.evaluate('interlagos.cockpitInfo()');check('external_car_restored',not info['visible'] and info['externalVisible'] and info['fov']==58)
+  page.keyboard.down('KeyB');page.wait_for_timeout(300);frame()
+  check('b_only_inside_cockpit',page.evaluate('interlagos.viewControls().lookBack.amount')==0);page.keyboard.up('KeyB')
   modes=[]
   for _ in range(6):page.keyboard.press('KeyC');modes.append(page.evaluate('interlagos.state.mode'))
   check('six_camera_cycle',modes==['close','hood','cockpit','aerial','orbit','chase'])

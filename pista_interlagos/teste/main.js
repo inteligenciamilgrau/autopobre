@@ -16,8 +16,8 @@ import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v=20260923-capotagem';
 import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
-import {createCockpit} from './cockpit.js?v=20260923-controls';
-import {CameraReturn} from './camera-return.js';
+import {createCockpit} from './cockpit.js?v=20260923-interior-fotos';
+import {CameraReturn,LookBack,turnHead,neckTwist,HEAD_YAW_COCKPIT,HEAD_YAW_HOOD} from './camera-return.js';
 import {createDriver} from './driver.js?v=20260923-controls';
 import {SkidMarks} from './skid-marks.js?v=20260923-capotagem';
 import {TyreSmoke} from './tyre-smoke.js?v=20260923-capotagem';
@@ -97,8 +97,14 @@ function aimOrbit(){
 // Set before every orbit update, or the previous orbit's limit would move the next one.
 function orbitTilt(){orbit.maxPolarAngle=Math.PI/2-clamp((camera.position.distanceTo(orbit.target)-ORBIT_MAX_DISTANCE)/60,0,1)*.5;}
 const headLook={yaw:0,pitch:0};
+// B held in the cockpit looks back; headView is the look actually drawn (mouse look blended with it).
+// cockpitView is a debug pose for interior photos (interlagos.setCockpitView); null in play.
+const lookBack=new LookBack(),headView={yaw:0,pitch:0},headEye=new THREE.Vector3(),twist=[0,0,0];
+let cockpitView=null,photoHidDriver=false;const photoEye=new THREE.Vector3();
 let pointerLocked=false,lockPending=false,lockUnavailable=!$('view').requestPointerLock;
 const isInside=()=>mode==='cockpit'||mode==='hood';
+// Look-back (B or the touch button): driving from the cockpit only, not on foot, in the pit stop or menus.
+const lookBackAllowed=()=>mode==='cockpit'&&ready&&!paused&&!cockpitView&&!pitstop?.opened&&!immersive?.onFoot()&&!gridPreview()&&!$('settings').open;
 // Sky light comes mostly from the environment map; the hemisphere only lifts deep shadows.
 scene.add(new THREE.HemisphereLight('#cfe2ff','#4a5236',.75));
 const sun=new THREE.DirectionalLight('#fff1dc',3.4);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:2048,touchDevice?1024:2048);Object.assign(sun.shadow.camera,{left:-55,right:55,top:55,bottom:-55,near:1,far:300});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;sun.shadow.radius=2;scene.add(sun,sun.target);
@@ -114,7 +120,7 @@ function initializeRenderer(){
  if(renderer)return;
  renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:!touchDevice});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
  sky=createSky(renderer,scene,{mobile:touchDevice});
- cockpit=createCockpit(renderer);carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,96);
+ cockpit=createCockpit(renderer);carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,64);
  skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
 }
@@ -172,14 +178,15 @@ async function setLivery(value){
  model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;
   for(const m of Array.isArray(o.material)?o.material:[o.material])if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
  }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){const front=o.name.includes('Dianteira');wheels.push({obj:o,front,index:(front?0:2)+(o.position.z>0?1:0),base:o.quaternion.clone(),basePosition:o.position.clone()});}});
- // These solid Blender panels close the cabin in every view. The detailed
- // cockpit hides the outer model, so retain its floor/bulkheads independently.
+ // These solid Blender panels close the cabin seen from outside. The detailed
+ // cockpit has its own floor, walls and rear cabin, so they hide with the body
+ // (their belt-high sheet over the rear seat would cover the interior).
  if(carStructure)carBody.remove(carStructure);
  carStructure=new THREE.Group();carStructure.name='Estrutura_cabine_V04';
  model.updateMatrixWorld(true);const structuralParts=[];
  model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
  for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
- carBody.add(model,carStructure);model.visible=mode!=='cockpit';activeLivery=value;status('');
+ carBody.add(model,carStructure);model.visible=carStructure.visible=mode!=='cockpit';activeLivery=value;status('');
  preferences.update({livery:value});if(ready)carAudio.effect('paint');
  }finally{
   if(token===loadToken){
@@ -196,7 +203,7 @@ async function cycleLivery(){
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
 // nearest (R key): only the player's car goes back on track; rivals, laps and fuel carry on.
-function reset(nearest=false){mobile?.setHandbrake(false);if(nearest)car.recover();else{car.resetGrid();if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;updateCar(1);updateCamera(1);}
+function reset(nearest=false){mobile?.setHandbrake(false);if(nearest)car.recover();else{car.resetGrid();if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
 function location(s){const sections=data.meta.sections||names;let name=sections[0][1];for(const [d,n] of sections)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
@@ -212,7 +219,7 @@ function drawMap(){
 }
 const roughRotation=new THREE.Quaternion(),roughEuler=new THREE.Euler(),chaseForward=new THREE.Vector3(1,0,0),chaseTarget=new THREE.Vector3(1,0,0);let roughRide=0;
 function updateCar(dt){
- cockpit.root.visible=mode==='cockpit'&&!gridPreview();if(model)model.visible=!cockpit.root.visible;
+ cockpit.root.visible=mode==='cockpit'&&!gridPreview();if(model)model.visible=carStructure.visible=!cockpit.root.visible;
  const p=car.surface,speed=Math.hypot(car.vx,car.vy),roughTarget=p.onRoad||!car.wheelsDown?0:clamp(speed/22,0,1);
  roughRide=dt>=1?0:roughRide+(roughTarget-roughRide)*(1-Math.exp(-dt*9));
  // Distance-based suspension motion stops at rest and fades on returning to asphalt.
@@ -267,8 +274,8 @@ function setCameraMode(value){
  const previous=mode,keepView=ready&&value==='orbit'&&previous!=='orbit'&&(followInitialized||wasGridPreview);
  mode=value;orbitFrom=null;followInitialized=false;orbit.enabled=value==='orbit';$('camera').value=value;
  preferences.update({camera:value});
- orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;
- if(cockpit)cockpit.root.visible=value==='cockpit';if(model)model.visible=value!=='cockpit';
+ orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();
+ if(cockpit)cockpit.root.visible=value==='cockpit';if(model)model.visible=carStructure.visible=value!=='cockpit';
  document.body.classList.toggle('cockpit-mode',value==='cockpit');
  $('cockpitButton').classList.toggle('active',value==='cockpit');$('cockpitButton').setAttribute('aria-pressed',String(value==='cockpit'));
  if(!keepView)camera.fov=value==='cockpit'?74:58;camera.near=value==='cockpit'?.025:.1;camera.updateProjectionMatrix();
@@ -340,8 +347,8 @@ document.addEventListener('mousemove',e=>{
  // On foot (pit stop, story-mode paddock) the mouse belongs to the walking camera.
  if(!pointerLocked||paused||pitstop?.opened||immersive?.onFoot()||(!e.movementX&&!e.movementY))return;
  if(isInside()){
-  headLook.yaw=clamp(headLook.yaw+e.movementX*.0025,-1.45,1.45);
-  headLook.pitch=clamp(headLook.pitch-e.movementY*.0025,-.60,.45);
+  // The cockpit turns right round; while B holds the look back, the look to return to stays put.
+  if(!lookBack.held)turnHead(headLook,e.movementX,e.movementY,mode==='cockpit'?HEAD_YAW_COCKPIT:HEAD_YAW_HOOD);
  }else{
   orbitFromView();
   orbit.rotateLeft(e.movementX*.0025);orbit.rotateUp(e.movementY*.0025);
@@ -366,19 +373,25 @@ function updateCamera(dt){
  const p=carRoot.position,vel=Math.hypot(car.vx,car.vy);
  if(gridPreview()&&!(phase==='prepare'&&previewOrbit)){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
+ // Holding B counts as looking around: the 3 s return waits until it is let go.
+ const photo=mode==='cockpit'?cockpitView:null,lookingBack=lookBackAllowed()&&pressed('KeyB');
+ if(lookingBack)cameraReturn.manual(performance.now());
  const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
  // Speed widens the view a little; rough ground and very high speed add a fine shake.
- const speedFov=(mode==='cockpit'?74:58)+(mode==='aerial'||mode==='orbit'&&!orbitSpeedFov?0:clamp((vel-12)/45,0,1)*(mode==='cockpit'?5:7));
- if(Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1?speedFov:camera.fov+(speedFov-camera.fov)*(1-Math.exp(-dt*3));camera.updateProjectionMatrix();}
- const shakeTime=performance.now()/1000,shake=paused||mode==='aerial'||mode==='orbit'?0:roughRide*.05+clamp((vel-42)/18,0,1)*.01;
+ const speedFov=photo?photo.fov:(mode==='cockpit'?74:58)+(mode==='aerial'||mode==='orbit'&&!orbitSpeedFov?0:clamp((vel-12)/45,0,1)*(mode==='cockpit'?5:7));
+ if(Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1||photo?speedFov:camera.fov+(speedFov-camera.fov)*(1-Math.exp(-dt*3));camera.updateProjectionMatrix();}
+ const shakeTime=performance.now()/1000,shake=photo||paused||mode==='aerial'||mode==='orbit'?0:roughRide*.05+clamp((vel-42)/18,0,1)*.01;
  if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
+ lookBack.update(dt,lookingBack,headLook,headView);
  if(mode==='cockpit'||mode==='hood'){
-  // Fixed local mount keeps the hood/dashboard still relative to the camera.
-  const eye=mode==='hood'?hoodEye:cockpit.eye;
+  // Fixed local mount keeps the hood/dashboard still relative to the camera; turned far
+  // round in the cockpit, the head leans in toward the middle of the car.
+  neckTwist(mode==='cockpit'&&!photo?headView.yaw:0,twist);
+  const view=photo??headView,eye=photo?photoEye:mode==='hood'?hoodEye:headEye.fromArray(twist).add(cockpit.eye),drop=photo?0:.20;
   carRoot.updateMatrixWorld(true);camera.position.copy(eye).applyMatrix4(carBody.matrixWorld);
-  look.set(Math.cos(headLook.pitch)*Math.cos(headLook.yaw)*20,Math.sin(headLook.pitch)*20-.20,Math.cos(headLook.pitch)*Math.sin(headLook.yaw)*20).add(eye).applyMatrix4(carBody.matrixWorld);
+  look.set(Math.cos(view.pitch)*Math.cos(view.yaw)*20,Math.sin(view.pitch)*20-drop,Math.cos(view.pitch)*Math.sin(view.yaw)*20).add(eye).applyMatrix4(carBody.matrixWorld);
   camera.position.y+=Math.sin(shakeTime*41)*shake*.35;look.y+=Math.sin(shakeTime*29+1.3)*shake*2;
-  camera.up.set(0,1,0).transformDirection(carBody.matrixWorld);camera.lookAt(look);
+  camera.up.set(0,1,0).transformDirection(carBody.matrixWorld);camera.lookAt(look);if(photo?.roll)camera.rotateZ(photo.roll);
  } else if(mode==='orbit'){
   orbitTarget.copy(p).add(new THREE.Vector3(0,.85,0));
   orbitDelta.subVectors(orbitTarget,orbit.target);camera.position.add(orbitDelta);orbit.target.copy(orbitTarget);
@@ -463,7 +476,7 @@ function lapBanner(dt){
  }
  if(lapShown>0){lapShown-=dt;if(lapShown<=0)banner.hidden=true;}
 }
-function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
+function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;menu(true);}
  if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}immersive?.stepFree(1/120,command);}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
@@ -486,7 +499,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  // Render the reflection from this frame's car pose before displaying the cockpit.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
  if(mode==='cockpit'&&!gridPreview()){
-  cockpit.root.visible=false;driver.root.visible=false;carStructure.visible=false;
+  cockpit.root.visible=false;driver.root.visible=false;
   cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carBody.matrixWorld);
   look.set(-30,1.14,0).applyMatrix4(carBody.matrixWorld);
   cockpit.rearCamera.up.set(0,1,0).transformDirection(carBody.matrixWorld);cockpit.rearCamera.lookAt(look);
@@ -495,7 +508,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
   renderer.setRenderTarget(cockpit.mirrorTarget);renderer.render(scene,cockpit.rearCamera);renderer.setRenderTarget(null);
   tyreSmoke.material.uniforms.viewport.value=renderer.domElement.height;
   mirrorFrame=renderedFrame;
-  renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;carStructure.visible=true;
+  renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;
  }
  renderer.render(scene,camera);
 }
@@ -644,7 +657,21 @@ async function loadCircuit(){
   // Interior cameras ride on the sprung body, so report them in its frame.
   cockpitInfo:()=>({...cockpit.info(),eyeLocal:carBody.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
    renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray()}),
-  viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs}),
+  viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs,
+   lookBack:{held:lookBack.held,allowed:lookBackAllowed(),amount:lookBack.amount,side:lookBack.side,viewYaw:headView.yaw,viewPitch:headView.pitch,eyeShift:[...twist]},photo:cockpitView&&structuredClone(cockpitView)}),
+  // Interior photography: a fixed cockpit-local pose {eye:[x,y,z],yaw,pitch,fov,hideDriver,roll?} replaces the
+  // head look (no clamps, shake or speed widening) while in the cockpit camera; null returns to play.
+  setCockpitView:view=>{
+   if(view){
+    const eye=view.eye??cockpit.eye.toArray(),number=value=>typeof value==='number'&&Number.isFinite(value);
+    if(!Array.isArray(eye)||eye.length!==3||!eye.every(number)||![view.yaw??0,view.pitch??0,view.roll??0,view.fov??74].every(number))throw new Error('setCockpitView: eye [x,y,z], yaw, pitch e fov numéricos');
+    cockpitView={eye:[...eye],yaw:view.yaw??0,pitch:view.pitch??0,roll:view.roll??0,fov:clamp(view.fov??74,5,150),hideDriver:!!view.hideDriver};photoEye.fromArray(eye);
+   }else cockpitView=null;
+   // The driver's group also carries the wheel, levers and pedals he works: only his body is hidden.
+   const hide=!!cockpitView?.hideDriver;if(hide!==photoHidDriver){const controls=new Set([cockpit.wheel,...cockpit.controls.parts]);for(const part of driver.root.children)if(!controls.has(part))part.visible=!hide;photoHidDriver=hide;}
+   if(!cockpitView){camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
+   lookBack.reset();return cockpitView&&structuredClone(cockpitView);
+  },
   cameraSnapshot:()=>({position:camera.position.toArray(),direction:camera.getWorldDirection(new THREE.Vector3()).toArray(),fov:camera.fov,roll:Math.asin(clamp(new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion).y,-1,1)),target:orbit.target.toArray(),car:carRoot.position.toArray(),distance:camera.position.distanceTo(orbit.target),ground:car.sample(camera.position.x,-camera.position.z).z}),
   wheelSnapshot:()=>{carRoot.updateMatrixWorld(true);const inverse=carRoot.getWorldQuaternion(new THREE.Quaternion()).invert();return wheels.map(w=>{const axle=new THREE.Vector3(0,0,1).applyQuaternion(w.obj.getWorldQuaternion(new THREE.Quaternion())).applyQuaternion(inverse);return {name:w.obj.name,front:w.front,angle:Math.atan2(axle.x,axle.z),axle:axle.toArray()};});},
   get state(){return {paused,automatic,mode,livery:activeLivery,wheels:wheels.length,drawCalls:renderer.info.render.calls};}};

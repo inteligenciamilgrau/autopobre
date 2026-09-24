@@ -21,7 +21,9 @@ with sync_playwright() as p:
   page.wait_for_timeout(2500);page.screenshot(path=str(ROOT/f'renders/pitstop_servicos_{mobile}.png'))
   wallet=page.evaluate('pit.wallet');page.click('[data-repair="motor"][data-kind="proper"]')
   page.click('[data-repair="freios"][data-kind="proper"]');page.click('[data-repair="suspensao"][data-kind="proper"]')
-  assert page.evaluate('pit.service.queue.length')==2;assert page.evaluate('pit.wallet')<wallet
+  # Engine and both front wheels are different places of the car: the crew works them together.
+  assert page.evaluate("pit.service.jobs.map(j=>j.id).join()")=='motor,freios,suspensao' and page.evaluate('pit.service.queue.length')==0;assert page.evaluate('pit.wallet')<wallet
+  assert page.locator('#pitActive progress').count()==3
   page.screenshot(path=str(ROOT/f'renders/pitstop_fila_{mobile}.png'))
   page.click('#pitSettings');elapsed=page.evaluate('pit.service.job.elapsed');page.wait_for_timeout(200);assert page.evaluate('pit.service.job.elapsed')==elapsed
   page.click('#settingsResume');wallet=page.evaluate('pit.wallet');page.click('#pitCoffee');wait_js(page,'pit.coffee!==null')

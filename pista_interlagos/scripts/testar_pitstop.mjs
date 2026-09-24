@@ -25,24 +25,39 @@ assert(service.startFuel(2));service.step(2.5);assert.equal(fuel,4,'refuel is gr
 wallet=0;assert(!service.startFuel(2));assert(!service.startRepair('tanque','proper'));assert.equal(fuel,4);
 const account=Object.create(PitStop.prototype);account.mode={active:true,state:{cash:10,profile:{fund:100}},save(){}};
 assert(account.spend(50,true));assert.equal(account.mode.state.cash,0);assert.equal(account.mode.state.profile.fund,60);account.refund(20);assert.equal(account.mode.state.cash,4);assert.equal(account.mode.state.profile.fund,76);assert(!account.spend(1000));assert.equal(account.wallet,80,'service uses cash first and refunds its original funding sources');
-// Different jobs are paid once, queued, and completed without another click.
-const queuedCondition=new CarCondition();for(const id of ['motor','freios','suspensao'])queuedCondition.damage(id,.6);
+// Jobs in different places of the car are worked at the same time; those sharing a
+// place (or needing more mechanics than are free) wait, paid once, and start by themselves.
+const queuedCondition=new CarCondition();for(const id of ['motor','freios','suspensao','pneus','tanque'])queuedCondition.damage(id,.6);
 let queueWallet=500,queueFuel=3,queueCharges=0;
 const queuedService=new PitService({condition:queuedCondition,getFuel:()=>queueFuel,setFuel:v=>queueFuel=v,pay:cost=>{queueWallet-=cost;queueCharges++;return true;},refund:cost=>queueWallet+=cost});
 for(const id of ['motor','freios','suspensao'])assert(queuedService.startRepair(id,'proper'));
-assert.equal(queuedService.queue.length,2);assert(!queuedService.startRepair('freios','patch'));assert.equal(queueCharges,3);
-queuedService.step(2);assert(queuedCondition.quality.motor>.4);assert.equal(queuedCondition.quality.freios,.4,'queued work has not started');
-const removed=queuedService.cancelQueued('suspensao');assert(removed>0);assert.equal(queuedService.queue.length,1);
-assert(queuedService.startFuel(2));assert(!queuedService.startFuel(2));
+assert.deepEqual(queuedService.jobs.map(job=>job.id),['motor','freios','suspensao'],'engine and both front wheels together');assert.equal(queuedService.queue.length,0);
+assert(!queuedService.startRepair('freios','patch'));assert.equal(queueCharges,3);
+assert(queuedService.startFuel(2));assert.equal(queuedService.jobs.length,4,'refuelling takes the fuel man, not a mechanic');assert(!queuedService.startFuel(2));
+assert(queuedService.startRepair('pneus','proper'));assert(queuedService.startRepair('tanque','proper'));
+assert.deepEqual(queuedService.queue.map(job=>job.id),['pneus','tanque']);
+assert.equal(queuedService.blocker(queuedService.queue[0]).job.id,'fuel','the right rear wheel waits for the filler beside it');
+assert.equal(queuedService.blocker(queuedService.queue[1]).job.id,'fuel','no tank repair while refuelling');
+queuedService.step(2);assert(['motor','freios','suspensao'].every(id=>queuedCondition.quality[id]>.4),'three jobs at once');assert.equal(queuedCondition.quality.pneus,.4,'queued work has not started');
+const removed=queuedService.cancelQueued('tanque');assert(removed>0);assert.deepEqual(queuedService.queue.map(job=>job.id),['pneus']);
+queuedService.step(3.5);assert.equal(queuedService.blocker(queuedService.queue[0])?.crew,true,'with the fuel done the tyres still need two free mechanics');
 for(let i=0;i<60*120;i++)queuedService.step(1/120);
-assert.equal(queuedCondition.quality.motor,1);assert.equal(queuedCondition.quality.freios,1);assert.equal(queuedCondition.quality.suspensao,.4);assert.equal(queueFuel,5);assert.equal(queuedService.job,null);
+for(const id of ['motor','freios','suspensao','pneus'])assert.equal(queuedCondition.quality[id],1);assert.equal(queuedCondition.quality.tanque,.4);assert.equal(queueFuel,5);assert.equal(queuedService.job,null);assert.equal(queuedService.queue.length,0);
+// Two orders for the same place never overlap: the tyres start only after the fuel.
+const placeService=new PitService({condition:new CarCondition(),getFuel:()=>0,setFuel(){},pay:()=>({}),refund(){}});placeService.condition.damage('pneus',.5);
+assert(placeService.startFuel(4));assert(placeService.startRepair('pneus','proper'));let overlap=false,tyresAt=null;
+for(let t=0;t<30;t+=.05){placeService.step(.05);const ids=placeService.jobs.map(job=>job.id);if(ids.includes('fuel')&&ids.includes('pneus'))overlap=true;if(tyresAt===null&&ids.includes('pneus'))tyresAt=t;}
+assert(!overlap);assert(tyresAt>=8-.1,'tyres after the 8 s refuel');
 // Refund each order to its own original cash/fund sources, even after buying food.
 account.mode.state.cash=100;account.mode.state.profile.fund=300;
 const accountingCondition=new CarCondition();accountingCondition.damage('motor',.5);accountingCondition.damage('freios',.8);
 const accountingService=new PitService({condition:accountingCondition,getFuel:()=>3,setFuel(){},pay:cost=>account.spend(cost,true)?{...account.payment}:false,refund:(cost,job)=>account.refund(cost,job.payment)});
 assert(accountingService.startRepair('motor','proper'));assert(accountingService.startRepair('freios','proper'));assert(account.spend(4));
-accountingService.step(accountingService.job.seconds/2);accountingService.cancel();
-assert.equal(account.mode.state.cash,55);assert.equal(account.mode.state.profile.fund,296);assert.equal(account.wallet,351,'only installed work and food remain charged');
+// Engine and brakes are worked together: half the engine and part of the brakes stay
+// installed; the engine was paid in cash, the brakes with the last R$ 10 and the fund.
+accountingService.step(accountingService.job.seconds/2);const brakes=accountingService.jobs.find(job=>job.id==='freios'),brakeRefund=Math.floor(brakes.cost*(1-brakes.progress)*100)/100;assert(brakes.progress>0&&brakes.progress<1);accountingService.cancel();
+const near=(a,b,m)=>assert(Math.abs(a-b)<1e-6,`${m}: ${a} vs ${b}`);
+near(account.mode.state.cash,45+brakeRefund*10/60,'cash back to cash');near(account.mode.state.profile.fund,246+brakeRefund*50/60,'fund back to the fund');near(account.wallet,291+brakeRefund,'only installed work and food remain charged');
 assert.deepEqual(CAFE_MENU.map(item=>item.id),['cafe','pao','doce']);assert(CAFE_MENU.every(item=>item.price>0));
 condition.reset();for(const p of CAR_PARTS){condition.damage(p.id,.65);const quote=condition.quote(p.id,'proper');condition.applyRepair(quote,1);}assert.equal(condition.health,1);assert.equal(condition.factors.power,1);
 

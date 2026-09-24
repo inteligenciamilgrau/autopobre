@@ -8,8 +8,10 @@ export const GATE=Object.freeze({'-1':[1,-1],1:[-1,1],2:[-1,-1],3:[0,1],4:[0,-1]
 const gate=g=>GATE[g]??[0,0];
 
 // Seconds a hand needs between two places; a return to the wheel is a little slower.
-export const REACH=Object.freeze({wheel:{knob:.22,handbrake:.19},knob:{wheel:.27,handbrake:.17},handbrake:{wheel:.27,knob:.2}});
-const ANTICIPATE=REACH.wheel.knob+.06,PULL_MIN=.35,LINGER=.16;
+// The car has no handbrake lever (its battery key sits there), so the right hand
+// only travels between the wheel and the gear knob.
+export const REACH=Object.freeze({wheel:{knob:.22},knob:{wheel:.27}});
+const ANTICIPATE=REACH.wheel.knob+.06,LINGER=.16;
 
 export const minimumJerk=t=>{t=clamp(t,0,1);return t*t*t*(10+t*(6*t-15));};
 const approach=(value,target,rate,dt)=>value+(target-value)*(1-Math.exp(-rate*dt));
@@ -38,7 +40,7 @@ export class DriverControls{
   this.visualGear=Number.isInteger(gear)&&gear!==0?gear:1;this.lever=[...gate(this.visualGear)];this.shift=null;
   this.hand={from:'wheel',to:'wheel',t:1,duration:REACH.wheel.knob,id:0};
   this.clutch=0;this.leftFoot=0;this.leftLinger=0;this.slowRelease=false;
-  this.throttle=0;this.brake=0;this.footOnBrake=0;this.handbrake=0;this.pullHold=0;
+  this.throttle=0;this.brake=0;this.footOnBrake=0;
   this.lastKmh=null;this.kmhRate=0;this.anticipate=0;this.cooldown=0;this.linger=0;this.shifts=0;
  }
  // state: throttle, brake, handbrake, gear (physics), kmh; returns the pose of controls and limbs.
@@ -56,18 +58,16 @@ export class DriverControls{
   if(soon>-.05&&soon<ANTICIPATE&&this.cooldown===0)this.anticipate=Math.max(this.anticipate,.6);
   else if(this.anticipate>0){this.anticipate=Math.max(0,this.anticipate-dt);if(this.anticipate===0)this.cooldown=.6;}
   const needShift=g!==this.visualGear;if(needShift)this.anticipate=0;
-  // Hand priority: finish a throw, then the handbrake, then a pending or expected shift.
-  this.pullHold=pulling?PULL_MIN:Math.max(0,this.pullHold-dt);
-  const wantsHandbrake=pulling||this.pullHold>0||this.handbrake>.04;
-  const want=this.shift?'knob':wantsHandbrake?'handbrake':needShift||this.anticipate>0||this.linger>0?'knob':'wheel';
+  // Hand priority: finish a throw, then a pending or expected shift.
+  const want=this.shift||needShift||this.anticipate>0||this.linger>0?'knob':'wheel';
   if(want!==this.hand.to){
    const from=this.hand.t>=1?this.hand.to:'moving';
    const duration=from==='moving'?.2:REACH[from][want];
    this.hand={from,to:want,t:0,duration,id:this.hand.id+1};
   } else this.hand.t=Math.min(1,this.hand.t+dt/this.hand.duration);
-  const onKnob=this.hand.to==='knob'&&this.hand.t>=1,onHandbrake=this.hand.to==='handbrake'&&this.hand.t>=1;
+  const onKnob=this.hand.to==='knob'&&this.hand.t>=1;
   // Left foot: covers the clutch while a change is expected, presses it for the throw,
-  // holds it at a standstill in gear and during a handbrake turn.
+  // holds it at a standstill in gear and while the rear brake locks for a slide.
   const shifting=!!this.shift||needShift&&this.hand.to==='knob';
   const standing=kmh<4&&throttle<.05,handbrakeTurn=pulling&&kmh>10;
   const pressClutch=shifting&&this.hand.t>.5||standing||handbrakeTurn;
@@ -85,14 +85,11 @@ export class DriverControls{
   const lift=shifting?1-this.clutch*.9:1;
   this.throttle=approach(this.throttle,this.footOnBrake<.02?throttle*lift:0,18,dt);
   this.brake=approach(this.brake,this.footOnBrake>.98?brake:0,16,dt);
-  // Hydraulic lever: pulled while held (with a minimum visible pull), springs back when let go.
-  const pull=onHandbrake&&(pulling||this.pullHold>0)?1:0;
-  this.handbrake=approach(this.handbrake,pull,pull?16:13,dt);if(!pull&&this.handbrake<.04)this.handbrake=0;
   return this.info();
  }
  info(){
   return {hand:{from:this.hand.from,to:this.hand.to,t:this.hand.t,s:minimumJerk(this.hand.t),id:this.hand.id},lever:[...this.lever],visualGear:this.visualGear,
    shifting:!!this.shift,clutch:this.clutch,leftFoot:this.leftFoot,throttle:this.throttle,brake:this.brake,footOnBrake:this.footOnBrake,
-   footLift:Math.sin(Math.PI*this.footOnBrake),handbrake:this.handbrake,anticipating:this.anticipate>0,shifts:this.shifts};
+   footLift:Math.sin(Math.PI*this.footOnBrake),anticipating:this.anticipate>0,shifts:this.shifts};
  }
 }

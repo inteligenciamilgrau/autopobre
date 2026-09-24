@@ -203,15 +203,30 @@ const ROLES=[
  ['Gasolina',{hat:'cap',skin:0xc68e6a,hairStyle:'curly'},[-2.4,-1.45],'stand'],
  ['Mecanico',{hat:'cap',skin:0xd9a37f,mustache:true,belly:.6},[.25,-1.6],'ready'],
 ];
-const JOBS={
- fuel:[[4,[-.7,1.55],'fuel','fuel']],
- motor:[[5,[2.85,.45],'work','wrench'],[1,[3.2,-.5],'jack']],
- cambio:[[5,[-.1,-1.45],'kneel','wrench']],
- freios:[[5,[1.53,1.42],'kneel','gun'],[1,[3.2,-.5],'jack']],
- suspensao:[[2,[1.53,-1.45],'kneel','gun'],[1,[3.2,-.5],'jack']],
- pneus:[[3,[-1.12,-1.45],'kneel','gun'],[5,[-1.12,1.42],'kneel','gun']],
- tanque:[[5,[-2.95,-.25],'kneel','wrench']],
+// Where each service is done (car frame f forward, r right) and how. The fuel man
+// refuels; the three mechanics (front wheel, rear wheel and the engine man) share the
+// other jobs, each taking the next job still unmanned and preferring his own trade,
+// so jobs in different places (car-condition.js) are worked at the same time. The
+// jack man lifts the front for brakes and suspension.
+const SLOTS={
+ fuel:[[[-.7,1.55],'fuel','fuel']],
+ motor:[[[2.85,.45],'work','wrench']],
+ cambio:[[[-.1,-1.45],'kneel','wrench']],
+ freios:[[[1.53,1.42],'kneel','gun']],
+ suspensao:[[[1.53,-1.45],'kneel','gun']],
+ pneus:[[[-1.12,-1.45],'kneel','gun'],[[-1.12,1.42],'kneel','gun']],
+ tanque:[[[-2.95,-.25],'kneel','wrench']],
 };
+const PREFER={motor:[5,2,3],cambio:[5,3,2],freios:[2,5,3],suspensao:[2,5,3],pneus:[3,5,2],tanque:[5,3,2]};
+function crewTasks(jobs){
+ const tasks=new Map(),free=[2,3,5];
+ for(const id of jobs){
+  if(id==='fuel'){const [at,pose,act]=SLOTS.fuel[0];tasks.set(4,{at,pose,act});continue;}
+  for(const [at,pose,act] of SLOTS[id]??[]){const who=(PREFER[id]??free).find(i=>free.includes(i));if(who===undefined)break;free.splice(free.indexOf(who),1);tasks.set(who,{at,pose,act});}
+ }
+ if(jobs.includes('freios')||jobs.includes('suspensao'))tasks.set(1,{at:[3.2,-.5],pose:'jack',act:null});
+ return tasks;
+}
 export class PitCrew{
  // homes: [{x,y,yaw,pose}] in track coordinates (y north); ground(x,y) gives the floor height.
  constructor(people,{homes,ground}){
@@ -219,11 +234,11 @@ export class PitCrew{
   this.actors=ROLES.map(([name,extra],i)=>{const person=people.person({...CREW,...extra});person.name=name;this.root.add(person);const h=homes[i];const a=new Actor(person,h.x,h.y,h.yaw);a.go(h.x,h.y,h.yaw,h.pose);return a;});
   const hand=i=>this.actors[i].person.userData.rig.limbs[1].hand;
   // Wheel guns, fuel dump can, spanner and the front jack.
-  for(const i of [2,3,5]){const g=people.prop([piece(block(.09,.2,.1),0x2a2d30,[0,-.06,0]),piece(tube(.025,.025,.16,10),0xb9bec2,[0,-.22,0]),piece(block(.06,.1,.05),0xf0c419,[.07,-.02,0])],hand(i),'Pistola_pneumatica');if(i===5)this.gun=g;}
+  // Each mechanic has a wheel gun and a spanner and shows the one his job needs.
+  this.tools=[2,3,5].map(i=>({i,gun:people.prop([piece(block(.09,.2,.1),0x2a2d30,[0,-.06,0]),piece(tube(.025,.025,.16,10),0xb9bec2,[0,-.22,0]),piece(block(.06,.1,.05),0xf0c419,[.07,-.02,0])],hand(i),'Pistola_pneumatica'),spanner:people.prop([piece(block(.03,.28,.015),0xc9ced2,[0,-.12,0])],hand(i),'Chave_boca')}));
   // Dump can, origin at its handle; the spout tip is at SPOUT (filler at the right rear quarter).
   this.can=people.prop([piece(block(.34,.38,.18),0xc81d25,[-.02,-.26,0]),piece(block(.22,.03,.04),0x2a2d30,[0,-.02,0]),piece(block(.03,.06,.04),0x2a2d30,[-.1,-.05,0]),piece(block(.03,.06,.04),0x2a2d30,[.1,-.05,0]),piece(tube(.024,.024,.34,8),0x2a2d30,[.27,-.21,0],[0,0,-2.27]),piece(tube(.032,.032,.04,8),0xf0c419,[-.12,-.06,.05])],this.root,'Galao_gasolina');
   this.spout=new THREE.Vector3(.4,-.31,0);this.filler=new THREE.Vector3();
-  this.spanner=people.prop([piece(block(.03,.28,.015),0xc9ced2,[0,-.12,0])],hand(5),'Chave_boca');
   const jack=this.actors[1].person;people.prop([piece(block(.9,.14,.3),0xc81d25,[1.3,.12,0]),piece(tube(.06,.06,.04,12),0x2a2d30,[1.7,.07,.14],[Math.PI/2,0,0]),piece(tube(.06,.06,.04,12),0x2a2d30,[1.7,.07,-.14],[Math.PI/2,0,0]),piece(block(.2,.04,.24),0x3a3f44,[1.72,.21,0]),piece(tube(.022,.022,.85,8),0xb9bec2,[.74,.6,0],[0,0,.28])],jack,'Macaco_jacare');
   // Lollipop: the pole follows the chief's right hand; the disc turns to the driver.
   this.discs={stop:new THREE.MeshBasicMaterial({map:lollipop('FREIO','#c81d25'),transparent:true,side:THREE.DoubleSide}),go:new THREE.MeshBasicMaterial({map:lollipop('ENGATA\n1ª','#1f8a3b'),transparent:true,side:THREE.DoubleSide})};
@@ -232,11 +247,11 @@ export class PitCrew{
   this.disc=new THREE.Mesh(new THREE.CircleGeometry(.23,28),this.discs.stop);this.root.add(this.pole,this.disc);
   this.handPos=new THREE.Vector3();this.poleDir=new THREE.Vector3();this.up=new THREE.Vector3(0,1,0);this.visible=true;
  }
- update(dt,{car,active,job,finished,departing,near}){
+ update(dt,{car,active,jobs=[],finished,departing,near}){
   this.root.visible=near;if(!near)return;
   const h=car.heading,cos=Math.cos(h),sin=Math.sin(h),toWorld=(f,r)=>[car.x+cos*f+sin*r,car.y+sin*f-cos*r];
   const facing=(f,r)=>{const [x,y]=toWorld(f,r),[tx,ty]=toWorld(Math.max(-2,Math.min(2,f)),Math.max(-.5,Math.min(.5,r)));return Math.atan2(ty-y,tx-x);};
-  const tasks=new Map((active?JOBS[job]??[]:[]).map(([role,at,pose,act])=>[role,{at,pose,act}]));
+  const tasks=active?crewTasks(jobs):new Map();
   const local=(x,y)=>{const dx=x-car.x,dy=y-car.y;return [dx*cos+dy*sin,dx*sin-dy*cos];},parked=Math.hypot(car.vx??0,car.vy??0)<1;
   this.actors.forEach((actor,i)=>{
    let x,y,yaw,pose;
@@ -254,7 +269,7 @@ export class PitCrew{
    const [fx,fy]=toWorld(-.7,.79),turn=Math.atan2(fy-fuel.y,fx-fuel.x);this.filler.set(fx,this.ground(fx,fy)+.9,-fy);
    this.can.rotation.set(0,turn,-.35);this.can.position.copy(this.filler).sub(this.spout.clone().applyEuler(this.can.rotation));
   }else{fuel.person.userData.rig.limbs[1].hand.getWorldPosition(this.can.position);this.can.rotation.set(0,fuel.yaw,0);}
-  if(this.gun)this.gun.visible=this.actors[5].act==='gun';this.spanner.visible=!this.gun?.visible;
+  for(const t of this.tools){const act=this.actors[t.i].act;t.gun.visible=act==='gun'||!act&&t.i!==5;t.spanner.visible=!t.gun.visible;}
   // Pole along the hand, disc square to the driver (or to the lane when idle).
   const chief=this.actors[0],hand=chief.person.userData.rig.limbs[1].hand;chief.person.updateMatrixWorld(true);
   hand.getWorldPosition(this.handPos);this.poleDir.set(0,-1,0).transformDirection(hand.matrixWorld);

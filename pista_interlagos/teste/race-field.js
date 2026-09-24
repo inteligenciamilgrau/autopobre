@@ -1,6 +1,6 @@
 import {TestCar,clamp,wrap,steerLimit,WHEELBASE} from './physics.js?v=20260923-capotagem';
 import {RIVAL_ROSTER,GRID_ROW_SPACING} from './race-roster.js';
-import {pitGeometry,wallContact} from './pit-lane.js';
+import {pitGeometry,wallContact,pitLane,curveloPitFrame,CURVELO_PIT} from './pit-lane.js';
 const HALF_LENGTH=2.38,HALF_WIDTH=.93,MASS=1250,INERTIA=MASS*(4.76**2+1.86**2)/12;
 const axes=c=>[[Math.cos(c.heading),Math.sin(c.heading)],[-Math.sin(c.heading),Math.cos(c.heading)]];
 const center=c=>[c.x+.08*Math.cos(c.heading),c.y+.08*Math.sin(c.heading)];
@@ -96,13 +96,48 @@ export function racingLine(data){
  for(let t=2*n-1,id=-1,run=0;t>=0;t--){const i=t%n;if(owner[i]>=0){id=owner[i];run=0;}else run++;if(t<n){cornerAt[i]=id;cornerDist[i]=run*ds;}}
  const line={off,lo,hi,laneLo,laneHi,curve,centre,corners,cornerAt,cornerDist,ds};lines.set(data,line);return line;
 }
+// --- In-lap: after the flag a rival runs one more lap, takes the pit lane and parks on the
+// working lane. Cars line up in the order they arrive, the first furthest down the garage row,
+// so nobody pulls over beside a parked car; Box 99, the café bay and the way out stay clear.
+const COOL_PACE=24,PIT_PACE=22,PIT_LIMIT=15.5,INLAP_MERGE=220,SLOT_GAP=6.6,routes=new WeakMap();
+export function pitRoute(data){
+ if(routes.has(data))return routes.get(data);
+ const L=data.meta.reconstructed_xy_m,a=data.samples,curvelo=!data.pit&&data.meta.id==='curvelo',frame=data.pit??(curvelo?curveloPitFrame(data):null);
+ if(!frame){routes.set(data,null);return null;}
+ const track=s=>{s=((s%L)+L)%L;let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(a[m][0]<=s)lo=m;else hi=m-1;}const p=a[lo],q=a[(lo+1)%a.length],u=(s-p[0])/((lo===a.length-1?L:q[0])-p[0]);return p.map((v,k)=>v+(q[k]-v)*u);};
+ // Stations along the lane (u from its entry): centre, direction, and the centres of the fast
+ // lane and of the working lane on the garage side (d to the lane's left).
+ let st,entryS,u0,limit;
+ if(curvelo){
+  // Curvelo's service lane is an offset of the main straight, 300 m from its entry (pitLane).
+  entryS=L-150;u0=150;limit={from:60,to:300};st=[];
+  for(let u=0;u<=300;u+=2){const p=track(u-150),lane=pitLane(data,u-150),blend=lane.offset/CURVELO_PIT.offset;st.push({u,x:p[1]+p[9]*lane.offset,y:p[2]+p[10]*lane.offset,fast:-lane.halfWidth/2*blend,work:lane.halfWidth/2});}
+  st.forEach((q,i)=>{const p=st[Math.max(0,i-1)],r=st[Math.min(st.length-1,i+1)],len=Math.hypot(r.x-p.x,r.y-p.y);q.tx=(r.x-p.x)/len;q.ty=(r.y-p.y)/len;});
+ }else{
+  const c=Object.fromEntries(frame.columns.map((k,i)=>[k,i]));entryS=frame.entry_main_s;u0=0;limit=frame.limit;
+  st=frame.samples.map(p=>{const n=Math.hypot(p[c.tx],p[c.ty]);return {u:p[c.s],x:p[c.x],y:p[c.y],tx:p[c.tx]/n,ty:p[c.ty]/n,fast:(p[c.lane_lo]+p[c.fast_hi])/2,work:(p[c.fast_hi]+p[c.lane_hi])/2};});
+ }
+ // Corner speed of each station over 12 m chords, gentle (4.5 m/s² sideways).
+ st.forEach((q,i)=>{const p=st[Math.max(0,i-3)],r=st[Math.min(st.length-1,i+3)],turn=Math.abs(wrap(Math.atan2(r.ty,r.tx)-Math.atan2(p.ty,p.tx)))/Math.max(1,r.u-p.u);q.v=Math.min(PIT_PACE,Math.sqrt(4.5/Math.max(turn,1e-4)));});
+ const at=u=>{let lo=0,hi=st.length-2;while(lo<hi){const m=(lo+hi+1)>>1;if(st[m].u<=u)lo=m;else hi=m-1;}const p=st[lo],q=st[lo+1],t=clamp((u-p.u)/(q.u-p.u),0,1),mix=k=>p[k]+(q[k]-p[k])*t,n=Math.hypot(mix('tx'),mix('ty'));return {x:mix('x'),y:mix('y'),tx:mix('tx')/n,ty:mix('ty')/n,fast:mix('fast'),work:mix('work')};};
+ const e=track(entryS),s0=at(0),entryD=(s0.x-s0.ty*s0.fast-e[1])*e[9]+(s0.y+s0.tx*s0.fast-e[2])*e[10];
+ // Parking slots, first taken first: from the end of the garage row back to Box 99's way out,
+ // then from before the café back to where the working lane begins. A slot stays clear of the
+ // walls a metre either way along the lane (the lane narrows where the garage row ends).
+ const b=frame.box99,half=b.bay/2,first=(curvelo?80-u0:frame.garages[0])+2.9,slots=[],geo=pitGeometry(data);
+ const clear=u=>[-1.2,-.6,0,.6,1.2].every(du=>{const p=at(u+du);return !wallContact(geo,p.x-p.ty*p.work,p.y+p.tx*p.work,Math.atan2(p.ty,p.tx));});
+ const take=(from,to)=>{for(let u=from+u0;u>=to+u0;u-=.2)if(clear(u)&&!(slots.at(-1)-u<SLOT_GAP))slots.push(u);};
+ take(frame.garages[1]-2.9,b.s+half+8.5);take(b.cafe_s-half-6.4,first);
+ const route={stations:st,at,entryS,entryD,limit,slots:slots.map(u=>({u,d:at(u).work}))};
+ routes.set(data,route);return route;
+}
 // Seeded (mulberry32) so a check or a reference run can replay one race exactly.
 function random(seed){let t=seed>>>0;return ()=>{t=t+0x6D2B79F5>>>0;let r=Math.imul(t^t>>>15,1|t);r=r+Math.imul(r^r>>>7,61|r)^r;return ((r^r>>>14)>>>0)/4294967296;};}
 const trackGap=(from,to,L)=>{let gap=to.surface.s-from.surface.s;if(gap>L/2)gap-=L;if(gap<-L/2)gap+=L;return gap;};
 export class RaceField {
- constructor(data,{onStep,onReset,seed}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.line=racingLine(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
+ constructor(data,{onStep,onReset,seed}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
  reset(startS=0,{grid=false,seed=this.seed}={}){
-  this.time=0;this.collisions=0;this.cooldowns.clear();
+  this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;
   // A fresh seed per start: the same grid never races the same way twice.
   this.raceSeed=seed??Math.floor(Math.random()*4294967296);const rand=this.random=random(this.raceSeed),pick=(lo,hi)=>lo+(hi-lo)*rand();
   this.gridLeadIn=grid?(this.data.meta.reconstructed_xy_m-startS)%this.data.meta.reconstructed_xy_m:0;
@@ -124,7 +159,7 @@ export class RaceField {
     reaction:grid?.15+pick(0,.4)*(1.3-rating):0,merge:pick(1.2,3.5),form:1,lap:-1,slot,
     // Race-day form: some days a driver simply has more pace than the standings suggest.
     day:1+pick(-.012,.012),
-    lane,blend:1,blendTarget:1,mode:'line',rival:null,passSide:0,modeTime:0,cooldown:pick(1,3),defended:-1,rolled:-1,mistake:null,brakePedal:0,mistakes:0,passes:0,stuck:0};
+    lane,blend:1,blendTarget:1,mode:'line',rival:null,passSide:0,modeTime:0,cooldown:pick(1,3),defended:-1,rolled:-1,mistake:null,brakePedal:0,mistakes:0,passes:0,stuck:0,pit:null,yieldSide:0,yieldTime:0};
   });
   this.onReset?.();
  }
@@ -136,7 +171,10 @@ export class RaceField {
    c.draft=0;const fx=Math.cos(c.heading),fy=Math.sin(c.heading);if(c.vx*fx+c.vy*fy<15)continue;
    for(const o of bodies){if(o===c)continue;const dx=o.x-c.x,dy=o.y-c.y,f=dx*fx+dy*fy,side=Math.abs(dy*fx-dx*fy);if(f>4&&f<35&&side<1.9)c.draft=Math.max(c.draft,.38*(1-f/35)*(1-side/3.8));}
   }
+  // One physics step for a rival, then its race distance and the flag.
+  const drive=(r,input)=>{const c=r.car;r.tow=c.draft;c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&!r.finished&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}};
   for(const r of this.rivals){
+   if(r.pit){drive(r,this.pitInput(r,bodies,dt));continue;}
    const c=r.car,st=r.style,here=c.surface,i=c.index,d=here.d,speed=Math.hypot(c.vx,c.vy),along=c.vx*here.tx+c.vy*here.ty,fx=Math.cos(c.heading),fy=Math.sin(c.heading);
    const lap=Math.floor(Math.max(0,r.progress-this.gridLeadIn)/L);
    if(lap!==r.lap){r.lap=lap;r.form=r.day*(1+(this.random()-.5)*.03*(1.4-st.consistency));}
@@ -187,7 +225,21 @@ export class RaceField {
    const g0=4.9+Math.max(0,along)*st.followTime*(r.mode==='pass'?.4:bend&&toCorner<150?1:.5),closing=ahead?along-ahead.v:0;
    // Held up: close behind a car slower than this driver would go here.
    r.stuck=ahead&&ahead.gap<g0+4&&free>ahead.v+1?(r.stuck??0)+dt:Math.max(0,(r.stuck??0)-2*dt);
-   if(r.finished&&totalLaps){if(r.mode!=='line')Object.assign(r,{mode:'line',rival:null});r.blendTarget=0;target=Math.min(target,24);}
+   if(r.finished&&totalLaps){
+    // Past the flag the driver eases off (about 2.5 m/s²) rather than braking in front of the pack.
+    if(r.mode!=='line')Object.assign(r,{mode:'line',rival:null});target=Math.min(target,COOL_PACE+Math.max(0,32-2.5*(t-r.finishTime)));
+    const R=this.route,toEntry=R?((R.entryS-here.s)%L+L)%L:Infinity;
+    // In-lap: over to the pit side before the entry, then down the lane (pitInput).
+    if(toEntry<INLAP_MERGE){r.lane=R.entryD;r.blendTarget=1;if(toEntry<6+speed*.3)r.pit={k:0,u:-toEntry,slot:R.slots[Math.min(this.nextSlot++,R.slots.length-1)],parked:false};}
+    else{
+     // Blue flag: with a car still racing close behind, keep to the side of the road away
+     // from the racing line ahead until it has gone by.
+     let chased=false;for(const o of bodies){if(o===c||driverOf.get(o)?.finished)continue;const gap=trackGap(c,o,L);if(gap<-3&&gap>-70&&Math.abs(o.surface.d-d)<12)chased=true;}
+     if(chased&&!r.yieldSide){let sum=0;for(let j=0;j<40;j++)sum+=line.off[(i+j)%n];r.yieldSide=Math.abs(sum)>24?-Math.sign(sum):Math.sign(d)||1;}
+     r.yieldTime=chased?2.5:Math.max(0,r.yieldTime-dt);if(!r.yieldTime)r.yieldSide=0;
+     r.lane=r.yieldSide*99;r.blendTarget=r.yieldSide?1:0;
+    }
+   }
    else{
     if(r.mode==='line')r.blendTarget=t<r.merge?1:0;
     // Attack when closing (a tow, a better exit) or after being held up for a while. Near a corner
@@ -257,7 +309,7 @@ export class RaceField {
    r.blocked=speed<1.5&&target>4&&t>r.reaction+1?(r.blocked??0)+dt:0;
    if(r.blocked>2.5){r.recover=1.2+this.random();r.blocked=0;}
    if(r.recover>0){r.recover-=dt;Object.assign(input,{reverse:1,throttle:0,brake:0,left:alpha<0?1:0,right:alpha>0?1:0});}
-   r.tow=c.draft;c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&!r.finished&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}
+   drive(r,input);
   }
   for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
    if(Math.abs((bodies[i].z??bodies[i].surface.z)-(bodies[j].z??bodies[j].surface.z))>1.6)continue;
@@ -268,5 +320,25 @@ export class RaceField {
   if(this.onStep)this.rivals.forEach((r,i)=>this.onStep(r,i,commands[i],dt));
   return impacts;
  }
- info(){return {collisions:this.collisions,rivals:this.rivals.map(r=>({number:r.entry.number,name:r.entry.name,level:r.entry.level,style:r.style.name,x:r.car.x,y:r.car.y,heading:r.car.heading,speed:Math.hypot(r.car.vx,r.car.vy),progress:r.progress,finished:r.finished,mode:r.mode,blend:r.blend,draft:r.tow,mistakes:r.mistakes,passes:r.passes}))};}
+ // Pit lane after the flag: pure pursuit along the fast lane, over to the working lane for the
+ // last 12 m before the slot, 56 km/h in the limit zone and a car length behind the car in front.
+ pitInput(r,bodies,dt){
+  const c=r.car,R=this.route,st=R.stations,P=r.pit,slot=P.slot,speed=Math.hypot(c.vx,c.vy),fx=Math.cos(c.heading),fy=Math.sin(c.heading),hold={left:0,right:0,throttle:0,brake:1,reverse:0,handbrake:0};
+  if(P.parked)return hold;
+  let best=Infinity;for(let k=Math.max(0,P.k-3);k<Math.min(st.length,P.k+12);k++){const q=st[k],dd=(c.x-q.x)**2+(c.y-q.y)**2;if(dd<best){best=dd;P.k=k;}}
+  const q=st[P.k],u=P.u=q.u+(c.x-q.x)*q.tx+(c.y-q.y)*q.ty,left=slot.u-u;
+  // Speed: bends and the limit zone ahead through a gentle braking curve, then the stop.
+  let target=Math.sqrt(2*2.2*Math.max(0,left-.3));
+  for(let k=P.k;k<Math.min(st.length,P.k+60);k++){const s=st[k],v=R.limit&&s.u>=R.limit.from-2&&s.u<=R.limit.to?Math.min(s.v,PIT_LIMIT):s.v;target=Math.min(target,Math.sqrt(v*v+2*3.5*Math.max(0,s.u-u-speed*.1)));}
+  for(const o of bodies){if(o===c)continue;const dx=o.x-c.x,dy=o.y-c.y,forward=dx*fx+dy*fy,side=dy*fx-dx*fy;if(forward>0&&forward<40&&Math.abs(side)<2.3)target=Math.min(target,Math.max(0,o.vx*fx+o.vy*fy)+Math.sqrt(2*3*Math.max(0,forward-6.3)));}
+  if(speed<.5&&(left<1.5||target<.3)){P.parked=left<1.5;return hold;}
+  const look=u+4+speed*.3,p=R.at(look),t=clamp((look-slot.u+12)/10,0,1),lane=p.fast+(p.work-p.fast)*t*t*(3-2*t),tx=p.x-p.ty*lane,ty=p.y+p.tx*lane,alpha=wrap(Math.atan2(ty-c.y,tx-c.x)-c.heading);
+  const turn=clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(tx-c.x,ty-c.y))/steerLimit(speed),-1,1);
+  const input={left:Math.max(0,turn),right:Math.max(0,-turn),throttle:clamp((target-speed)*.6,0,1),brake:clamp((speed-target)*.7,0,1),reverse:0,handbrake:0};
+  // Wedged against a wall: back out with the wheels turned, then go on.
+  r.blocked=speed<1.2&&target>3?(r.blocked??0)+dt:0;if(r.blocked>2.5){r.recover=1.2;r.blocked=0;}
+  if(r.recover>0){r.recover-=dt;Object.assign(input,{reverse:1,throttle:0,brake:0,left:alpha<0?1:0,right:alpha>0?1:0});}
+  return input;
+ }
+ info(){return {collisions:this.collisions,rivals:this.rivals.map(r=>({number:r.entry.number,name:r.entry.name,level:r.entry.level,style:r.style.name,x:r.car.x,y:r.car.y,heading:r.car.heading,speed:Math.hypot(r.car.vx,r.car.vy),progress:r.progress,finished:r.finished,pit:r.pit?(r.pit.parked?'parked':'lane'):null,mode:r.mode,blend:r.blend,draft:r.tow,mistakes:r.mistakes,passes:r.passes}))};}
 }

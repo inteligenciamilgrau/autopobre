@@ -19,14 +19,15 @@ with sync_playwright() as p:
   check('v04_structural_panels_loaded',structure()['parts']==1 and structure()['revision']=='v04_fechamentos')
   # The free race starts behind the car; switch to the interior on track.
   page.click('#cockpitButton');page.keyboard.down('KeyS');frame()
-  check('floor_remains_visible_in_cockpit',structure()['visible'] and page.evaluate('!interlagos.cockpitInfo().externalVisible'))
+  # The detailed interior has its own floor and rear cabin: the V04 panels hide with the body.
+  check('interior_replaces_panels_in_cockpit',not structure()['visible'] and page.evaluate('!interlagos.cockpitInfo().externalVisible'))
   page.screenshot(path=str(ROOT/'renders/fechamento_interna_frente.png'))
   page.locator('#view').click(position={'x':800,'y':430});wait_js(page,'interlagos.viewControls().pointerLocked');move(0,300)
   check('look_down_active',page.evaluate('interlagos.viewControls().pitch<-.5'))
   page.screenshot(path=str(ROOT/'renders/fechamento_interna_pes.png'))
   move(500,0);page.screenshot(path=str(ROOT/'renders/fechamento_interna_passageiro.png'))
   page.keyboard.press('KeyV');wait_js(page,"interlagos.state.livery==='seiva_danilo'");frame()
-  check('second_skin_keeps_floor_and_driver',structure()['visible'] and structure()['parts']==1 and page.evaluate('interlagos.driverInfo().helmet.balaclava'))
+  check('second_skin_keeps_interior_and_driver',not structure()['visible'] and structure()['parts']==1 and page.evaluate('interlagos.driverInfo().helmet.balaclava'))
   check('mirror_still_current',page.evaluate('interlagos.cockpitInfo().mirrorFrame===interlagos.cockpitInfo().renderedFrame'))
   page.screenshot(path=str(ROOT/'renders/fechamento_interna_seiva.png'))
   page.keyboard.up('KeyS');page.keyboard.press('KeyP');race_options(page,camera='orbit');enter_track(page);page.keyboard.down('KeyS')

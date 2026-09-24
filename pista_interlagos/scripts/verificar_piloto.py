@@ -36,8 +36,9 @@ with sync_playwright() as p:
   check('throttle_pedal_down',page.evaluate('interlagos.cockpitInfo().controls.pedals.throttle')>.8)
   page.keyboard.up('KeyW');page.keyboard.down('KeyS');wait_js(page,f'{controls}.footOnBrake===1&&{controls}.brake>.8')
   pedals=page.evaluate('interlagos.cockpitInfo().controls.pedals');check('right_foot_on_brake',pedals['brake']>.8 and pedals['throttle']<.05);page.keyboard.up('KeyS')
-  page.keyboard.down('Space');wait_js(page,f'{controls}.handbrake>.9');frame();check('hand_pulls_handbrake',pose()['arms'][1]['target']=='handbrake');page.screenshot(path=str(ROOT/'renders/piloto_freio_de_mao.png'))
-  page.keyboard.up('Space');wait_js(page,f"{controls}.handbrake===0&&{controls}.hand.to==='wheel'&&{controls}.hand.t===1");check_arms('hand_back_after_handbrake')
+  # No handbrake lever in this car (the battery key sits there): Space keeps the hand on the rim.
+  page.keyboard.down('Space');page.wait_for_timeout(500);frame();check('no_handbrake_lever_to_reach',pose()['arms'][1]['target'] in ('wheel','knob') and 'handbrake' not in pose()['controls']);page.screenshot(path=str(ROOT/'renders/piloto_freio_de_mao.png'))
+  page.keyboard.up('Space');wait_js(page,f"{controls}.hand.to==='wheel'&&{controls}.hand.t===1");check_arms('hand_on_wheel_after_space')
   race_options(page,camera='chase');page.evaluate('interlagos.reposition(600)');race_options(page,camera='orbit');enter_track(page);page.keyboard.down('KeyS')
   page.mouse.move(600,450);page.mouse.down();page.mouse.move(1050,450,steps=8);page.mouse.up();page.mouse.wheel(0,-700);frame();check('driver_visible_externally',pose()['visible']);page.screenshot(path=str(ROOT/'renders/piloto_externa_omp.png'));page.keyboard.up('KeyS')
   race_options(page,livery='seiva_danilo');enter_track(page);page.keyboard.down('KeyS');frame();check_arms('second_livery_same_driver');page.screenshot(path=str(ROOT/'renders/piloto_externa_seiva.png'));page.keyboard.up('KeyS')

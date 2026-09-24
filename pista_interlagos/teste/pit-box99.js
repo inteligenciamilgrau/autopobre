@@ -319,7 +319,7 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
   },
   animate(dt,s){
    const cam=s.camera.position,near=Math.hypot(cam.x-O.x,cam.z-O.z)<160;fan.rotation.y+=dt*3.2;
-   crew.update(dt,{car:s.car,active:s.opened,job:s.job?.id,finished:!s.job&&!s.queue.length,departing:s.departing&&Math.hypot(s.car.x-spotX,s.car.y-spotY)<30,near});
+   crew.update(dt,{car:s.car,active:s.opened,jobs:s.jobs.map(j=>j.id),finished:!s.jobs.length&&!s.queue.length,departing:s.departing&&Math.hypot(s.car.x-spotX,s.car.y-spotY)<30,near});
    tia.update(dt,{hero:s.hero,walking:s.walking,snack:s.snack,near});
   },
  };

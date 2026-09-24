@@ -34,14 +34,54 @@ export class CarCondition {
  applyRepair(quote,progress){if(!quote||!Object.hasOwn(this.quality,quote.id))return;this.quality[quote.id]=clamp(quote.from+(quote.to-quote.from)*clamp(progress));this.revision++;}
 }
 
-// Charged once; partial work stays installed and unused money is refunded.
+// Where on the Opala each service is done and how many of the three mechanics it takes
+// (the fuel man only refuels; the jack man lifts the front for brakes and suspension
+// together). Services in different places run at the same time, as far as the
+// mechanics go; those sharing a place wait their turn. The filler sits by the right
+// rear wheel and feeds the tank, so refuelling shares both places.
+export const SERVICE_PLACES=Object.freeze({
+ fuel:{zones:['tanque','traseira_direita'],crew:0},
+ motor:{zones:['motor'],crew:1},
+ cambio:{zones:['assoalho'],crew:1},
+ freios:{zones:['dianteira_direita'],crew:1},
+ suspensao:{zones:['dianteira_esquerda'],crew:1},
+ pneus:{zones:['traseira_esquerda','traseira_direita'],crew:2},
+ tanque:{zones:['tanque'],crew:1},
+});
+export const PLACE_NAMES=Object.freeze({motor:'no motor',assoalho:'embaixo do carro',dianteira_direita:'na roda dianteira direita',dianteira_esquerda:'na roda dianteira esquerda',traseira_esquerda:'na roda traseira esquerda',traseira_direita:'na traseira direita',tanque:'no tanque'});
+export const MECHANICS=3;
+const placeOf=id=>SERVICE_PLACES[id]??{zones:[id],crew:1};
+
+// Charged once; partial work stays installed and unused money is refunded. `jobs` are
+// at work together, `queue` waits for its place or a free mechanic.
 export class PitService {
- constructor({condition,getFuel,setFuel,pay,refund}){Object.assign(this,{condition,getFuel,setFuel,pay,refund});this.job=null;this.queue=[];}
- has(id){return this.job?.id===id||this.queue.some(job=>job.id===id);}
+ constructor({condition,getFuel,setFuel,pay,refund}){Object.assign(this,{condition,getFuel,setFuel,pay,refund});this.jobs=[];this.queue=[];}
+ // The first job at work, for a single readout.
+ get job(){return this.jobs[0]??null;}
+ has(id){return this.jobs.some(job=>job.id===id)||this.queue.some(job=>job.id===id);}
  startRepair(id,kind){return this.start(this.condition.quote(id,kind));}
  startFuel(litres){const amount=Math.min(Math.max(0,Number(litres)||0),12-this.getFuel());if(amount<.05)return false;return this.start({id:'fuel',from:this.getFuel(),to:this.getFuel()+amount,cost:Math.ceil(amount*6.5),seconds:2+amount*1.5});}
- start(quote){if(!quote||this.has(quote.id))return false;const payment=this.pay(quote.cost);if(!payment)return false;const job={...quote,payment,elapsed:0,progress:0};if(this.job)this.queue.push(job);else this.job=job;return true;}
- step(dt){if(!this.job)return null;const job=this.job;job.elapsed=Math.min(job.seconds,job.elapsed+Math.max(0,dt));job.progress=job.elapsed/job.seconds;if(job.id==='fuel')this.setFuel(job.from+(job.to-job.from)*job.progress);else this.condition.applyRepair(job,job.progress);if(job.progress>=1){this.job=this.queue.shift()||null;return job;}return null;}
+ start(quote){if(!quote||this.has(quote.id))return false;const payment=this.pay(quote.cost);if(!payment)return false;this.queue.push({...quote,payment,elapsed:0,progress:0});this.schedule();return true;}
+ // Why a queued job waits: a job at work in the same place ({job, zone}) or not enough
+ // free mechanics ({crew: true}); null when it can start.
+ blocker(job){
+  const place=placeOf(job.id);
+  for(const other of this.jobs){const zone=placeOf(other.id).zones.find(z=>place.zones.includes(z));if(zone)return {job:other,zone};}
+  return this.jobs.reduce((n,other)=>n+placeOf(other.id).crew,0)+place.crew>MECHANICS?{crew:true}:null;
+ }
+ // Orders start as soon as their place and enough mechanics are free, oldest first (a
+ // later one goes ahead when it works somewhere else).
+ schedule(){for(const job of [...this.queue])if(!this.blocker(job)){this.queue.splice(this.queue.indexOf(job),1);this.jobs.push(job);}}
+ // Advances every job at work; returns those finished in this step.
+ step(dt){
+  const done=[];
+  for(const job of [...this.jobs]){
+   job.elapsed=Math.min(job.seconds,job.elapsed+Math.max(0,dt));job.progress=job.elapsed/job.seconds;
+   if(job.id==='fuel')this.setFuel(job.from+(job.to-job.from)*job.progress);else this.condition.applyRepair(job,job.progress);
+   if(job.progress>=1){this.jobs.splice(this.jobs.indexOf(job),1);done.push(job);}
+  }
+  if(done.length)this.schedule();return done;
+ }
  cancelQueued(id){const index=this.queue.findIndex(job=>job.id===id);if(index<0)return 0;const [job]=this.queue.splice(index,1);this.refund(job.cost,job);return job.cost;}
- cancel(){const jobs=[...(this.job?[this.job]:[]),...this.queue];let total=0;for(const job of jobs){const amount=Math.floor(job.cost*(1-job.progress)*100)/100;this.refund(amount,job);total+=amount;}this.job=null;this.queue=[];return Math.round(total*100)/100;}
+ cancel(){const jobs=[...this.jobs,...this.queue];let total=0;for(const job of jobs){const amount=Math.floor(job.cost*(1-job.progress)*100)/100;this.refund(amount,job);total+=amount;}this.jobs=[];this.queue=[];return Math.round(total*100)/100;}
 }

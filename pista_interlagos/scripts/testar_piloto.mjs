@@ -99,12 +99,12 @@ const slowing=drive([[4.6,{throttle:1}],[3.4,{brake:1}]]),down=slowing.filter((f
 assert(down.length>=2,'downshifts while braking');
 for(const s of down){const caught=slowing.slice(slowing.indexOf(s)).find(f=>f.visualGear===s.gear);assert(caught&&caught.t-s.t<.35,`lever back to ${s.gear}`);}
 assert.equal(slowing.at(-1).visualGear,slowing.at(-1).gear);
-// Handbrake: pulled while held, a quick tap still shows, then back to the wheel.
-const pull=drive([[1.2,{throttle:1}],[.45,{handbrake:1}]]);assert(pull.at(-1).hand.to==='handbrake'&&pull.at(-1).handbrake>.9);
-const tap=drive([[1.2,{throttle:1}],[1/60,{handbrake:1}],[1,{}]]);
-assert(Math.max(...tap.map(f=>f.handbrake))>.5,'a tap is still a visible pull');
-assert(tap.at(-1).handbrake===0&&tap.at(-1).hand.to==='wheel'&&tap.at(-1).hand.t===1);
+// Handbrake key: the car has no lever (the battery key is in its place, carro_28),
+// so the right hand stays on the wheel while the rear brake is held.
+const pull=drive([[1.2,{throttle:1}],[.45,{handbrake:1}]]);
+assert(pull.slice(-20).every(f=>f.hand.to==='wheel'),'no lever to reach for');
+assert(!('handbrake' in pull.at(-1)),'no handbrake lever pose');
 // Reverse: into R through the gate, and back to first on release.
 const reverse=drive([[.5,{}],[.8,{reverse:1}]]);assert.equal(reverse.at(-1).visualGear,-1);
 const forward=drive([[.5,{}],[.8,{reverse:1}],[.8,{}]]);assert.equal(forward.at(-1).visualGear,1);
-console.log(`${poses} reachable arm poses; body, gaze, gate, ${shifts.length} hand shifts, pedals, handbrake and reverse passed.`);
+console.log(`${poses} reachable arm poses; body, gaze, gate, ${shifts.length} hand shifts, pedals, hand kept off the missing handbrake and reverse passed.`);
