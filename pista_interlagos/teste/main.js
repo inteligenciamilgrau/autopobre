@@ -679,7 +679,8 @@ async function loadCircuit(){
   skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),waterInfo:()=>landscape.waterInfo(),lakeInfo:()=>lakeContact?.info()??null,waterAt:(x,y)=>landscape.water.at(x,y),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
   openingsInfo:()=>openings.info(),holdOpening:(name,on=true)=>openings.hold(name,'teste',on),
-  rivalParts:()=>{const rival=immersive.visual.rivals[0],names=[];let meshes=0;rival?.traverse(o=>{names.push(o.name);if(o.isMesh)meshes++;});return {motor:names.includes('Motor_CONJUNTO'),tanque:names.includes('Tanque_combustivel_CONJUNTO'),meshes};},
+  // materials: those shown on the rival (whatever its distance detail), numbers: its own number decals.
+  rivalParts:()=>{const rival=immersive.visual.rivals[0],names=[],shown=new Set();let meshes=0;rival?.traverse(o=>{names.push(o.name);if(!o.isMesh)return;meshes++;let seen=true;for(let q=o;q&&q!==rival;q=q.parent)if(!q.visible&&q!==rival.userData.detail)seen=false;if(seen)for(const m of [o.material].flat())shown.add(m.name);});return {motor:names.includes('Motor_CONJUNTO'),tanque:names.includes('Tanque_combustivel_CONJUNTO'),meshes,materials:[...shown],numbers:names.filter(n=>n.startsWith('Numero_')).length};},
   driverInfo:()=>driver.info(),
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
   // Interior cameras ride on the sprung body, so report them in its frame.

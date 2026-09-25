@@ -11,6 +11,7 @@ Usage, from the repo root, with the local server running (INTERLAGOS_URL for ano
   python pista_interlagos/scripts/verificar_aberturas.py
 Screenshots: pista_interlagos/renders/aberturas_*.png
 """
+import re
 import json
 import os
 from pathlib import Path
@@ -51,6 +52,9 @@ with sync_playwright() as p:
         check('all_shut_at_start', all(v['open'] == 0 for v in info.values()))
         rival = page.evaluate('interlagos.rivalParts()')
         check('rivals_without_engine_and_cell', not rival['motor'] and not rival['tanque'] and rival['meshes'] > 10)
+        # The other cars carry no sponsor, name, logo or window sticker of the 99: only their own number (4 decals).
+        livery = [m for m in rival['materials'] if re.match(r'(Adesivo|Decal_|Pilotos_99_parabrisa|Invent_parabrisa|Jesus_|Logo_frontal|Stickers_vigia_|Branco$)', m)]
+        check('rivals_carry_only_their_number', not livery and rival['numbers'] == 4)
         # Park in Box 99 (as verificar_pitstop.py does) with the engine and the fuel cell worn.
         page.evaluate("""async()=>{const {PitStop}=await import('./pitstop.js');const old=PitStop.prototype.info;PitStop.prototype.info=function(){window.pit=this;return old.call(this)};interlagos.pitInfo();
          pit.setDamage(true);pit.condition.damage('motor',.5);pit.condition.damage('tanque',.5);pit.mode.freeFuel=5;

@@ -9,21 +9,10 @@ import {shutOpenings,CarOpenings,carSpot,SPOT_OPENING} from './car-openings.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
 const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
+// The 99's livery (by material): sponsors, logos, drivers' names (Branco: with the tail's 99), its numbers, the
+// hood, roof and trunk lid decals and the window stickers. The other cars carry none of it, only their own number.
+const LIVERY_99=/^(Adesivo|Decal_|Pilotos_99_parabrisa|Invent_parabrisa|Jesus_|Logo_frontal|Stickers_vigia_|Branco$)/;
 const up=new THREE.Vector3(0,1,0);
-// The small white 99 on the Opala's tail is part of its 'Branco' mesh: rivals drop the
-// triangles on the tail panel (x < -2.05 m, car frame) and carry their own number there.
-function withoutTail(g){
- const pos=g.attributes.position,n=g.index?g.index.count:pos.count,at=i=>g.index?g.index.getX(i):i,keep=[];
- for(let i=0;i+2<n;i+=3){const a=at(i),b=at(i+1),c=at(i+2);if((pos.getX(a)+pos.getX(b)+pos.getX(c))/3>-2.05)keep.push(a,b,c);}
- if(g.index){g.setIndex(keep);return g;}
- const out=new THREE.BufferGeometry();
- for(const [name,attr] of Object.entries(g.attributes)){
-  // Same array type as the other meshes of the batch (mergeGeometries needs it).
-  const raw=!attr.isInterleavedBufferAttribute,arr=raw?new attr.array.constructor(keep.length*attr.itemSize):new Float32Array(keep.length*attr.itemSize);
-  keep.forEach((v,k)=>{for(let j=0;j<attr.itemSize;j++)arr[k*attr.itemSize+j]=raw?attr.array[v*attr.itemSize+j]:attr.getComponent(v,j);});out.setAttribute(name,new THREE.BufferAttribute(arr,attr.itemSize,raw&&attr.normalized));
- }
- g.dispose();return out;
-}
 const leanRotation=new THREE.Quaternion(),leanEuler=new THREE.Euler(),poseForward=new THREE.Vector3(),poseUp=new THREE.Vector3(),poseSide=new THREE.Vector3(),poseMatrix=new THREE.Matrix4();
 export function trackPoint(data,s,offset=0){
  const a=data.samples,L=data.meta.reconstructed_xy_m;s=((s%L)+L)%L;
@@ -208,9 +197,9 @@ export class ImmersiveVisuals {
    if(o.isMesh){
     const mats=Array.isArray(o.material)?o.material:[o.material];
     o.castShadow=mats.some(m=>!m.transparent||m.opacity>=.95);o.receiveShadow=true;
-    // The Opala 99's number stickers (sides, roof) give way to the rival's own number.
-    if(mats.some(m=>m.name.startsWith('Adesivo')||m.name==='Decal_teto_99')){o.visible=false;return;}
-    const recolor=m=>{if(!['Pintura_preta','Faixa_amarela','Branco'].includes(m.name))return m;if(!materials.has(m)){const c=m.clone();c.color.setHex(m.name==='Pintura_preta'?color:0xe4e4d5);materials.set(m,c);}return materials.get(m);};
+    // No sponsor, name or number of the 99 on the other cars: their own number replaces it.
+    if(mats.some(m=>LIVERY_99.test(m.name))){o.visible=false;return;}
+    const recolor=m=>{if(!['Pintura_preta','Faixa_amarela'].includes(m.name))return m;if(!materials.has(m)){const c=m.clone();c.color.setHex(m.name==='Pintura_preta'?color:0xe4e4d5);materials.set(m,c);}return materials.get(m);};
     o.material=Array.isArray(o.material)?mats.map(recolor):recolor(o.material);
    }
    if(!o.isMesh&&o.name.startsWith('Roda_')&&o.name.includes('PIVO'))pivots.push({obj:o,base:o.quaternion.clone()});
@@ -218,7 +207,7 @@ export class ImmersiveVisuals {
   // Batch fixed bodywork by material; preserve separate wheel pivots for animation.
   root.updateMatrixWorld(true);const inverse=root.matrixWorld.clone().invert(),batches=new Map(),parts=[];
   root.traverse(o=>{if(!o.isMesh||!o.visible||Array.isArray(o.material)||o.children.length)return;let parent=o.parent;while(parent&&parent!==root){if(pivots.some(p=>p.obj===parent))return;parent=parent.parent;}parts.push(o);});
-  for(const o of parts){let geometry=o.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld));geometry.deleteAttribute('tangent');if(o.material.name==='Branco')geometry=withoutTail(geometry);if(!geometry.attributes.uv)geometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));const key=o.material.uuid;if(!batches.has(key))batches.set(key,{material:o.material,geometries:[],objects:[]});const batch=batches.get(key);batch.geometries.push(geometry);batch.objects.push(o);}
+  for(const o of parts){let geometry=o.geometry.clone().applyMatrix4(new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld));geometry.deleteAttribute('tangent');if(!geometry.attributes.uv)geometry.setAttribute('uv',new THREE.BufferAttribute(new Float32Array(geometry.attributes.position.count*2),2));const key=o.material.uuid;if(!batches.has(key))batches.set(key,{material:o.material,geometries:[],objects:[]});const batch=batches.get(key);batch.geometries.push(geometry);batch.objects.push(o);}
   for(const batch of batches.values()){const geometry=mergeGeometries(batch.geometries,false);if(geometry){const mesh=new THREE.Mesh(geometry,batch.material);mesh.castShadow=!batch.material.transparent||batch.material.opacity>=.95;mesh.receiveShadow=true;root.add(mesh);batch.objects.forEach(o=>o.removeFromParent());}batch.geometries.forEach(g=>g.dispose());}
   // Level of detail: beyond ~40 m the car is one vertex-coloured mesh (one draw call).
   const detail=new THREE.Group();detail.name='Rival_detalhe';while(root.children.length)detail.add(root.children[0]);root.add(detail);
