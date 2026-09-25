@@ -2,12 +2,20 @@ name: Publicar Auto-Pobre Racing
 
 # Publishing is manual: pushes to main no longer replace the live game.
 # Actions -> Publicar Auto-Pobre Racing -> Run workflow, choosing what to publish.
+# The main link shows `versao` (the announced game) and /dev/ shows `versao_dev` (the one
+# in progress), so the before and after can be shown side by side. Both are built from
+# their own checkout, tested and packed into one Pages site. An empty versao_dev
+# publishes the main link alone.
 on:
   workflow_dispatch:
     inputs:
       versao:
-        description: 'Branch, tag ou commit a publicar (ex.: main ou online-2026-09-14)'
+        description: 'Link principal: branch, tag ou commit (ex.: online-2026-09-14 ou main)'
         required: true
+        default: online-2026-09-14
+      versao_dev:
+        description: 'Endereco /dev/: branch, tag ou commit (vazio = sem /dev/)'
+        required: false
         default: main
 
 permissions:
@@ -20,55 +28,66 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: read
     steps:
-      - name: Baixar o codigo
+      - name: Baixar a versao do link principal
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           ref: ${{ inputs.versao }}
+          path: principal
+          persist-credentials: false
+      - name: Baixar a versao de /dev/
+        if: ${{ inputs.versao_dev != '' }}
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ inputs.versao_dev }}
+          path: dev
           persist-credentials: false
       - name: Preparar Node.js
         uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
         with:
           node-version: '24'
           cache: npm
-          cache-dependency-path: pista_interlagos/teste/package-lock.json
+          cache-dependency-path: '*/pista_interlagos/teste/package-lock.json'
       - name: Preparar Python
         uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
         with:
           python-version: '3.12'
       - name: Instalar a dependencia fixada no lock
-        run: npm ci --prefix pista_interlagos/teste --ignore-scripts --no-audit --no-fund
-      - name: Verificar as preferencias do jogador
-        run: node pista_interlagos/scripts/testar_preferencias.mjs
-      - name: Verificar audio e contatos dos carros
         run: |
-          node pista_interlagos/scripts/testar_audio.mjs
-          node pista_interlagos/scripts/testar_eventos_audio.mjs
-          node pista_interlagos/scripts/testar_colisoes.mjs
-          node pista_interlagos/scripts/testar_saldo.mjs
-          node pista_interlagos/scripts/testar_imersivo.mjs
-          node pista_interlagos/scripts/testar_voltas.mjs
-          node pista_interlagos/scripts/testar_derrapadas.mjs
-          node pista_interlagos/scripts/testar_terreno_rivais.mjs
-          node pista_interlagos/scripts/testar_aderencia.mjs
-          node pista_interlagos/scripts/testar_direcao.mjs
-          node pista_interlagos/scripts/testar_bandeirada.mjs
-          node pista_interlagos/scripts/testar_recordes.mjs
-          node pista_interlagos/scripts/testar_pilotos_largada.mjs
-          node pista_interlagos/scripts/testar_curvelo.mjs
-          node pista_interlagos/scripts/testar_pitstop.mjs
-      - name: Gerar somente os arquivos publicos
-        run: python pista_interlagos/scripts/preparar_publicacao.py
+          for pasta in principal dev; do
+            [ -d "$pasta" ] || continue
+            npm ci --prefix "$pasta/pista_interlagos/teste" --ignore-scripts --no-audit --no-fund
+          done
+      - name: Verificar cada versao (preferencias, audio, contatos, corrida, boxes)
+        run: |
+          for pasta in principal dev; do
+            [ -d "$pasta" ] || continue
+            echo "::group::Testes de $pasta"
+            for teste in testar_preferencias testar_audio testar_eventos_audio testar_colisoes testar_saldo testar_imersivo testar_voltas testar_derrapadas testar_terreno_rivais testar_aderencia testar_direcao testar_bandeirada testar_recordes testar_pilotos_largada testar_curvelo testar_pitstop; do
+              (cd "$pasta" && node "pista_interlagos/scripts/$teste.mjs")
+            done
+            echo "::endgroup::"
+          done
+      - name: Gerar somente os arquivos publicos (a versao de /dev/ dentro de dev/)
+        run: |
+          (cd principal && python pista_interlagos/scripts/preparar_publicacao.py)
+          mkdir site
+          cp -a principal/dist/. site/
+          if [ -d dev ]; then
+            (cd dev && python pista_interlagos/scripts/preparar_publicacao.py)
+            mkdir site/dev
+            cp -a dev/dist/. site/dev/
+          fi
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
       - name: Enviar o jogo para publicacao
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: dist
+          path: site
 
   deploy:
     needs: build
