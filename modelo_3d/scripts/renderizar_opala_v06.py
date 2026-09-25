@@ -21,7 +21,7 @@ SAMPLES=int(arg('--samples',96))
 FFMPEG=os.environ.get('FFMPEG') or str(R.parent/'apps/ffmpeg-n9.0-latest-win64-gpl-9.0/ffmpeg-n9.0-latest-win64-gpl-9.0/bin/ffmpeg.exe')
 O=bpy.data.objects
 
-# view: camera location, target, lens (mm), parts opened, extra light ('bay','trunk','cabin','under' or None), photo
+# view: camera location, target, lens (mm), parts opened, extra light ('bay','trunk','cabin','under','day' or None), photo
 DOORS=('Porta_Motorista_DOBRADICA','Porta_Passageiro_DOBRADICA');ALL=DOORS+('Capo_DOBRADICA','Tampa_porta_malas_DOBRADICA')
 VIEWS={
  'fechado_frente':((10.9,5.75,1.25),(.12,0,.52),85,(),None,'carro_1_perspectiva_frente.jpg'),
@@ -33,6 +33,8 @@ VIEWS={
  'porta_malas_aberto':((-2.36,.24,1.30),(-1.78,.04,.30),17,('Tampa_porta_malas_DOBRADICA',),'trunk','carro_37_tanque_porta_malas.JPG'),
  'porta_motorista_aberta':((-1.05,2.25,1.18),(.45,.95,.55),26,('Porta_Motorista_DOBRADICA',),'cabin',None),
  'interior_pela_porta':((.02,1.42,1.02),(.36,.12,.66),22,('Porta_Motorista_DOBRADICA',),'cabin',None),
+ # the onboard GoPro of carro_14: low (0.95 m) beside the driver, as the game's 'frente' photo pose
+ 'interior_frente':((-.12,-.20,.95),(.876,-.15,.87),13.6,(),'day','carro_14_interna.JPG'),
  'explodida':((6.5,5.5,3.5),(.15,0,.78),34,DOORS+('Tampa_porta_malas_DOBRADICA',),'bay',None),
  'por_baixo':((.2,1.7,-2.5),(-.1,0,.2),20,(),'under',None),
  'frente_capo':((4.0,.05,1.55),(1.6,0,.62),28,(),None,'carro_23_capo_omp_melhor.JPG')}
@@ -83,11 +85,28 @@ def extra_light(kind):
  LIGHTS.clear()
  spots={'bay':[((1.5,0,2.1),(1.5,0,.5),130,1.6),((3.2,.8,1.4),(1.5,0,.5),60,1.)],
   'trunk':[((-1.85,0,2.0),(-1.85,0,.4),90,1.4),((-3.2,.4,1.3),(-1.8,0,.5),40,1.)],
-  'cabin':[((.1,1.9,1.1),(.2,0,.6),70,.8),((-.2,0,1.25),(-.2,0,.4),40,.9)],
+  'cabin':[((.1,1.9,1.1),(.2,0,.6),70,.8),((-.2,0,1.25),(-.2,0,.4),40,.9)],'day':[((-.2,0,1.25),(-.2,0,.4),40,.9)],
   'under':[((0,0,-1.2),(0,0,.3),35,2.5)]}.get(kind,[])
  for loc,tgt,power,size in spots:
   d=bpy.data.lights.new('V06_luz','AREA');d.energy=power;d.size=size;o=bpy.data.objects.new('V06_luz',d)
   bpy.context.scene.collection.objects.link(o);o.location=loc;o.rotation_euler=(Vector(tgt)-Vector(loc)).to_track_quat('-Z','Y').to_euler();LIGHTS.append(o)
+
+SAVED={}
+def daylight(on):
+ """Seen from the cabin (carro_14 was shot on track by day): the smoked glass lets the light through and the world
+ brightens to a daytime sky. In memory only, restored after the view."""
+ sc=bpy.context.scene;bg=sc.world.node_tree.nodes.get('Background') if sc.world else None
+ glass={m for o in O if o.type=='MESH' and o.name.startswith(('Para_brisa','Vidro','Vigia')) for m in o.data.materials if m}
+ if on:
+  for m in glass:
+   p=next((n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED'),None)
+   if p:SAVED[m.name]=p.inputs['Alpha'].default_value;p.inputs['Alpha'].default_value=.12
+  if bg:SAVED['_bg']=(tuple(bg.inputs['Color'].default_value),bg.inputs['Strength'].default_value);bg.inputs['Color'].default_value=(.62,.72,.86,1);bg.inputs['Strength'].default_value=1.4
+ else:
+  for m in glass:
+   p=next((n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED'),None)
+   if p and m.name in SAVED:p.inputs['Alpha'].default_value=SAVED.pop(m.name)
+  if bg and '_bg' in SAVED:c,s=SAVED.pop('_bg');bg.inputs['Color'].default_value=c;bg.inputs['Strength'].default_value=s
 
 def to_jpg(png,jpg):
  if Path(FFMPEG).is_file():
@@ -104,7 +123,7 @@ def main():
  floor=O.get('Piso');t0=time.time()
  for v in views:
   loc,tgt,lens,opened,light,photo=VIEWS[v]
-  set_open(opened,.4 if v=='explodida' else 1.);explode(v=='explodida');extra_light(light)
+  set_open(opened,.4 if v=='explodida' else 1.);explode(v=='explodida');extra_light(light);daylight(light=='day')
   if floor:floor.hide_render=(v=='por_baixo')
   cam.location=loc;cam.data.lens=lens;cam.data.clip_start=.05
   cam.rotation_euler=(Vector(tgt)-Vector(loc)).to_track_quat('-Z','Y').to_euler()

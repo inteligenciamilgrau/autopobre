@@ -13,8 +13,13 @@ from v06_comum import *
 
 R=Path(__file__).resolve().parents[2]
 V06_FLOOR,GAME_DROP=.217,-.093           # V06 cabin floor; how far the game lowers its cockpit into this body (cockpit.js)
-BANK_TUBE_BOTTOM=1.166                   # underside of the windscreen tube: cockpit.js hangs the switch bank there
 CROSS_TUBE_X=.29                         # windscreen cross tube of the game cage (switch bank hanger)
+# The windscreen tube arches up with the roof between the two roof rails (carro_14): its centre line rises to
+# ARCH_TOP at the car's centre, flat across the middle and curving down to the rails. cockpit.js hangs the switch
+# bank (0.365 m to the driver's side, right beside the mirror) from its underside there, at BANK_TUBE_BOTTOM, and
+# the mirror under its top.
+ARCH_TOP,BANK_Y,BANK_TUBE_BOTTOM=1.262,.365,1.229
+def arch_z(y,z_end,y_end):return z_end+(ARCH_TOP-z_end)*(1-(abs(y)/y_end)**4)
 CRUDE_V05=('Banco_apoio_cabeca','Banco_concha_assento','Banco_concha_encosto','Cinto_ombro','Coluna_direcao','Volante',
  'Raio_volante','Alavanca_cambio','Manopla','Painel_instrumentos')
 
@@ -49,8 +54,8 @@ def build(mats):
   for i,m in enumerate(o.data.materials):
    if m and m.name.startswith('Espelho.') and 'Espelho' in bpy.data.materials:o.data.materials[i]=bpy.data.materials['Espelho']
  # The switch bank arrives hanging where cockpit.js puts it: under this windscreen tube, which must be there.
- tube_z,tube_y=cross_tube(mats)
- assert abs(tube_z-.021-BANK_TUBE_BOTTOM)<.005,f'tubo do para-brisa em {tube_z-.021:.3f}; cockpit.js pendura o painel em {BANK_TUBE_BOTTOM}'
+ bank_hanger=cross_tube(mats)
+ assert abs(bank_hanger-BANK_TUBE_BOTTOM)<.005,f'tubo do para-brisa em {bank_hanger:.3f} sobre o painel; cockpit.js pendura o painel em {BANK_TUBE_BOTTOM}'
  for m in {m for o in meshes for m in o.data.materials if m}:principled_only(m)
  if os.environ.get('OPALA_V06_DEBUG'):report(meshes,detailed=True)
  anchor=pivot('Interior_do_jogo',(0,0,V06_FLOOR),'interior','',0.,
@@ -113,8 +118,9 @@ def straighten_hoop():
   W[:,0]+=w*(target-top);set_world_verts(o,W)
 
 def cross_tube(mats):
- """Windscreen cross tube between the two V05 roof rails, at the game's cage position. The whole cage becomes gloss
- black like the real one (carro_30, 33, 36); in V05 it shared the wheels' aluminium."""
+ """Windscreen cross tube between the two V05 roof rails, at the game's cage position, arched up with the roof
+ (arch_z). The whole cage becomes gloss black like the real one (carro_30, 33, 36); in V05 it shared the wheels'
+ aluminium. Returns the height of its underside above the switch bank."""
  O=bpy.data.objects;pts=[]
  black=material('Gaiola_preta',(32,35,38),metal=.3,rough=.3,coat=.9)
  for o in [o for o in O if o.name.startswith('Gaiola_') and o.type=='MESH']:o.data.materials[0]=black
@@ -122,8 +128,8 @@ def cross_tube(mats):
   W=world_verts(O[n]);q=W[(np.abs(W[:,0]-CROSS_TUBE_X)<.02)&(W[:,2]>1.1)];pts.append(q.mean(0))
  z=float(np.mean([p[2] for p in pts]));y=float(np.mean([abs(p[1]) for p in pts]))
  P=Part('Gaiola_travessa_parabrisa','02_Vidros_Redes_Interior',None,smooth=40)
- P.cyl(black,(CROSS_TUBE_X,-y,z),(CROSS_TUBE_X,y,z),.021,16);P.build()
- return z,y
+ P.sweep(black,[(CROSS_TUBE_X,v,arch_z(v,z,y)) for v in np.linspace(-y,y,25)],.021,16,samples=60);P.build()
+ return arch_z(BANK_Y,z,y)-.021
 
 def report(objs,detailed=False):
  """Overlap of the interior with the shell it must not pierce (roof, glass, doors, sides, window frames). The detailed

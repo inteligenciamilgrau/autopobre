@@ -26,14 +26,15 @@ SIZE = {'width': 1400, 'height': 788}
 PI = math.pi
 
 # Nome -> pose, com a foto de referência que ela imita. eye = olho em coordenadas locais do
-# cockpit; None = olho padrão do jogo (-.39, 1.08, .015). roll (opcional) gira a imagem: positivo
+# cockpit; None = olho padrão do jogo (-.25, 1.08, .015; -.39 no interior clássico). Na carroceria V06 o
+# cockpit desce 9,3 cm e o olho das poses desce junto. roll (opcional) gira a imagem: positivo
 # inclina o topo da câmera para a esquerda. As referências têm uma selfie no canto superior
 # esquerdo: ignore-a ao comparar. Poses ajustadas pelo enquadramento (mesmas coisas no mesmo
 # lugar da foto); a lente das fotos é mais aberta/curva, então nem tudo coincide ao mesmo tempo.
 POSES = {
-    # GoPro à frente do olho do jogo, à direita do piloto: retrovisor no alto, volante à esquerda.
-    # A GoPro é olho de peixe; fov 100 aproxima sem curvar as bordas como a foto.
-    'frente': {'ref': 'carro/carro_14_interna.JPG', 'eye': [-.12, 1.22, .20], 'yaw': -.05, 'pitch': -.32, 'fov': 100},
+    # GoPro à frente do olho do jogo, à direita do piloto, baixa (0,95 m na V06): retrovisor e faixa
+    # no alto, volante à esquerda. A GoPro é olho de peixe; fov 82 aproxima sem curvar as bordas.
+    'frente': {'ref': 'carro/carro_14_interna.JPG', 'eye': [-.12, 1.043, .20], 'yaw': -.05, 'pitch': -.08, 'roll': -.05, 'fov': 82},
     # Do lado do carona, olhando para trás e para baixo pelo X da gaiola; o encosto de tela do
     # banco do piloto (vazio na foto) na borda direita.
     'tras': {'ref': 'carro/carro_36_interno_banco_traseiro_armacao_ferro.JPG', 'eye': [-.45, .95, .40], 'yaw': 3.67, 'pitch': .04, 'fov': 88, 'hideDriver': True},

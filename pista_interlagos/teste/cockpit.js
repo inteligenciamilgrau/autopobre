@@ -96,8 +96,8 @@ export function createCockpit(renderer){
  // Inside the V06 body its windscreen base is 10 cm ahead of this dash top: a strip closes it,
  // stopping short of the windscreen rubber.
  box([.872,.896,0],[.094,.012,1.40],m.dash,fillers);
- // And the parcel shelf: from its rear bulkhead top up to just under the rear window rubber.
- box([-1.485,.919,0],[.081,.01,1.50],m.paint,fillers).rotation.z=Math.atan2(.054,-.06);
+ // And the parcel shelf: from its rear bulkhead top up to just ahead of the trunk lid frame.
+ box([-1.4715,.9165,0],[.047,.01,1.50],m.paint,fillers).rotation.z=Math.atan2(.035,-.031);
  for(const side of [-1,1]){
   box([.10,.59,side*.745],[1.54,.57,.025],m.paint,classic);
   box([.10,.878,side*.736],[1.54,.018,.03],m.body,classic); // door top rail
@@ -123,10 +123,19 @@ export function createCockpit(renderer){
  padding([.58,.60,-.70],[-.62,.88,-.70],.35,.75,.038,classic);
  padding([-.63,.31,-.63],[-.63,1.36,-.59],.62,.95,undefined,classic);
  // Opaque sun strip, leaving the road aperture open.
- const banner=box([.36,1.296,0],[.003,.073,1.17],new THREE.MeshStandardMaterial({color:0x958c77,roughness:1}),classic);banner.rotation.z=-.32;
+ const stripMaterial=new THREE.MeshStandardMaterial({color:0x958c77,roughness:1});
+ const banner=box([.36,1.296,0],[.003,.073,1.17],stripMaterial,classic);banner.rotation.z=-.32;
  const bannerLogo=new THREE.TextureLoader().load('./assets/texturas/cockpit_faixa_invent.png');bannerLogo.colorSpace=THREE.SRGBColorSpace;
  const bannerPlane=new THREE.PlaneGeometry(.51,.079);const buv=bannerPlane.attributes.uv;for(let i=0;i<buv.count;i++)buv.setX(i,1-buv.getX(i));
- mesh(bannerPlane,new THREE.MeshBasicMaterial({map:bannerLogo,transparent:true,opacity:.85,depthWrite:false}),[0,0,0],panel([.335,1.288,.005],classic));
+ const logoMaterial=new THREE.MeshBasicMaterial({map:bannerLogo,transparent:true,opacity:.85,depthWrite:false});
+ mesh(bannerPlane,logoMaterial,[0,0,0],panel([.335,1.288,.005],classic));
+ // In the V06 body the strip lies on the inside of its windscreen, 7 mm off the flat glass (55.6 degrees
+ // from upright), from just under the header rubber down 12 cm, narrowing with the glass to 1 cm inside
+ // its side rubbers: the band under the header in carro_14, pale with the sun behind it.
+ const stripShape=new THREE.Shape([[-.598,-.06],[.598,-.06],[.558,.06],[-.558,.06]].map(([x,y])=>new THREE.Vector2(x,y)));
+ const backlit=stripMaterial.clone();backlit.emissive.set(0x958c77);backlit.emissiveIntensity=.45;
+ const strip=panel([.5247,1.1843,0],fillers,.970);mesh(new THREE.ExtrudeGeometry(stripShape,{depth:.003,bevelEnabled:false}),backlit,[0,0,-.0035],strip);
+ mesh(bannerPlane,logoMaterial,[0,.02,0],strip);
 
  // --- Sgarbi bucket seat (carro_8, 24, 28, 36): air-mesh centres, back and head
  // wings, black bolsters with white piping, fibreglass sides.
@@ -303,22 +312,24 @@ export function createCockpit(renderer){
  }
  const board=root.getObjectByName('Painel_reles'),battery=root.getObjectByName('Bateria');
  mergeStatic(root);mergeStatic(seat);mergeStatic(classic);mergeStatic(cabin);mergeStatic(fillers);mergeStatic(dashTop);mergeStatic(battery);
- const eye=new THREE.Vector3(-.39,1.08,.015),EYE_Y=eye.y,MIRROR_Y=mirror.position.y,BOARD_Z=board.position.z;
+ const eye=new THREE.Vector3(-.39,1.08,.015),EYE_X=eye.x,EYE_Y=eye.y,MIRROR_Y=mirror.position.y,BOARD_Z=board.position.z;
  // inside: the camera is in the cabin (the cockpit view); classic: the old box interior. Anywhere
  // else the controls sit in the V06 body as in its Blender scene (v06_interior.py): dropped onto its
- // cabin floor, whose structure replaces `cabin`; the dash top stays at its windscreen base, and
- // the switch bank and the mirror hang under its windscreen cage tube, as in carro_14 and carro_31
- // (bank brackets on the tube's underside at 1.166 m, mirror centred at 1.13 m). The relay board and
- // the battery come inboard, clear of the V06 cage leg and rear arch; what crosses that cage or its
- // sills belongs to `classic`.
- const V06={drop:-.093,bank:1.166-1.345,mirror:1.13-MIRROR_Y,board:-.045,battery:-.035};
+ // cabin floor, whose structure replaces `cabin`; the dash top stays at its windscreen base. As in
+ // the onboard photo carro_14, the mirror spans the top of the windscreen (centre 1.185 m) with the
+ // switch bank right beside it (3.5 cm inboard of the classic spot), hanging from the underside of
+ // the V06 windscreen tube where it arches up with the roof (1.229 m there: v06_interior.py). The
+ // camera comes 14 cm forward, where the mirror spans about 50 degrees of the view as in carro_14. The
+ // relay board and the battery come inboard, clear of the V06 cage leg and rear arch; what crosses that
+ // cage or its sills belongs to `classic`.
+ const V06={drop:-.093,bank:1.229-1.345,bankIn:.035,mirror:1.185-MIRROR_Y,board:-.045,battery:-.035,eyeForward:.14};
  function setView({inside=true,classic:old=false}={}){
   const v06=!(inside&&old),drop=v06?V06.drop:0;
   classic.visible=cabin.visible=!v06;fillers.visible=v06;
   root.position.y=drop;dashTop.position.y=fillers.position.y=-drop;
-  bankRig.position.y=v06?V06.bank-drop:0;mirror.position.y=MIRROR_Y+(v06?V06.mirror-drop:0);
+  bankRig.position.set(0,v06?V06.bank-drop:0,v06?V06.bankIn:0);mirror.position.y=MIRROR_Y+(v06?V06.mirror-drop:0);
   board.position.z=BOARD_Z+(v06?V06.board:0);battery.position.z=v06?V06.battery:0;
-  eye.y=EYE_Y+drop;
+  eye.set(EYE_X+(v06?V06.eyeForward:0),EYE_Y+drop,eye.z);
  }
  setView();
  function update(car,dt,powertrain){
