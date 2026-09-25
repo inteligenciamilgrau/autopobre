@@ -17,8 +17,10 @@ with sync_playwright() as p:
   open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton');page.keyboard.down('KeyS');wait_race_start(page);frame()
   page.screenshot(path=str(ROOT/'renders/cockpit_largada.png'))
   info=page.evaluate('interlagos.cockpitInfo()');report['views'].append(info)
-  check('internal_selected',info['visible'] and not info['externalVisible'])
-  check('eye_inside_cabin',math.dist(info['eyeLocal'],[-.39,1.08,.015])<1e-6)
+  # The controls sit in the V06 body (the car stays visible round them), lowered onto its floor.
+  check('internal_selected',info['visible'] and info['externalVisible'] and not info['view']['classic'] and info['view']['drop']<0)
+  EYE=info['view']['eye']
+  check('eye_inside_cabin',math.dist(info['eyeLocal'],EYE)<1e-6 and abs(EYE[1]-(1.08-.093))<1e-6)
   # Scanned interior maps (carbon, leather, suede, aluminium, tread plate, rubber) and the cabin reflections.
   loaded=wait_js(page,"performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length>=13&&performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length")
   check('interior_textures_loaded',loaded>=13)
@@ -30,18 +32,18 @@ with sync_playwright() as p:
   check('b_looks_back',back['held'] and page.evaluate(facing)<-.9)
   page.screenshot(path=str(ROOT/'renders/cockpit_olhando_tras.png'))
   page.keyboard.up('KeyB');wait_js(page,'interlagos.viewControls().lookBack.amount===0',timeout=5000);frame()
-  check('b_release_returns_forward',page.evaluate(facing)>.9 and math.dist(page.evaluate('interlagos.cockpitInfo().eyeLocal'),[-.39,1.08,.015])<1e-6)
+  check('b_release_returns_forward',page.evaluate(facing)>.9 and math.dist(page.evaluate('interlagos.cockpitInfo().eyeLocal'),EYE)<1e-6)
   for key,sign in [('KeyA',1),('KeyD',-1)]:
    page.keyboard.down(key);wait_js(page,'(s)=>interlagos.car.steer*s>.3',arg=sign);frame()
    check(key+'_wheel_direction',page.evaluate('(s)=>interlagos.cockpitInfo().steering*s>.85',sign));page.keyboard.up(key)
   page.keyboard.up('KeyS');page.evaluate('interlagos.reposition(600)');page.keyboard.down('KeyW');wait_js(page,'interlagos.telemetry().speed>30');page.keyboard.up('KeyW');frame()
   info=page.evaluate('interlagos.cockpitInfo()');report['views'].append(info)
   check('speed_display_active',info['speed']>29)
-  check('camera_rigid_while_driving',math.dist(info['eyeLocal'],[-.39,1.08,.015])<1e-6)
+  check('camera_rigid_while_driving',math.dist(info['eyeLocal'],EYE)<1e-6)
   page.screenshot(path=str(ROOT/'renders/cockpit_movimento.png'))
   race_options(page,livery='seiva_danilo');page.evaluate('interlagos.reposition(800)');enter_track(page);page.keyboard.down('KeyS');frame()
-  info=page.evaluate('interlagos.cockpitInfo()');check('second_livery_cockpit',info['visible'] and not info['externalVisible']);page.screenshot(path=str(ROOT/'renders/cockpit_seiva.png'));page.keyboard.up('KeyS')
-  page.click('#cockpitButton');frame();info=page.evaluate('interlagos.cockpitInfo()');check('external_car_restored',not info['visible'] and info['externalVisible'] and info['fov']==58)
+  info=page.evaluate('interlagos.cockpitInfo()');check('second_livery_cockpit',info['visible'] and info['externalVisible'] and not info['view']['classic']);page.screenshot(path=str(ROOT/'renders/cockpit_seiva.png'));page.keyboard.up('KeyS')
+  page.click('#cockpitButton');frame();info=page.evaluate('interlagos.cockpitInfo()');check('external_car_restored',info['visible'] and info['externalVisible'] and not info['view']['cabin'] and info['fov']==58)
   page.keyboard.down('KeyB');page.wait_for_timeout(300);frame()
   check('b_only_inside_cockpit',page.evaluate('interlagos.viewControls().lookBack.amount')==0);page.keyboard.up('KeyB')
   modes=[]
