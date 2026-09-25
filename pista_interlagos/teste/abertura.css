@@ -19,7 +19,14 @@
 #menu .choices{margin:18px 0}
 #menu .primary{background:#f4ce39;color:#171c15}
 #menu .primary:hover{background:#ffe574}
-#menu:has(#immersiveMode:checked) #tour{display:none}
+/* Opening: Modo Corrida and Modo História, then Config and Recordes side by side. */
+#menu .story-start{background:#152d29eb;color:#f4ce39;border:1px solid #d9b93c;padding:16px;font-weight:700}
+#menu .story-start:hover{background:#21443ceb;color:#ffe574}
+#menu .story-start[hidden]{display:none}
+body:not(.touch-device) #menu .menu-tools{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin:10px 0}
+body:not(.touch-device) #menu .menu-tools button{display:flex;align-items:center;justify-content:center;gap:8px;margin:0}
+body:not(.touch-device) #menu .menu-tools>#startFullscreen{grid-column:1/-1}
+body:not(.touch-device) #menu .menu-tool-icon{display:block;width:18px;height:18px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:#efd377}
 #menu article>small{color:#bac6bd;margin-top:14px}
 #menu select,
 #menu #mute{background:#19302de8}
@@ -44,7 +51,7 @@
 #finishingOrder[hidden]{display:none!important}#finishingOrder{list-style:none;padding:0 10px;max-height:150px;overflow:auto;background:#102420eb;border:1px solid #ffffff25;margin:0 0 14px;font-size:12px;color:#e5eade}#finishingOrder li{padding:7px 0;border-bottom:1px solid #ffffff16}#finishingOrder .player-row{color:#f4d055;font-weight:bold}
 .grid-roster{margin:15px 0;border:1px solid #ffffff25;border-radius:8px;padding:12px}.grid-roster summary{cursor:pointer;color:#f4d055;font-weight:bold}.grid-roster ul{list-style:none;margin:10px 0 0;padding:0;font-size:12px;line-height:1.7}.grid-roster li{padding:5px 0;border-bottom:1px solid #ffffff15}
 @media(orientation:landscape) and (max-height:500px){#finishingOrder{max-height:86px}#menu.race-finished #startFullscreen{display:none}#menu.race-finished #raceResult{margin-bottom:8px}}
-#menu.race-finished article>.opening-brand,#menu.race-finished #tour,#menu.race-finished article>small{display:none}
+#menu.race-finished article>.opening-brand,#menu.race-finished article>small{display:none}
 #menu.race-finished article>.eyebrow,#menu.race-finished article>h1{display:block}
 #menu.race-finished article>.eyebrow{color:#e8ce58;letter-spacing:.16em;margin-bottom:12px}
 #menu.race-finished article>h1{font-size:clamp(32px,5vw,56px);line-height:1;margin:0 0 22px}
@@ -71,12 +78,12 @@
  .touch-device #circuitPicker{margin:0 0 6px}.touch-device #circuitPicker legend{font-size:9px;letter-spacing:.1em;margin-bottom:4px}
  .touch-device #menu .circuit-options{gap:6px}.touch-device #menu .circuit-options button{display:flex;align-items:center;gap:5px;min-height:44px;margin:0;padding:6px}
  .touch-device #menu .circuit-options svg{float:none;flex-shrink:0;width:24px;height:24px;margin:0}.touch-device #menu .circuit-options b{font-size:10px;line-height:1.15;white-space:normal}.touch-device #menu .circuit-options span{display:none}
- .touch-device #menu #start,.touch-device #menu #restartRace{min-height:40px;padding:9px 12px;margin:0 0 6px;font-size:13px}
+ .touch-device #menu .menu-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:0 0 6px}
+ .touch-device #menu #start,.touch-device #menu #storyStart,.touch-device #menu #restartRace{min-height:40px;padding:9px 6px;margin:0;font-size:12px}
  .touch-device #menu #start::before{content:'▶';margin-right:8px;font-size:11px}
- .touch-device #menu .menu-tools{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:6px}
+ .touch-device #menu .menu-tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
  .touch-device #menu .menu-tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:44px;width:100%;margin:0;padding:4px 2px;font-size:9px;line-height:1.1;background:#102b27e8;border-color:#8eaa865c;border-radius:7px}
  .touch-device #menu .menu-tools .menu-tool-icon{display:block;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:#efd377}
  .touch-device #menu .menu-tool-label{display:none}.touch-device #menu .menu-tool-short{display:inline}
- .touch-device #menu #tour:disabled{display:flex;opacity:.4;cursor:default}
- .touch-device #menu.race-finished .menu-tools{grid-template-columns:repeat(2,minmax(0,1fr))}.touch-device #menu.race-finished .menu-tools #tour{display:none}
+ .touch-device #menu.race-finished .menu-tools{grid-template-columns:repeat(2,minmax(0,1fr))}
 }

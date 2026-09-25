@@ -24,7 +24,10 @@ export const EFFECT_NAMES=Object.freeze(['pitRepair','pitCoffee','click','paint'
 
 export class SoundEffects {
  constructor(ctx,world,ui,noise){
-  this.ctx=ctx;this.world=new Synth(ctx,world,noise);this.ui=new Synth(ctx,ui,noise,12);this.counts={};this.last={};this.loops={};this.levels={};this.ambientAt=0;this.warningAt=0;this.wasBraking=false;
+  this.ctx=ctx;this.output=world;this.world=new Synth(ctx,world,noise);this.ui=new Synth(ctx,ui,noise,12);this.counts={};this.last={};this.loops={};this.levels={};this.ambientAt=0;this.warningAt=0;this.wasBraking=false;
+  // Recorded effects: the starter cranking comes from car_trying_to_start.mp3 once it has
+  // loaded; until then, or without the file, the synthesized loop stands in.
+  this.samples={};this.loadSample('starter','./assets/audio/car_trying_to_start.mp3');
   for(const [name,wave,hz,cut] of [['starter','sawtooth',95,700],['tow','sawtooth',45,550],['rival0','sawtooth',90,1100],['rival1','sawtooth',85,900],['crowd','noise',0,460],['gravel','noise',0,1400],['wind','noise',0,650],['scrape','noise',0,2700],['leak','noise',0,700]]){
    const source=wave==='noise'?ctx.createBufferSource():ctx.createOscillator();
    if(wave==='noise'){source.buffer=noise;source.loop=true;}else{source.type=wave;source.frequency.value=hz;}
@@ -32,6 +35,15 @@ export class SoundEffects {
    const level=ctx.createGain(),pan=ctx.createStereoPanner();level.gain.value=0;source.connect(filter);filter.connect(level);level.connect(pan);pan.connect(world);source.start();
    this.loops[name]={source,filter,level,pan};this.levels[name]=0;
   }
+ }
+ loadSample(name,url){fetch(url).then(r=>{if(!r.ok)throw Error(url);return r.arrayBuffer();}).then(data=>this.ctx.decodeAudioData(data)).then(buffer=>{this.samples[name]={buffer,source:null,level:null};}).catch(()=>{});}
+ // A recorded loop that sounds while its gain is above zero (from the top on each start).
+ sampleLoop(name,gain,rate=1){
+  const s=this.samples[name],t=this.ctx.currentTime;if(!s)return;
+  if(gain>0&&!s.source){const source=this.ctx.createBufferSource(),level=this.ctx.createGain();source.buffer=s.buffer;source.loop=true;level.gain.value=0;source.connect(level);level.connect(this.output);source.start();Object.assign(s,{source,level});}
+  if(!s.source)return;
+  s.level.gain.setTargetAtTime(gain,t,.03);s.source.playbackRate.setTargetAtTime(rate,t,.08);
+  if(gain<=0){const {source,level}=s;source.onended=()=>{source.disconnect();level.disconnect();};source.stop(t+.2);s.source=s.level=null;}
  }
  play(name,options={},ui=false){
   if(!EFFECT_NAMES.includes(name))return false;
@@ -98,9 +110,12 @@ export class SoundEffects {
   const t=this.ctx.currentTime,speed=clamp(scene.speed??0,0,100),factor=scene.camera==='aerial'?.5:scene.camera==='cockpit'?.68:1;
   const level=(name,value,hz,pan=0)=>{const loop=this.loops[name],v=audible?value*factor:0;this.levels[name]=v;loop.level.gain.setTargetAtTime(v,t,.045);loop.pan.pan.setTargetAtTime(pan,t,.07);if(hz&&loop.source.frequency)loop.source.frequency.setTargetAtTime(hz,t,.06);};
   const starting=scene.phase==='starting'&&scene.starter,towing=scene.phase==='tow'||scene.phase==='snag'||scene.phase==='broken';
-  level('starter',starting?.075*(.7+.3*Math.sin(t*43))*(1-Math.min(scene.crank||0,4)*.1):0,80+(scene.pressure||0)*60);
+  // The recording slows as the battery sags (it does not recover between tries); a little throttle lifts it.
+  const sag=1-clamp(scene.battery??1,0,1);
+  if(this.samples.starter){level('starter',0);const gain=starting&&audible?.5*factor:0;this.sampleLoop('starter',gain,1-sag*.24+(scene.pressure||0)*.08);this.levels.starter=gain;}
+  else level('starter',starting?.075*(.7+.3*Math.sin(t*43))*(1-sag*.4):0,80+(scene.pressure||0)*60);
   level('tow',towing?.06+(scene.truckSpeed||0)*.012:0,40+(scene.truckSpeed||0)*9,.15);
-  level('crowd',['crowd','prepare','podium'].includes(scene.phase)?.024*(.8+.2*Math.sin(t*1.3)):0);
+  level('crowd',['crowd','podium'].includes(scene.phase)?.024*(.8+.2*Math.sin(t*1.3)):0);
   level('gravel',scene.onRoad===false?Math.min(.19,speed*.005):0);
   level('wind',scene.driving?Math.min(.075,speed*.0014):0);
   level('scrape',scene.tankDetached?Math.min(.15,speed*.012):0);
@@ -113,5 +128,5 @@ export class SoundEffects {
   if(scene.phase==='crowd'&&t>this.ambientAt){this.play('talk',{pan:Math.sin(t)*.7,strength:.4});this.ambientAt=t+4.5;}
  }
  stopWorld(){this.world.stop();this.update({},false);}
- info(){return {counts:{...this.counts},activeVoices:this.world.voices.size+this.ui.voices.size,peakVoices:this.world.peak+this.ui.peak,loops:{...this.levels}};}
+ info(){return {counts:{...this.counts},activeVoices:this.world.voices.size+this.ui.voices.size,peakVoices:this.world.peak+this.ui.peak,loops:{...this.levels},samples:Object.keys(this.samples)};}
 }

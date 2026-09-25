@@ -27,7 +27,7 @@ with sync_playwright() as p:
   page.keyboard.press('Escape');wait_js(page,'!document.pointerLockElement && interlagos.state.paused')
  try:
   # The free race starts behind the car; switch to the interior on track.
-  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton');page.keyboard.down('KeyS')
+  open_menu(page);enter_track(page);page.click('#cockpitButton');page.keyboard.down('KeyS')
   page.mouse.click(750,440);wait_js(page,"document.pointerLockElement?.id==='view' && interlagos.viewControls().pointerLocked")
   check('native_pointer_lock',controls()['pointerLocked'])
   page.mouse.move(1030,500,steps=3);frame()
@@ -95,10 +95,18 @@ with sync_playwright() as p:
   race_options(page,camera='hood');enter_track(page);page.mouse.click(700,440);wait_js(page,'!!document.pointerLockElement && interlagos.viewControls().pointerLocked')
   page.mouse.move(880,450,steps=2);frame();check('hood_supports_head_look',page.evaluate("interlagos.state.mode==='hood'") and abs(controls()['yaw'])>.1)
   page.evaluate("window.dispatchEvent(new Event('blur'))");wait_js(page,'!document.pointerLockElement && interlagos.state.paused');check('focus_loss_releases_mouse',True)
+  # Leaving the window keeps the track on screen under a pause badge (a screenshot shows the race); P resumes, Escape opens the menu.
+  shown="[!document.querySelector('#menu').classList.contains('hidden'),!document.querySelector('#pauseBadge').hidden]"
+  check('focus_loss_keeps_the_track_on_screen',page.evaluate(shown)==[False,True])
+  page.keyboard.press('KeyP');wait_js(page,'!interlagos.state.paused');check('p_resumes_from_the_badge',page.evaluate(shown)==[False,False])
+  page.keyboard.press('KeyP');wait_js(page,'interlagos.state.paused');check('p_pauses_on_the_track',page.evaluate(shown)==[False,True])
+  page.keyboard.press('Escape');wait_js(page,"!document.querySelector('#menu').classList.contains('hidden')");check('escape_opens_the_menu',page.evaluate(shown)==[True,False])
+  page.keyboard.press('KeyP');wait_js(page,'!interlagos.state.paused');page.keyboard.press('KeyP');wait_js(page,'interlagos.state.paused')
+  page.click('#pauseBadge');wait_js(page,'!interlagos.state.paused');check('tapping_the_badge_resumes',page.evaluate(shown)==[False,False])
   # Browser without Pointer Lock retains ordinary drag controls.
   fallback=browser.new_page(viewport={'width':1000,'height':700})
   fallback.add_init_script("Object.defineProperty(Element.prototype,'requestPointerLock',{value:undefined,configurable:true})")
-  open_menu(fallback);race_options(fallback,immersive=False);enter_track(fallback)
+  open_menu(fallback);enter_track(fallback)
   fallback.mouse.move(500,420);fallback.mouse.down();fallback.mouse.move(700,420,steps=4);fallback.mouse.up()
   check('unsupported_browser_drag_fallback',fallback.evaluate("interlagos.state.mode==='orbit' && !document.pointerLockElement"));fallback.close()
   check('no_webgl_errors',not report['errors']);report['passed']=True

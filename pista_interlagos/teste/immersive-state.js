@@ -14,6 +14,17 @@ export const JOKES=[
  {topic:'corrida',text:'Meu carro faz de zero a cem em três segundos. Zero de dinheiro a cem de preocupação.'}
 ];
 export const BLAZER_COST=900;
+// What a start costs: the entry, the litre of fuel, the windscreen film, and the least that
+// opens the fuel purchase on the grid (the entry and four litres).
+export const COSTS=Object.freeze({entry:100,litre:6.5,film:30,minimum:126});
+export const startCost=(litres,film)=>COSTS.entry+litres*COSTS.litre+(film?COSTS.film:0);
+// Engine start: the throttle band where it catches (low to high), how long it must crank
+// there (longer with wet plugs), the throttle above which it floods, and the battery's
+// cranking time, which does not come back between tries. wet: how the plugs get soaked
+// (level 1 floods the engine): each push of the pedal without cranking squirts fuel (per
+// full push), cranking over the flood mark or in the high band soaks them (per second),
+// cranking in or under the band clears them and they dry slowly otherwise.
+export const START=Object.freeze({low:.22,high:.65,flood:.8,catchTime:.72,battery:4,wet:Object.freeze({pump:.3,rich:1.5,high:.25,clear:.2,dry:.02})});
 export class ImmersiveState {
  constructor(profile={}){profile=profile&&typeof profile==='object'?profile:{};const counter=v=>Number.isFinite(v)&&v>=0?Math.min(v,Number.MAX_SAFE_INTEGER):0;this.profile={fund:counter(profile.fund),released:profile.released===true,races:Math.floor(counter(profile.races))};this.active=false;this.phase='off';this.revision=0;this.sounds=[];}
  emitSound(name,options={}){if(this.sounds.length<64)this.sounds.push({name,options});}
@@ -21,11 +32,15 @@ export class ImmersiveState {
  touch(){this.revision++;}
  start(){
   this.sounds=[];this.emitSound('crowdWelcome');
-  Object.assign(this,{active:true,phase:'crowd',cash:0,donors:[],fan:null,feedback:'',fuel:0,tankDetached:false,tankWear:0,health:1,glass:0,film:false,
-   pressure:0,crank:0,flood:0,ignitionGood:0,starter:false,raceTime:0,position:GRID_SIZE,result:null,reason:'',towSnags:0,inspection:0,judging:false,inspected:false,paid:false,prize:0,savedCash:0,podiumPlace:null,disqualifiedTime:0,alert:'',alertTime:0});this.touch();
+  Object.assign(this,{active:true,phase:'crowd',cash:0,donors:[],fan:null,desk:false,feedback:'',fuel:0,tankDetached:false,tankWear:0,health:1,glass:0,film:false,
+   pressure:0,crank:0,flood:0,battery:1,ignitionGood:0,starter:false,ignOn:false,raceTime:0,position:GRID_SIZE,result:null,reason:'',towSnags:0,inspection:0,judging:false,inspected:false,paid:false,prize:0,savedCash:0,podiumPlace:null,disqualifiedTime:0,alert:'',alertTime:0});this.touch();
  }
  disable(){this.sounds=[];this.active=false;this.phase='off';this.touch();}
- talk(index){if(this.phase!=='crowd'||!FANS[index])return;this.emitSound('talk');this.fan=index;this.feedback='';this.touch();}
+ talk(index){if(this.phase!=='crowd'||this.desk||!FANS[index])return;this.emitSound('talk');this.fan=index;this.feedback='';this.touch();}
+ // The registration is made with the team at the computers of its stand on the pit wall:
+ // they show the kitty against the costs, and the pilot goes back for more or to the track.
+ openDesk(){if(this.phase!=='crowd'||this.desk)return false;this.emitSound('talk');this.desk=true;this.fan=null;this.feedback='';this.touch();return true;}
+ closeDesk(){if(!this.desk)return false;this.desk=false;this.touch();return true;}
  joke(index){
   if(this.phase!=='crowd'||this.fan===null||!JOKES[index])return false;
   const fan=FANS[this.fan],laughed=fan.taste===JOKES[index].topic;
@@ -35,22 +50,30 @@ export class ImmersiveState {
   else this.feedback=`${fan.name}: “Essa não me pegou... tenta outra!”`;
   this.touch();return laughed;
  }
- prepare(){if(this.phase==='crowd'&&this.cash>=126){this.emitSound('paper');this.phase='prepare';this.fan=null;this.touch();return true;}return false;}
+ // At the team's desk the entry, the fuel and the optional windscreen film are paid, and
+ // the pilot goes straight to the engine start on the grid (from the kitty's minimum up).
  buy(litres,film){
-  if(this.phase!=='prepare')return false;
-  litres=clamp(Math.round(Number(litres)||0),2,12);const cost=100+litres*6.5+(film?30:0);
-  if(cost>this.cash){this.emitSound('denied');this.feedback='Faltou dinheiro. Reduza os extras ou volte à torcida.';this.touch();return false;}
-  this.cash-=cost;this.fuel=litres;this.film=!!film;this.phase='starting';this.emitSound('fuelFill');this.touch();return true;
+  if(this.phase!=='crowd'||!this.desk)return false;
+  litres=clamp(Math.round(Number(litres)||0),2,12);const cost=startCost(litres,film);
+  if(this.cash<COSTS.minimum||cost>this.cash){this.emitSound('denied');this.feedback=this.cash<COSTS.minimum?'Ainda não fecha a inscrição: volta lá e pede mais um dindin!':'Não cabe tudo isso na vaquinha: tira uns litros ou a proteção.';this.touch();return false;}
+  this.emitSound('paper');this.cash-=cost;this.fuel=litres;this.film=!!film;this.desk=false;this.feedback='';this.phase='starting';this.emitSound('fuelFill');this.touch();return true;
  }
+ // The IGN switch on the overhead bank: without it the starter turns the engine, which never fires.
+ switchIgnition(){if(this.phase!=='starting')return false;this.ignOn=!this.ignOn;this.emitSound('click');this.touch();return true;}
+ // input.ignition or starter: the PART button held (crank: this try's cranking time).
+ // Too much throttle, or pumping the pedal between tries, floods it even without IGN.
+ catchTime(){return START.catchTime*(1+2*this.flood);}
  startEngine(input,dt){
   if(this.phase!=='starting')return;
-  this.pressure=clamp(this.pressure+(input.throttle?.60:-.42)*dt,0,1);
-  if(input.ignition||this.starter){
-   if(!this.crank)this.emitSound('ignition');this.crank+=dt;this.flood=this.pressure>.8?this.flood+dt:Math.max(0,this.flood-dt);
-   if(this.flood>.65){this.fail('Motor afogado na partida','flooded');return;}
-   if(this.pressure>=.22&&this.pressure<=.65){this.ignitionGood=(this.ignitionGood||0)+dt;if(this.ignitionGood>.72){this.phase='grid';this.countdown=3;this.emitSound('engineCatch');this.emitSound('countdown');this.touch();return;}}
+  const before=this.pressure,wet=START.wet;this.pressure=clamp(this.pressure+(input.throttle?.60:-.42)*dt,0,1);
+  const cranking=!!(input.ignition||this.starter),p=this.pressure;
+  this.flood=Math.max(0,this.flood+(cranking?(p>START.flood?wet.rich:p>START.high?wet.high:-wet.clear)*dt:Math.max(0,p-before)*wet.pump-wet.dry*dt));
+  if(this.flood>=1){this.fail('Motor afogado na partida','flooded');return;}
+  if(cranking){
+   if(!this.crank)this.emitSound('ignition');this.crank+=dt;this.battery=Math.max(0,this.battery-dt/START.battery);
+   if(this.ignOn&&p>=START.low&&p<=START.high){this.ignitionGood=(this.ignitionGood||0)+dt;if(this.ignitionGood>this.catchTime()){this.phase='grid';this.countdown=3;this.emitSound('engineCatch');this.emitSound('countdown');this.touch();return;}}
    else this.ignitionGood=0;
-   if(this.crank>4){this.fail('A bateria arriou tentando dar partida','batteryDead');return;}
+   if(this.battery<=0){this.fail('A bateria arriou tentando dar partida','batteryDead');return;}
   }else{this.crank=0;this.ignitionGood=0;}
  }
  startRace(){if(this.phase!=='grid')return;this.emitSound('raceGo');this.phase='race';this.raceTime=0;this.touch();}
@@ -60,7 +83,8 @@ export class ImmersiveState {
  raceStep(sensor,dt){
   if(this.phase!=='race')return;
   this.raceTime+=dt;this.alertTime=Math.max(0,this.alertTime-dt);
-  const previousFuel=this.fuel;this.fuel=Math.max(0,this.fuel-dt*(.002+sensor.speed*.00045+sensor.throttle*.005+(sensor.wheelspin||0)*.0023+(this.tankDetached?.35:0)+(this.condition?.factors.leak??0)));
+  // fuelScale (ImmersiveMode.start): driving burns the tank over the whole race as it did over one lap.
+  const previousFuel=this.fuel;this.fuel=Math.max(0,this.fuel-dt*((.002+sensor.speed*.00045+sensor.throttle*.005+(sensor.wheelspin||0)*.0023)*(this.fuelScale??1)+(this.tankDetached?.35:0)+(this.condition?.factors.leak??0)));
   if(previousFuel>=1&&this.fuel<1&&this.fuel>0)this.emitSound('reserve');
   const depth=Math.max(0,sensor.offTrack||0);
   if(depth>2.5&&sensor.speed>7)this.tankWear+=dt*(depth-2.5)*.24;
@@ -99,7 +123,7 @@ export class ImmersiveState {
   this.prize=Math.max(0,reward-this.towSnags*25);this.savedCash=Math.max(0,Number.isFinite(this.cash)?this.cash:0);this.profile.fund+=this.prize+this.savedCash;this.cash=0;this.profile.races++;this.emitSound(this.result?.position===1&&this.result?.status!=='Desclassificado'?'podiumWin':'podiumLoss');this.paid=true;this.phase='podium';this.podiumPlace=6;this.touch();
  }
  releaseBlazer(){if(this.phase==='complete'&&!this.profile.released&&this.profile.fund>=BLAZER_COST){this.emitSound('blazer');this.profile.fund-=BLAZER_COST;this.profile.released=true;this.touch();return true;}return false;}
- info(){return {active:this.active,phase:this.phase,cash:this.cash,fuel:this.fuel,health:this.health,glass:this.glass,tankDetached:this.tankDetached,pressure:this.pressure,
+ info(){return {active:this.active,phase:this.phase,cash:this.cash,desk:!!this.desk,fuel:this.fuel,health:this.health,glass:this.glass,tankDetached:this.tankDetached,pressure:this.pressure,ignOn:!!this.ignOn,flood:this.flood,battery:this.battery,
   position:this.position,result:this.result,reason:this.reason,towGap:this.towGap,towSnags:this.towSnags,inspected:this.inspected,podiumPlace:this.podiumPlace,prize:this.prize,savedCash:this.savedCash,profile:{...this.profile}};}
 }
 

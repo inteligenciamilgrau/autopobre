@@ -55,4 +55,21 @@ for(const [name,r] of [['interlagos',interlagos],['curvelo',curvelo]]){
 assert(interlagos.modes.includes('defend'),'rivals cover the inside when attacked');
 assert(interlagos.best[0]>113&&interlagos.best[1]<140,'Interlagos pace sits between the car limit and the old convoy');
 assert(interlagos.peak>190,'no artificial speed limiter on the straights');
-console.log(JSON.stringify({passed:true,interlagos,curvelo},null,1));
+
+// Recon lap: the Opala 99 races with the same racecraft (heroInput) from the back of the grid,
+// passes cars and finishes near the front, on the asphalt and off the walls. Its own dice leave
+// the rivals' seeded race exactly as it is.
+function heroRace(seed){
+ const car=new TestCar(data);car.resetGrid();const field=new RaceField(data,{seed});field.reset(car.surface.s,{grid:true});
+ let offroad=0,walls=0,steps=0,position=null;
+ for(;steps<120*480&&position===null;steps++){
+  car.step(field.heroInput(car,1/120),1/120);if(car.wallImpactSpeed>4)walls++;field.step(car,1/120,3);if(!car.surface.onRoad)offroad++;
+  if(car.laps>=3)position=1+field.rivals.filter(r=>r.finished).length;
+ }
+ return {position,best:car.best,offroad:offroad/steps,walls,passes:field.hero.passes};
+}
+const hero=heroRace(5);
+assert(hero.position!==null&&hero.position<=6,'the recon driver finishes three laps in the top six from the back');
+assert(hero.passes>=3&&hero.walls===0&&hero.offroad<.005,'the recon driver passes cleanly, on the asphalt');
+assert(hero.best<122,'the recon driver laps near the front-runners\' pace');
+console.log(JSON.stringify({passed:true,interlagos,curvelo,hero},null,1));

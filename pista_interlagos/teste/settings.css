@@ -10,9 +10,15 @@
 .key-guide{margin-top:24px}.key-guide>div{display:grid;grid-template-columns:150px 1fr;align-items:center;padding:12px 0;border-bottom:1px solid #ffffff12}.key-guide dt{display:flex;gap:4px}.key-guide kbd{margin:0;padding:4px 6px;background:#071611;color:#e7d491;min-width:24px;text-align:center}.key-guide dd{font-size:11px;color:#c0cec2;margin:0}
 .settings-footer{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:20px 32px;border-top:1px solid #ffffff18;background:#0b1815}.settings-footer span{font-size:10px;color:#91a795}.settings-footer i{display:inline-block;width:5px;height:5px;border-radius:50%;background:#a6c88d;margin-right:6px}.settings-footer button{font-size:12px;font-weight:750;background:#edca50;color:#182519;border:0;white-space:nowrap}
 #settings :focus-visible{outline:2px solid #f1d775;outline-offset:3px}
-#menu #tour:disabled{display:none}
+
 @media(max-width:700px){.settings-header{padding:18px;gap:12px}.settings-header h2{font-size:24px}.settings-mark{width:45px;height:45px;font-size:28px}.settings-kicker{font-size:8px;letter-spacing:1.2px}.settings-body{display:flex;flex-direction:column;min-height:0}.settings-tabs{display:flex;gap:6px;padding:10px;border-right:0;border-bottom:1px solid #ffffff18;flex-shrink:0}.settings-tabs button{justify-content:center;gap:7px;margin:0;padding:12px 7px}.settings-tabs p{display:none}.settings-content{padding:22px}.settings-content .choices{flex-direction:column}.settings-footer{padding:16px;flex-wrap:wrap}.key-guide>div{grid-template-columns:120px 1fr}.settings-content h3{font-size:22px}}
 /* Leave the player visible to the left of the conversation card. */
 .immersive-stage #immersivePanel{width:min(380px,36vw);font-size:12px}.immersive-stage #immersivePanel h2{font-size:26px}
 @media(max-width:700px){.immersive-stage #immersivePanel{top:auto;bottom:68px;right:12px;left:12px;width:auto;max-height:35vh;padding:14px}.immersive-stage #immersiveHud{top:90px;bottom:auto;width:180px;left:12px}.immersive-stage #immersivePanel h2{font-size:22px}}
 .settings-content .realism-choice{margin:0 0 18px}
+/* 04 Reconhecimento: the automatic recon lap, mostly used for testing. */
+.tour-start{margin:8px 0 22px;padding:13px 20px;font-size:13px;font-weight:700;background:#152d29;color:#f0d67a;border:1px solid #dfc85d88}
+.tour-start:hover{background:#21443c;color:#ffe574}
+/* Tight layouts: short label for 04 and, in a single row of tabs, no numbers. */
+.settings-tabs .tab-short{display:none}
+@media(max-width:700px){.settings-tabs button{font-size:0;gap:0;flex:1 1 auto;padding-inline:4px}.settings-tabs b{font-size:12px}.settings-tabs .tab-long{display:none}.settings-tabs .tab-short{display:inline}}

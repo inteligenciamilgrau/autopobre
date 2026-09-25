@@ -9,7 +9,7 @@ with sync_playwright() as p:
  page=browser.new_page(viewport={'width':1440,'height':900},device_scale_factor=1)
  page.on('pageerror',lambda e:errors.append(str(e)))
  page.on('console',lambda msg:errors.append(msg.text) if msg.type=='error' else None)
- open_menu(page);race_options(page,immersive=False)
+ open_menu(page)
  page.screenshot(path=str(R/'renders/teste_menu.png'))
  enter_track(page);wait_race_start(page)
  before=page.evaluate('interlagos.telemetry()')

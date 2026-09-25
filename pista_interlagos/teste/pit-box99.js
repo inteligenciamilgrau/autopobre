@@ -59,7 +59,7 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
   poster:std('Cartaz_corrida',0xffffff,{map:art.racePoster(),roughness:.8}),
   opening:std('Quadro_abertura',0xffffff,{map:image('./assets/abertura/abertura_stevan_opala99.png'),roughness:.6}),
   logo:std('Banner_logo_box99',0xffffff,{map:image('./assets/abertura/logo_auto_pobre_racing.png'),transparent:true,roughness:.7,...decal}),
-  screen:new THREE.MeshBasicMaterial({name:'Monitores_cronometragem',map:art.timingScreen(rows)}),
+  screen:new THREE.MeshBasicMaterial({name:'Monitores_cronometragem',map:art.timingScreen(rows,'CRONOMETRAGEM · '+(labels?.track??'INTERLAGOS'))}),
  };
  const addc=(color,g,x,d,y=0,turn=0,absolute=false)=>add(M.props,paint(g,color),x,d,y,turn,absolute);
  // Several coloured parts in one object's own frame, placed together.
@@ -141,7 +141,10 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
   kit(parts,x,d,0,turn);};
  shelves(-B+.47,F+10.75,0,3);
  kit([[cyl(.3,.04,16),DARK,[0,.02,0]],[cyl(.035,1.9,10),STEEL,[0,.95,0]],[box(1.5,.06,.06),STEEL,[0,1.75,-.02]],[box(.72,.44,.05),DARK,[-.37,1.75,.04]],[box(.72,.44,.05),DARK,[.37,1.75,.04]]],B-1.15,F+1.2);
- for(const x of [-.37,.37])add(M.screen,new THREE.PlaneGeometry(.64,.37),B-1.15+x,F+1.115,1.75);
+ // Record boards (layout.showRecords): the mode's best laps and best races, and the other mode's
+ // best laps. The two TVs by the door show the first two, the team stand's three monitors all.
+ const boards=[art.recordBoard(),art.recordBoard(),art.recordBoard()],boardMaterials=boards.map((board,i)=>new THREE.MeshBasicMaterial({name:'TV_recordes_'+['volta','corrida','outro_modo'][i],map:board.map}));
+ for(const i of [0,1])add(boardMaterials[i],new THREE.PlaneGeometry(.64,.37),B-1.15+(i?.37:-.37),F+1.115,1.75);
  {const rack=[[box(.9,.04,.45),STEEL,[0,.45,0]],[box(.9,.04,.45),STEEL,[0,.02,0]]];for(const [x,z] of [[-.43,-.2],[.43,-.2],[-.43,.2],[.43,.2]])rack.push([box(.04,.9,.04),STEEL,[x,.45,z]]);
   for(const [x,y] of [[-.22,.04],[.22,.04],[-.22,.47],[.22,.47]])rack.push([box(.3,.34,.18),RED,[x,y+.17,0]],[cyl(.03,.05,8),YELLOW,[x+.1,y+.37,0]],[box(.14,.03,.04),DARK,[x-.05,y+.36,0]]);kit(rack,-B+1,F+1.25);}
  const extinguisher=(x,d)=>kit([[cyl(.09,.5,14),RED,[0,.3,0]],[sph(.09,12,6),RED,[0,.55,0]],[box(.06,.08,.06),DARK,[0,.66,0]],[box(.14,.02,.03),DARK,[.05,.7,0]],[cyl(.012,.35,6),DARK,[.09,.45,0]]],x,d);
@@ -231,27 +234,46 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
 
  // --- Team stand on the pit wall in front of the box, facing the track.
  // Without a pit wall (Curvelo) it stands on a concrete plinth on the grass.
- let standBox;
+ let standBox,standFloor,onStand,desk;
  {const p0=lerp(S);let dw,t,top;
   if(pit.stand)({d:dw,thickness:t,top}=pit.stand);
   else{const o=at(p0,0);let best=null;for(const q of pit.walls.find(w=>w.name==='Muro_boxes').points){const dist=Math.hypot(q[0]-o.x,q[1]+o.z);if(!best||dist<best[0])best=[dist,q];}
    const q=best[1];dw=(q[0]-p0[c.x])*p0[c.lx]+(q[1]-p0[c.y])*p0[c.ly];t=q[3];top=q[2]+1.05-p0[c.z];}
   const W=Math.min(2.2,t-.5),dc=dw+t/2-.2-W/2;
-  if(pit.stand)addc(0x9a9c96,box(3.8,top-sink,t),0,dw,(top+sink)/2,0,true);
+  // The plinth runs under the steps' landing too (x -2.65 to 1.95, as the pit wall top).
+  if(pit.stand)addc(0x9a9c96,box(4.6,top-sink,t),-.35,dw,(top+sink)/2,0,true);
   const stand=[[box(3.2,.08,W),0x3a4045,[0,.04,0]],[box(2.8,.05,.7),DARK,[0,.82,W/2-.45]],[box(3.5,.08,W+.3),RED,[0,2.46,0]],[box(3.5,.3,.04),RED,[0,2.3,-W/2-.15]],[cyl(.012,1.6,6),ALU,[1.5,3.3,0]],[box(.02,.25,.4),YELLOW,[1.5,3.95,.2]]];
   for(const x of [-1.3,1.3])stand.push([box(.05,.78,.05),STEEL,[x,.43,W/2-.45]]);
   for(const x of [-.95,0,.95])stand.push([box(.62,.4,.04),DARK,[x,1.1,W/2-.28]]);
   for(const [x,z] of [[-1.55,-W/2+.05],[1.55,-W/2+.05],[-1.55,W/2-.05],[1.55,W/2-.05]])stand.push([cyl(.035,2.4,8),STEEL,[x,1.24,z]]);
   for(const x of [-.6,.6])stand.push([cyl(.2,.05,14),DARK,[x,.72,-W/2+.55]],[cyl(.03,.66,8),ALU,[x,.37,-W/2+.55]],[cyl(.2,.02,14),ALU,[x,.05,-W/2+.55]]);
-  kit(stand,0,dc,top,0,true);for(const x of [-.95,0,.95])add(M.screen,new THREE.PlaneGeometry(.56,.33),x,dc-(W/2-.31),top+1.1,Math.PI,true);
+  // Read by the engineers, left to right: best laps, best races, the other mode's best laps.
+  kit(stand,0,dc,top,0,true);[.95,0,-.95].forEach((x,i)=>add(boardMaterials[i],new THREE.PlaneGeometry(.56,.33),x,dc-(W/2-.31),top+1.1,Math.PI,true));
   // The team sign hangs 3 cm off the red fascia (on its face it flickered).
   sign(art.signBoard('AUTO-POBRE RACING · 99','','#c01e25','#fff4d8',{h:96}),3.4,.28,0,dc+W/2+.2,top+2.3,Math.PI);
-  kit([[box(.8,top/3,.3),STEEL,[0,top/6,-.15]],[box(.8,top*2/3,.3),STEEL,[0,top/3,.15]]],-2.2,dw+t/2+.3);
-  // Solid on foot: plinth or wall top, the deck with its people and the steps.
+  // Steps up from the lane, with yellow nosing on the treads.
+  const D=dw+t/2+.3;
+  kit([[box(.8,top/3,.3),STEEL,[0,top/6,-.15]],[box(.8,top*2/3,.3),STEEL,[0,top/3,.15]],[box(.8,.012,.06),YELLOW,[0,top/3+.006,-.27]],[box(.8,.012,.06),YELLOW,[0,top*2/3+.006,.03]]],-2.2,D);
   standBox=[-2.65,1.95,Math.min(dw-t/2,dc-W/2-.2),Math.max(dw+t/2+.6,dc+W/2+.25)];
-  for(const x of [-.6,.6]){const w=frame(x,dc+W/2-.55,top+.08,true);crowd.push({outfit:{...OUTFITS.engineer,skin:x<0?0xc68e6a:0x8d5a3b},pose:'stool',x:w.x,y:w.y+.02,z:w.z,yaw:w.h-Math.PI/2});}}
+  // On foot the stand is climbed by its steps: the treads, the wall top (or plinth) and
+  // the deck are floors, each entered from at most a step (45 cm) below. The fence edge,
+  // the desk and the canopy posts stay solid; the engineers are solid people (layout.solid).
+  // onStand: the cells where these floors replace the pit wall's collision.
+  const deskD=dc-W/2+.45,edge=pit.stand?0:.15;
+  onStand=(x,d)=>x>-2.6&&x<-1.8&&d>D-.3&&d<D+.3?(d>D?1:2):x>-2.65&&x<1.95&&d>dw-t/2&&d<=dw+t/2?3:0;
+  standFloor=(x,d,elevation)=>{
+   const cell=onStand(x,d);if(!cell)return x>-2.65-R&&x<1.95+R&&d>dw-t/2-R&&d<dw+t/2?null:undefined;
+   if(cell===3&&(d<dw-t/2+edge+R||Math.abs(x)<1.4+R&&Math.abs(d-deskD)<.35+R||[-1.55,1.55].some(px=>[-1,1].some(k=>Math.hypot(x-px,d-dc-k*(W/2-.05))<.035+R))))return null;
+   const y=cell<3?frame(x,D,top*cell/3).y:frame(x,d,top+(Math.abs(x)<1.6&&Math.abs(d-dc)<W/2?.08:0),true).y;
+   return y<=elevation+.45?y:null;
+  };
+  // Registration (story mode): the circle beside the left engineer, where the pilot
+  // faces him and his screens; the route climbs from the foot of the steps.
+  const place=(x,d,y,absolute=true)=>{const f=frame(x,d,y,absolute);return new THREE.Vector3(f.x,f.y,f.z);},[sx,sd,ex,ed]=[-1.15,(dc+W/2-.55+deskD+.35)/2,-.6,dc+W/2-.55],spot=place(sx,sd,top+.08),team=place(ex,ed,top+.08);
+  desk={spot,team,face:Math.atan2(-(team.z-spot.z),team.x-spot.x),look:frame(0,0).h-Math.PI/2+.2,route:[place(-2.2,D+.9,0,false),place(-2.2,dw+t/2-.45,top),spot.clone()]};
+  for(const x of [-.6,.6]){const w=frame(x,dc+W/2-.55,top+.08,true);crowd.push({outfit:{...OUTFITS.engineer,skin:x<0?0xc68e6a:0x8d5a3b},pose:'stool',idle:'desk',x:w.x,y:w.y+.02,z:w.z,yaw:w.h-Math.PI/2});}}
 
- // --- Café regulars (static) and the animated crew and Tia.
+ // --- Café regulars (idling with their coffee, pit-crew.js) and the animated crew and Tia.
  const person=(x,d,y,pose,outfit,turn)=>{const w=frame(x,d,y);crowd.push({outfit,pose,x:w.x,y:w.y,z:w.z,yaw:w.h+turn});};
  person(-15.3,F+1.4,.16,'stool',{top:GREEN,bottom:0x2b3a55,skin:0xb77a55,hat:'cap',hatColor:YELLOW},-Math.PI/2);
  person(-12.3,F+1.4,.16,'stool',{top:WHITE,bottom:0x3b3f45,skin:0x8d5a3b,hairStyle:'curly'},-Math.PI/2);
@@ -291,13 +313,21 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
  const spotWorld=at(lerp(S),spot.d),[spotX,spotY]=toData(0,spot.d);
  const layout={
   pit,anchor:{x:spotWorld.x,y:spotWorld.y+.055,z:spotWorld.z,heading:h0},label:'INTERLAGOS · BOX 99',title:'Cuida do Opala!',name:'Box 99 de Interlagos',...labels,scenery:true,
+  // lap, race: trackRecords rows (lap-records.js); mode: the story's ('immersive') or the race's.
+  // recordsShown keeps what the TVs show.
+  showRecords:({title,mode,lap,race,laps,other})=>{layout.recordsShown={title,mode,lap,race,other};const kind=m=>m==='immersive'?'MODO HISTÓRIA':'MODO CORRIDA';
+   boards[0].show({title,subtitle:`MELHOR VOLTA · ${kind(mode)}`,rows:lap});boards[1].show({title,subtitle:`CORRIDA DE ${laps} VOLTAS · ${kind(mode)}`,rows:race});boards[2].show({title,subtitle:`MELHOR VOLTA · ${kind(other.mode)}`,rows:other.lap});},
   inBox:surface=>inServiceSpot(spot,surface),
   crew,cafeSeat:route.at(-1).clone(),cafeSign:world(-13.2,F+9.6,2.95),route,heroHeading:h0+Math.PI/2,pitView:[5.6,-6.4,2.9],
   makeHero:()=>people.person(OUTFITS.driver),
-  walk:pos=>{
-   const q=toLocal(pos.x,-pos.z);if(q.x>standBox[0]-R&&q.x<standBox[1]+R&&q.d>standBox[2]-R&&q.d<standBox[3]+R)return null;
+  // elevation: the height of the pilot's feet (the team stand is climbed step by step).
+  walk:(pos,elevation=pos.y)=>{
+   const q=toLocal(pos.x,-pos.z);if(q.x>standBox[0]-R&&q.x<standBox[1]+R&&q.d>standBox[2]-R&&q.d<standBox[3]+R){const y=standFloor(q.x,q.d,elevation);if(y!==undefined)return y;}
    if(q.d<F+.2-R||q.d>F+16.8||q.x<-3*B-1||q.x>B+1)return undefined;return walkable(q.x,q.d)?floorAt(q.x,q.d):null;
   },
+  // On the stand's steps, wall top and deck the layout's floors stand for the pit wall.
+  overWalls:pos=>{const q=toLocal(pos.x,-pos.z);return !!onStand(q.x,q.d);},
+  desk,
   // People are solid on foot: everyone placed for good at his level (the stand, the
   // café, the garages; not the roof terrace) and, unless it is at work round the car,
   // the crew. Only steps toward someone are stopped, so nobody gets pinned.

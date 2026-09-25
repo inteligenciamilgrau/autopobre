@@ -7,3 +7,11 @@ Diffuse, OpenGL normal and roughness maps: 2048 x 2048, 2.1 metres per tile.
 Downloaded from the official Poly Haven asset downloads; JPEGs recompressed
 for the web version. Decorative rubber, repairs, seams and shoulder wear
 are added by the game shader and are not surveyed Interlagos surface data.
+
+Version 3 (2026-09-25): Asphalt Track - Dimitrios Savva / Poly Haven
+https://polyhaven.com/a/asphalt_track
+License: CC0 1.0 (public domain)
+Diffuse, OpenGL normal and roughness maps at 2048 x 2048, 2.0 metres per tile,
+recompressed as asfalto_diff_v3.jpg, asfalto_nor_gl_v3.jpg and asfalto_rough_v3.jpg.
+The game shader re-tones the diffuse to a sun-weathered grey and adds the racing
+line, marbles, crack sealant, patches and seams (decorative, not survey data).

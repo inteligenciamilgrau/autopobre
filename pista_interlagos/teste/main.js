@@ -6,7 +6,7 @@ import {CIRCUITS,selectedCircuit,mapProjection} from './circuits.js';
 import {createCurveloData} from './curvelo-data.js';
 import {createCurveloScene} from './curvelo-scene.js';
 import {RaceResults} from './race-results.js';
-import {LapRecords,AutomaticRecords} from './lap-records.js';
+import {LapRecords,AutomaticRecords,trackRecords} from './lap-records.js';
 import {AutomaticAIRecords} from './ai-records.js';
 import {PilotPicker,pilotStorage} from './pilot-profile.js';
 import * as THREE from 'three';
@@ -26,12 +26,17 @@ import {ImmersiveMode} from './immersive-mode.js';
 import {MobileControls} from './mobile-controls.js';
 import {setupSettings} from './settings.js';
 import {CarAudio} from './car-audio.js?v=20260913-immersive';
-import {PlayerPreferences,CAMERA_MODES} from './player-preferences.js';
+import {PlayerPreferences,CAMERA_MODES,LAPS} from './player-preferences.js';
 import {createSky,SUN_DIRECTION} from './sky.js';
+import {createCinematic} from './cinematic.js';
 import {createLandscape,loadTerrainTextures,buildTrackField,readOrtho,terrainMaterial,structureMaterial,createCrowd} from './landscape.js';
 import {LakeContact} from './lake-contact.js';
 import {fitGround,applyGroundHeights,groundHeight} from './track-clearance.js';
 import {createGrandstands} from './interlagos-stands.js';
+import {createTrackside} from './trackside.js';
+import {updatePeople} from './pit-crew.js';
+import {TvCamera} from './tv-camera.js';
+import {CinematicIntro} from './intro-cinematic.js';
 const $=id=>document.getElementById(id);
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;let mobile;
 const preferences=new PlayerPreferences();
@@ -55,23 +60,28 @@ for(const button of document.querySelectorAll('[data-circuit]'))button.onclick=(
  showCircuitSelection();updateMenuLabels();
 };
 let projectMap;
-$('immersiveMode').checked=preferences.values.immersive;
 $('livery').value=preferences.values.livery;
 $('camera').value=preferences.values.camera;
 $('carDamage').checked=preferences.values.damage;
 $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked});pitstop?.setDamage(preferences.values.damage);};
 $('realisticWater').checked=preferences.values.realisticWater;
 $('realisticWater').onchange=()=>{preferences.update({realisticWater:$('realisticWater').checked});landscape?.setRealisticWater(preferences.values.realisticWater);};
+// Race length (both modes, every circuit): taken at the next start, so a race under way keeps its own.
+{const laps=$('raceLaps');for(let n=LAPS.min;n<=LAPS.max;n++)laps.add(new Option(`${n} volta${n>1?'s':''}${n===LAPS.standard?' (padrão)':''}`,String(n)));laps.value=String(preferences.values.laps);
+ laps.onchange=()=>{preferences.update({laps:Number(laps.value)});if(immersive)immersive.laps=preferences.values.laps;};}
 $('classicInterior').checked=preferences.values.classicInterior;
 $('classicInterior').onchange=()=>{preferences.update({classicInterior:$('classicInterior').checked});if(ready)cabinVisibility();};
-$('tour').disabled=preferences.values.immersive;
+// Film look level (cinematic.js): auto, full, lite or off.
+$('cinematicLevel').value=preferences.values.cinematic;
+$('cinematicLevel').onchange=()=>{preferences.update({cinematic:$('cinematicLevel').value});cinematic?.setLevel(cinematicLevel());};
+// The opening menu picks the mode: Modo Corrida (free race) or Modo História (immersive).
 function chooseImmersive(value){
- $('immersiveMode').checked=value;$('tour').disabled=value;
  preferences.update({immersive:value});if(ready)updateMenuLabels();
 }
-$('immersiveMode').onchange=()=>chooseImmersive($('immersiveMode').checked);
 const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');
-let sky,landscape,landscapeField,terrainTextures,lakeContact=null;
+let sky,landscape,landscapeField,terrainTextures,lakeContact=null,cinematic,trackside=null,tvCamera=null;const tvVelocity=new THREE.Vector3();
+// Film-style opening shots before the free race's 3-2-1 and when the story begins.
+const intro=new CinematicIntro();let introHidden=null;
 let renderer;
 const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,6500);
 const orbit=new OrbitControls(camera,$('view'));
@@ -104,13 +114,17 @@ const headLook={yaw:0,pitch:0};
 // cockpitView is a debug pose for interior photos (interlagos.setCockpitView); null in play.
 const lookBack=new LookBack(),headView={yaw:0,pitch:0},headEye=new THREE.Vector3(),twist=[0,0,0];
 let cockpitView=null,photoHidDriver=false;const photoEye=new THREE.Vector3();
+// Recon lap: N (or the Piloto button) hands the cameras to the next car on track, to watch the lap
+// with another driver; 0 is the player's own Opala.
+let watched=0;const watchForward=new THREE.Vector3(1,0,0),watchTarget=new THREE.Vector3();
 let pointerLocked=false,lockPending=false,lockUnavailable=!$('view').requestPointerLock;
 const isInside=()=>mode==='cockpit'||mode==='hood';
 // Look-back (B or the touch button): driving from the cockpit only, not on foot, in the pit stop or menus.
 const lookBackAllowed=()=>mode==='cockpit'&&ready&&!paused&&!cockpitView&&!pitstop?.opened&&!immersive?.onFoot()&&!gridPreview()&&!$('settings').open;
 // Sky light comes mostly from the environment map; the hemisphere only lifts deep shadows.
-scene.add(new THREE.HemisphereLight('#cfe2ff','#4a5236',.75));
-const sun=new THREE.DirectionalLight('#fff1dc',3.4);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:2048,touchDevice?1024:2048);Object.assign(sun.shadow.camera,{left:-55,right:55,top:55,bottom:-55,near:1,far:300});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;sun.shadow.radius=2;scene.add(sun,sun.target);
+// Late-afternoon key light: warm sun, a weaker sky fill so shade keeps its depth.
+scene.add(new THREE.HemisphereLight('#c4d8f2','#4c4a38',.52));
+const sun=new THREE.DirectionalLight('#ffe2bf',3.7);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:4096,touchDevice?1024:4096);const shadowReach=touchDevice?55:85;Object.assign(sun.shadow.camera,{left:-shadowReach,right:shadowReach,top:shadowReach,bottom:-shadowReach,near:1,far:340});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;sun.shadow.radius=2;scene.add(sun,sun.target);
 const sunOffset=SUN_DIRECTION.clone().multiplyScalar(140);
 const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
 // Sprung mass: body, cabin, cockpit and driver roll and pitch on the suspension;
@@ -123,17 +137,29 @@ const openings=new CarOpenings();
 // controls show through the windows. The classic setting keeps the old box interior in the
 // cockpit view instead. The driver drops with the controls he holds.
 function cabinVisibility(){
- const inside=mode==='cockpit'&&!gridPreview(),classic=preferences.values.classicInterior;
+ const inside=mode==='cockpit'&&!gridPreview()&&!watchedRival(),classic=preferences.values.classicInterior;
  if(cockpit){cockpit.root.visible=inside||!!model;cockpit.setView({inside,classic});if(driver)driver.root.position.y=cockpit.drop();}
  if(model){model.visible=!inside||!classic;carStructure.visible=!(inside&&classic);}
 }
 const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
 function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
 let cockpit,skidMarks,tyreSmoke;
+// The two TVs in Box 99's garage and the team stand's monitors show this track's records (the mode
+// being played, and the other mode's best laps on the stand); they are
+// checked every 1.5 s and redrawn only when the lists change (a new record, the other mode).
+let recordTvs=null,recordTvsKey='',recordTvsAt=0;
+function updateRecordTvs(now){
+ if(!recordTvs||now<recordTvsAt)return;recordTvsAt=now+1500;
+ const kind=immersive?.active?'immersive':'normal',otherKind=kind==='immersive'?'normal':'immersive',read=m=>trackRecords(pilotStorage(),circuit.id,m,immersive?.pilotName);
+ const lists=read(kind),other={mode:otherKind,lap:read(otherKind).lap},key=JSON.stringify([circuit.id,kind,lists,other]);
+ if(key!==recordTvsKey){recordTvsKey=key;recordTvs.showRecords({title:`RECORDES · ${circuit.name.toUpperCase()}`,mode:kind,laps:LAPS.standard,...lists,other});}
+}
 function initializeRenderer(){
  if(renderer)return;
  renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:!touchDevice});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
  sky=createSky(renderer,scene,{mobile:touchDevice});
+ // Film look: linear HDR scene, then occlusion, haze, bloom, lens and grade (cinematic.js).
+ cinematic=createCinematic(renderer,{mobile:touchDevice,level:cinematicLevel()});cinematic.setSun(SUN_DIRECTION);
  cockpit=createCockpit(renderer);carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,64);
  skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
@@ -149,8 +175,10 @@ $('volume').oninput=e=>{carAudio.setVolume(Number(e.target.value)/100);audioCont
 $('mute').onclick=()=>{carAudio.toggleMute();carAudio.unlock();audioControls();};
 let sessionStarted=false,loading=false,loadedCircuit=null;
 let pitstop,immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
-const gridPreview=()=>immersive?.active&&['prepare','starting','grid'].includes(immersive.state.phase);
-let wasGridPreview=false,previewOrbit=false,previewPhase='';
+// The story's grid countdown is shown from behind the car; the engine start before it
+// ('starting') is played in the cockpit (ImmersiveMode switches the view).
+const gridPreview=()=>immersive?.active&&immersive.state.phase==='grid';
+let wasGridPreview=false;
 const keys=new Set(),clock=new THREE.Clock(),matrix=new THREE.Matrix4(),forward=new THREE.Vector3(),up=new THREE.Vector3(),right=new THREE.Vector3(),desired=new THREE.Vector3(),look=new THREE.Vector3();
 const wheelForward=new THREE.Vector3(),wheelUp=new THREE.Vector3(0,1,0),wheelAxle=new THREE.Vector3(),wheelMatrix=new THREE.Matrix4(),wheelTurn=new THREE.Quaternion(),wheelSpin=new THREE.Quaternion(),axleAxis=new THREE.Vector3(0,0,1);
 function status(text){$('status').textContent=text;$('status').classList.toggle('hidden',!text);}
@@ -233,7 +261,7 @@ function drawMap(){
  const ctx=$('map').getContext('2d'),w=260,h=300;ctx.clearRect(0,0,w,h);
  const xy=p=>projectMap(p[1],p[2]);
  ctx.beginPath();data.samples.forEach((p,i)=>{const [x,y]=xy(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.lineWidth=8;ctx.strokeStyle='#ffffff16';ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle='#b6c5b5';ctx.stroke();
- if(immersive&&(!immersive.active||['prepare','starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle='#'+r.entry.color.toString(16).padStart(6,'0');ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
+ if(immersive&&(!immersive.active||['starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle='#'+r.entry.color.toString(16).padStart(6,'0');ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
  if(pitstop){ctx.beginPath();let started=false;const nodes=data.samples.filter(p=>pitLane(data,p[0])).sort((a,b)=>pitLane(data,a[0]).u-pitLane(data,b[0]).u);for(const p of nodes){const d=pitLane(data,p[0]).offset,[x,y]=projectMap(p[1]-p[8]*d,p[2]+p[7]*d);if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y);}ctx.strokeStyle='#55e0db';ctx.lineWidth=2;ctx.stroke();const [px,py]=projectMap(pitstop.anchor.x,-pitstop.anchor.z);ctx.fillStyle='#114e43';ctx.fillRect(px-9,py-21,18,16);ctx.fillStyle='#fff5a1';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillText('P',px,py-9);}
  if(data.pit){const c=data.pit.columns,x=c.indexOf('x'),y=c.indexOf('y');ctx.beginPath();data.pit.samples.forEach((p,i)=>{const [px,py]=projectMap(p[x],p[y]);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.lineWidth=1.5;ctx.strokeStyle=car.surface.pit?'#55e0db':'#7fa7a0';ctx.stroke();}
  const [sx,sy]=xy(data.samples[0]);ctx.fillStyle='#ffffff';ctx.fillRect(sx-3,sy-3,6,6);
@@ -248,7 +276,7 @@ function updateCar(dt){
  const bump=roughRide*(Math.sin(car.distance*2.1)*.025+Math.sin(car.distance*4.7)*.012);
  // The physics body carries heave, pitch, roll, jumps and rollovers; the
  // model origin sits on the ground below its centre of mass.
- const pose=car.pose();carRoot.position.set(pose.x,pose.z+bump,-pose.y);
+ const pose=car.pose(renderAhead());carRoot.position.set(pose.x,pose.z+bump,-pose.y);
  forward.set(pose.forward[0],pose.forward[2],-pose.forward[1]);up.set(pose.up[0],pose.up[2],-pose.up[1]);right.crossVectors(forward,up).normalize();
  matrix.makeBasis(forward,up,right);
  roughEuler.set(Math.sin(car.distance*2.7)*roughRide*.008,0,Math.sin(car.distance*1.9)*roughRide*.006);
@@ -294,7 +322,7 @@ function setCameraMode(value){
  if(!cameraModes.includes(value))return;
  // Only a follow view already drawn for this car is worth keeping when the orbit takes over.
  const previous=mode,keepView=ready&&value==='orbit'&&previous!=='orbit'&&(followInitialized||wasGridPreview);
- mode=value;orbitFrom=null;followInitialized=false;orbit.enabled=value==='orbit';$('camera').value=value;
+ mode=value;orbitFrom=null;followInitialized=false;if(value==='tv')tvCamera?.reset();orbit.enabled=value==='orbit';$('camera').value=value;
  preferences.update({camera:value});
  orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();
  cabinVisibility();
@@ -348,8 +376,7 @@ window.addEventListener('blur',()=>blockedCameraTouches.clear());
 $('view').addEventListener('pointerdown',e=>{
  if(!ready||paused||pitstop?.opened||e.button!==0||immersive?.active&&!immersive.allowsPointer())return;
  cameraReturn.manual(performance.now());
- const preparing=immersive?.active&&immersive.state.phase==='prepare';if(preparing){previewOrbit=true;orbitFromView();orbit.target.copy(carRoot.position).add(new THREE.Vector3(0,.85,0));orbit.update();}
- if(!preparing&&e.pointerType==='mouse'&&!lockUnavailable&&$('view').requestPointerLock){
+ if(e.pointerType==='mouse'&&!lockUnavailable&&$('view').requestPointerLock){
   e.stopImmediatePropagation();
   if(pointerLocked||lockPending)return;
   lockPending=true;
@@ -362,12 +389,14 @@ document.addEventListener('pointerlockchange',()=>{
  orbit.enableRotate=!pointerLocked;document.body.classList.toggle('pointer-locked',pointerLocked);$('view').classList.remove('dragging');
  cameraReturn.manual(performance.now());cameraHint();
  if(pointerLocked)status('');
- if(wasLocked&&!pointerLocked&&!pitstop?.opened&&!immersive?.blockingUI())menu(true);
+ // Escape releases the lock without a keydown: that opens the menu. The pause (P) releasing it,
+ // or the window going to another app, only pauses with the track on screen.
+ if(wasLocked&&!pointerLocked&&!held&&!pitstop?.opened&&!immersive?.blockingUI()){if(document.hasFocus()&&!document.hidden)menu(true);else hold(true);}
 });
 document.addEventListener('pointerlockerror',lockFailed);
 document.addEventListener('mousemove',e=>{
- // On foot (pit stop, story-mode paddock) the mouse belongs to the walking camera.
- if(!pointerLocked||paused||pitstop?.opened||immersive?.onFoot()||(!e.movementX&&!e.movementY))return;
+ // On foot (pit stop, story-mode paddock) and on the podium the mouse belongs to that camera.
+ if(!pointerLocked||paused||pitstop?.opened||immersive?.ownsMouse()||(!e.movementX&&!e.movementY))return;
  if(isInside()){
   // The cockpit turns right round; while B holds the look back, the look to return to stays put.
   if(!lookBack.held)turnHead(headLook,e.movementX,e.movementY,mode==='cockpit'?HEAD_YAW_COCKPIT:HEAD_YAW_HOOD);
@@ -380,28 +409,43 @@ document.addEventListener('mousemove',e=>{
 $('view').addEventListener('pointermove',e=>{if(!pointerLocked&&e.buttons)cameraReturn.manual(performance.now());});
 window.addEventListener('pointerup',()=>$('view').classList.remove('dragging'));
 $('view').addEventListener('pointercancel',()=>$('view').classList.remove('dragging'));
-$('view').addEventListener('wheel',e=>{if(ready&&!paused&&!pitstop?.opened&&!immersive?.onFoot()){if(immersive?.active&&immersive.state.phase==='prepare')previewOrbit=true;if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}orbitFromView();cameraReturn.manual(performance.now());}},{capture:true,passive:true});
+$('view').addEventListener('wheel',e=>{if(ready&&!paused&&!pitstop?.opened&&!immersive?.ownsMouse()){if(pointerLocked&&isInside()){e.stopImmediatePropagation();return;}orbitFromView();cameraReturn.manual(performance.now());}},{capture:true,passive:true});
+// The rival the cameras watch in the recon lap (null: the player's own car).
+function watchedRival(){
+ if(!watched||!automatic||!immersive||immersive.active)return null;
+ const obj=immersive.visual.rivals[watched-1],rival=immersive.rivals[watched-1];
+ return obj&&rival?{obj,car:rival.car,entry:obj.userData.entry}:null;
+}
+function watchNext(step=1){
+ if(!ready||!automatic||immersive.active)return;
+ const n=immersive.visual.rivals.length+1;watched=((watched+step)%n+n)%n;
+ followInitialized=false;tvCamera?.reset();headLook.yaw=headLook.pitch=0;lookBack.reset();
+ const rival=watchedRival();if(rival)watchForward.set(1,0,0).applyQuaternion(rival.obj.quaternion);
+ cabinVisibility();hud();
+}
 // Follow cameras sit behind the smoothed heading and look ahead of the car.
 const followsCar=m=>m==='chase'||m==='close'||m==='aerial';
-function followPose(m,p,vel){
- if(m==='aerial'){desired.copy(p).addScaledVector(chaseForward,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(chaseForward,22);}
- else if(m==='close'){desired.copy(p).addScaledVector(chaseForward,-5.6-Math.min(vel*.02,1)).add(new THREE.Vector3(0,2.2,0));look.copy(p).addScaledVector(chaseForward,9).add(new THREE.Vector3(0,.9,0));}
- else{desired.copy(p).addScaledVector(chaseForward,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(chaseForward,13).add(new THREE.Vector3(0,1,0));}
+function followPose(m,p,vel,ahead=chaseForward){
+ if(m==='aerial'){desired.copy(p).addScaledVector(ahead,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(ahead,22);}
+ else if(m==='close'){desired.copy(p).addScaledVector(ahead,-5.6-Math.min(vel*.02,1)).add(new THREE.Vector3(0,2.2,0));look.copy(p).addScaledVector(ahead,9).add(new THREE.Vector3(0,.9,0));}
+ else{desired.copy(p).addScaledVector(ahead,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(ahead,13).add(new THREE.Vector3(0,1,0));}
 }
 function updateCamera(dt){
  if(pitstop?.opened)return;
- const phase=immersive?.active?immersive.state.phase:'free';if(phase!==previewPhase){previewPhase=phase;previewOrbit=false;}
  if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)&&!immersive.inCar){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
- const p=carRoot.position,vel=Math.hypot(car.vx,car.vy);
- if(gridPreview()&&!(phase==='prepare'&&previewOrbit)){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
+ const rival=watchedRival(),subject=rival?.car??car,p=rival?rival.obj.position:carRoot.position,vel=Math.hypot(subject.vx,subject.vy);
+ // A watched rival's nose, smoothed as chaseForward is for the player's car.
+ if(rival){rival.obj.updateMatrixWorld(true);watchTarget.set(1,0,0).applyQuaternion(rival.obj.quaternion);if(subject.upright<.6&&vel>2)watchTarget.set(subject.vx,0,-subject.vy).normalize();watchForward.lerp(watchTarget,dt>=1?1:1-Math.exp(-dt*30)).normalize();}
+ const ahead=rival?watchForward:chaseForward,heading=rival?watchTarget:forward;if(immersive?.visual)immersive.visual.focus=rival?.obj.position??null;
+ if(gridPreview()){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
  if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
  // Holding B counts as looking around: the 3 s return waits until it is let go.
- const photo=mode==='cockpit'?cockpitView:null,lookingBack=lookBackAllowed()&&pressed('KeyB');
+ const photo=mode==='cockpit'&&!rival?cockpitView:null,lookingBack=lookBackAllowed()&&pressed('KeyB');
  if(lookingBack)cameraReturn.manual(performance.now());
  const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
  // Speed widens the view a little; rough ground and very high speed add a fine shake.
  const speedFov=photo?photo.fov:(mode==='cockpit'?74:58)+(mode==='aerial'||mode==='orbit'&&!orbitSpeedFov?0:clamp((vel-12)/45,0,1)*(mode==='cockpit'?5:7));
- if(Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1||photo?speedFov:camera.fov+(speedFov-camera.fov)*(1-Math.exp(-dt*3));camera.updateProjectionMatrix();}
+ if(mode!=='tv'&&Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1||photo?speedFov:camera.fov+(speedFov-camera.fov)*(1-Math.exp(-dt*3));camera.updateProjectionMatrix();}
  const shakeTime=performance.now()/1000,shake=photo||paused||mode==='aerial'||mode==='orbit'?0:roughRide*.05+clamp((vel-42)/18,0,1)*.01;
  if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
  lookBack.update(dt,lookingBack,headLook,headView);
@@ -409,11 +453,13 @@ function updateCamera(dt){
   // Fixed local mount keeps the hood/dashboard still relative to the camera; turned far
   // round in the cockpit, the head leans in toward the middle of the car.
   neckTwist(mode==='cockpit'&&!photo?headView.yaw:0,twist);
+  // A watched rival carries both cameras at the same places in its own body, beside its driver.
+  const mount=rival?rival.obj.matrixWorld:carBody.matrixWorld;
   const view=photo??headView,eye=photo?photoEye:mode==='hood'?hoodEye:headEye.fromArray(twist).add(cockpit.eye),drop=photo?0:.20;
-  carRoot.updateMatrixWorld(true);camera.position.copy(eye).applyMatrix4(carBody.matrixWorld);
-  look.set(Math.cos(view.pitch)*Math.cos(view.yaw)*20,Math.sin(view.pitch)*20-drop,Math.cos(view.pitch)*Math.sin(view.yaw)*20).add(eye).applyMatrix4(carBody.matrixWorld);
+  carRoot.updateMatrixWorld(true);camera.position.copy(eye).applyMatrix4(mount);
+  look.set(Math.cos(view.pitch)*Math.cos(view.yaw)*20,Math.sin(view.pitch)*20-drop,Math.cos(view.pitch)*Math.sin(view.yaw)*20).add(eye).applyMatrix4(mount);
   camera.position.y+=Math.sin(shakeTime*41)*shake*.35;look.y+=Math.sin(shakeTime*29+1.3)*shake*2;
-  camera.up.set(0,1,0).transformDirection(carBody.matrixWorld);camera.lookAt(look);if(photo?.roll)camera.rotateZ(photo.roll);
+  camera.up.set(0,1,0).transformDirection(mount);camera.lookAt(look);if(photo?.roll)camera.rotateZ(photo.roll);
  } else if(mode==='orbit'){
   orbitTarget.copy(p).add(new THREE.Vector3(0,.85,0));
   orbitDelta.subVectors(orbitTarget,orbit.target);camera.position.add(orbitDelta);orbit.target.copy(orbitTarget);
@@ -425,13 +471,13 @@ function updateCamera(dt){
   if(centering){
    // The mouse only looked around a follow camera: return to that camera's own place. Otherwise go behind the car.
    if(followsCar(orbitFrom)){
-    followPose(orbitFrom,p,vel);
+    followPose(orbitFrom,p,vel,ahead);
     // That camera frames the road ahead, not the car: blend the aim to its framing too.
     aimOffset(aimToCar.subVectors(orbit.target,desired).normalize(),aimView.subVectors(look,desired).normalize(),orbitHomeAim);
     orbitAim.yaw+=wrap(orbitHomeAim.yaw-orbitAim.yaw)*blend;orbitAim.pitch+=(orbitHomeAim.pitch-orbitAim.pitch)*blend;
     orbitHome.setFromVector3(desired.sub(orbit.target));
    }
-   else orbitHome.set(Math.min(orbitSphere.radius,ORBIT_MAX_DISTANCE),1.25,Math.atan2(-forward.x,-forward.z));
+   else orbitHome.set(Math.min(orbitSphere.radius,ORBIT_MAX_DISTANCE),1.25,Math.atan2(-heading.x,-heading.z));
    orbitSphere.theta+=wrap(orbitHome.theta-orbitSphere.theta)*blend;
    orbitSphere.phi+=(orbitHome.phi-orbitSphere.phi)*blend;
    orbitSphere.radius+=(orbitHome.radius-orbitSphere.radius)*blend;orbit.maxDistance=Math.max(ORBIT_MAX_DISTANCE,orbitSphere.radius);
@@ -446,8 +492,10 @@ function updateCamera(dt){
   const obstruction=orbit.maxDistance>ORBIT_MAX_DISTANCE?null:cameraRay.intersectObjects(cameraObstacles,false)[0];
   if(obstruction)camera.position.copy(orbit.target).addScaledVector(cameraRayDirection,Math.max(.2,obstruction.distance-.3));
   aimOrbit();orbitSeen.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));
+ } else if(mode==='tv'){
+  tvCamera.update(camera,p,subject.surface.s,tvVelocity.set(subject.vx,0,-subject.vy),dt);
  } else {
- followPose(mode,p,vel);
+ followPose(mode,p,vel,ahead);
  // Smooth the offset, not the world position: frame-rate changes must not
  // make the car surge back and forth relative to its following camera.
  desired.sub(p);if(!followInitialized){followOffset.copy(desired);followInitialized=true;}else followOffset.lerp(desired,1-Math.exp(-dt*5));
@@ -457,20 +505,54 @@ function updateCamera(dt){
 }
 const pressed=code=>keys.has(code)||mobile?.pressed.has(code);
 function input(){return {ignition:pressed('KeyI')?1:0,throttle:Math.max(pressed('KeyW')||pressed('ArrowUp')?1:0,mobile?.throttle??0),brake:Math.max(pressed('KeyS')||pressed('ArrowDown')?1:0,mobile?.brake??0),left:Math.max(pressed('KeyA')||pressed('ArrowLeft')?1:0,-(mobile?.steering??0)),right:Math.max(pressed('KeyD')||pressed('ArrowRight')?1:0,mobile?.steering??0),reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};}
-function pilot(){
- return recognitionInput(car);
+// The recon lap races the Opala 99 with the rivals' racecraft (RaceField.heroInput). Each physics
+// step asks for a new command; the sound and the driver's hands reuse the last one.
+let heroCommand=null;
+function pilot(step=0){
+ if(step||!heroCommand)heroCommand=immersive&&!immersive.active?immersive.field.heroInput(car,step||1/120):recognitionInput(car);
+ return {...heroCommand};
 }
 function hud(){
- const fuel=immersive?.active?immersive.state.fuel:immersive?.freeFuel??12,staged=immersive?.active&&['crowd','podium'].includes(immersive.state.phase);$('fuelGauge').classList.toggle('hidden',!!staged);$('fuelGauge').classList.toggle('reserve',fuel<1);$('fuelVolume').textContent=fuel.toFixed(1)+' L';$('fuelBar').value=fuel;$('fuelStatus').textContent=fuel<=0?(immersive?.active?'TANQUE VAZIO':'VAZIO · R PARA REABASTECER'):fuel<1?'RESERVA':immersive?.active&&immersive.state.tankDetached?'VAZAMENTO':'COMBUSTÍVEL';const p=car.surface,speed=Math.hypot(car.vx,car.vy)*3.6;
- $('speed').textContent=Math.round(speed);$('gear').textContent=carAudio.state.gear;$('rev').style.width=`${carAudio.state.rpm/7400*100}%`;
+ const fuel=immersive?.active?immersive.state.fuel:immersive?.freeFuel??12,staged=immersive?.active&&['crowd','podium'].includes(immersive.state.phase);$('fuelGauge').classList.toggle('hidden',!!staged);$('fuelGauge').classList.toggle('reserve',fuel<1);$('fuelVolume').textContent=fuel.toFixed(1)+' L';$('fuelBar').value=fuel;$('fuelStatus').textContent=fuel<=0?(immersive?.active?'TANQUE VAZIO':'VAZIO · R PARA REABASTECER'):fuel<1?'RESERVA':immersive?.active&&immersive.state.tankDetached?'VAZAMENTO':'COMBUSTÍVEL';const p=car.surface,watch=watchedRival(),shown=watch?.car??car,speed=Math.hypot(shown.vx,shown.vy)*3.6;
+ $('speed').textContent=Math.round(speed);$('gear').textContent=watch?watch.car.gear:carAudio.state.gear;$('rev').style.width=`${(watch?watch.car.rpm:carAudio.state.rpm)/7400*100}%`;
+ // Recon lap: the Piloto button (N) names the driver the cameras watch; speed and gear are that car's.
+ const touring=automatic&&!immersive.active;$('watchButton').hidden=!touring;if(touring)$('watchButton').textContent=watch?`Piloto: #${watch.entry.number} ${watch.entry.shortName} (N)`:'Piloto: você (N)';
  $('grade').textContent=`${(p.grade*100).toFixed(1).replace('.',',')}%`;$('bank').textContent=`${(p.bank*100).toFixed(1).replace('.',',')}%`;$('alt').textContent=circuit.altitude===null?'—':`${(p.z+circuit.altitude).toFixed(1)} m`;
- $('lap').textContent=`${Math.min(car.laps+1,immersive.active?1:immersive.freeTotalLaps)} / ${immersive.active?1:immersive.freeTotalLaps}`;$('racePosition').textContent=`${immersive.active?immersive.state.result?.position??immersive.state.position:immersive.freePosition}º / ${GRID_SIZE}`;$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);const rejected=car.lastLapValid===false&&car.clock-car.lapStart<10;$('valid').textContent=rejected?(car.lastInvalidReason==='pit'?'Volta não contou · excesso de velocidade nos boxes':'Volta não contou · trecho cortado ou incompleto'):car.lapValid?'Volta válida':car.invalidReason==='pit'?`Volta inválida · ${Math.round(car.pitPenalty?.kmh??0)} km/h nos boxes (máx. 60)`:'Volta inválida · trecho cortado';$('valid').hidden=car.lapValid&&!rejected;$('valid').style.color=car.lapValid&&!rejected?'#e2fb57':'#ffb789';
- $('surface').textContent=automatic?'RECONHECIMENTO AUTOMÁTICO':p.pit&&data.pit?(car.limiter?'PIT LANE · MÁX. 60 km/h':'PIT LANE'):p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=p.pit&&data.pit?'Pit lane · boxes':location(p.s);drawMap();
+ $('lap').textContent=`${Math.min(car.laps+1,immersive.active?immersive.storyLaps:immersive.freeTotalLaps)} / ${immersive.active?immersive.storyLaps:immersive.freeTotalLaps}`;$('racePosition').textContent=`${immersive.active?immersive.state.result?.position??immersive.state.position:immersive.freePosition}º / ${GRID_SIZE}`;$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);const rejected=car.lastLapValid===false&&car.clock-car.lapStart<10;$('valid').textContent=rejected?(car.lastInvalidReason==='pit'?'Volta não contou · excesso de velocidade nos boxes':'Volta não contou · trecho cortado ou incompleto'):car.lapValid?'Volta válida':car.invalidReason==='pit'?`Volta inválida · ${Math.round(car.pitPenalty?.kmh??0)} km/h nos boxes (máx. 60)`:'Volta inválida · trecho cortado';$('valid').hidden=car.lapValid&&!rejected;$('valid').style.color=car.lapValid&&!rejected?'#e2fb57':'#ffb789';
+ $('surface').textContent=automatic?(watch?`RECONHECIMENTO · #${watch.entry.number} ${watch.entry.shortName.toUpperCase()}`:'RECONHECIMENTO AUTOMÁTICO'):p.pit&&data.pit?(car.limiter?'PIT LANE · MÁX. 60 km/h':'PIT LANE'):p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=p.pit&&data.pit?'Pit lane · boxes':location(p.s);drawMap();
  // Jumps and crashes take over the surface line while they last.
  const crash=car.upright<.45?(car.overturned>0?`CAPOTADO · FISCAIS DESVIRAM EM ${Math.max(1,Math.ceil(RIGHTING_DELAY-car.overturned))} s`:'CAPOTANDO!'):car.rightedAt!==null&&car.clock-car.rightedAt<3?'FISCAIS DESVIRARAM O CARRO':car.airTime>.25?'NO AR!':car.pitPenalty&&car.clock-car.pitPenalty.clock<3?'EXCESSO DE VELOCIDADE NOS BOXES · VOLTA INVÁLIDA':'';if(crash)$('surface').textContent=crash;
  else if(mobile.handbrake)$('surface').textContent=touchDevice?'FREIO DE MÃO PUXADO':'FREIO DE MÃO PUXADO · ESPAÇO SOLTA';
 }
+// Automated browsers (the checks) skip it unless the page asks with ?intro=1; ?intro=0 turns it off.
+function introWanted(){const asked=new URLSearchParams(window.location.search).get('intro');return asked==='1'||(asked!=='0'&&!navigator.webdriver);}
+function introContext(){
+ if(!ready||!car)return null;
+ const s=car.surface.s,a=data.samples,L=data.meta.reconstructed_xy_m,probe=new TestCar(data);
+ // Track centre line k metres ahead of the car, on the road surface.
+ const center=k=>{const t=((s+k)%L+L)%L,i=Math.max(0,a.findIndex(q=>q[0]>=t)),p=a[i];probe.index=i;return new THREE.Vector3(p[1],probe.sample(p[1],p[2]).z,-p[2]);};
+ const here=center(0),position=immersive.active?immersive.state.position:immersive.freePosition;
+ return {car:carRoot.position.clone(),forward:forward.clone(),inward:here.sub(carRoot.position),center,pilot:immersive.pilotName||'Stevan',position,grid:GRID_SIZE,laps:immersive.active?immersive.storyLaps:immersive.freeTotalLaps,
+  circuit:circuit.name,venue:circuit.id==='interlagos'?'Autódromo José Carlos Pace':circuit.label,weather:circuit.id==='interlagos'?'São Paulo · 16h40 · 27 °C · pista seca':'Fim de tarde · 26 °C · pista seca',
+  hero:immersive.visual?.hero?immersive.visual.hero.getWorldPosition(new THREE.Vector3()):carRoot.position.clone(),
+  // People face their local +x.
+  heroForward:immersive.visual?.hero?new THREE.Vector3(1,0,0).applyQuaternion(immersive.visual.hero.getWorldQuaternion(new THREE.Quaternion())):forward.clone()};
+}
+intro.onEnd=kind=>{
+ // Back to the player's own camera; the 3-2-1 beeps now.
+ if(!immersive)return;
+ if(kind==='race'&&!immersive.active&&immersive.freeCountdown>0)immersive.state.emitSound('countdown');
+ camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();followInitialized=false;
+ if(introHidden){for(const o of introHidden)o.visible=true;introHidden=null;}
+};
+// Visual quality: ?cinema=full|lite|off overrides the saved choice; 'auto' is lite on phones.
+function cinematicLevel(){const asked=new URLSearchParams(window.location.search).get('cinema')??preferences.values.cinematic;return ['full','lite','off'].includes(asked)?asked:touchDevice?'lite':'full';}
+// The haze thins with height above the circuit's mean ground level.
+let hazeData=null,hazeLevel=0;
+function hazeBase(){if(hazeData!==data){hazeData=data;const z=data?.terrain?.z;hazeLevel=z?.length?z.reduce((a,b)=>a+b,0)/z.length:0;}return hazeLevel;}
 let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0,frameImpact=0;
+// Time since the last 1/120 s physics step: cars are drawn where they are at this frame.
+const renderAhead=()=>clamp(accumulator,0,1/120);
 // Adaptive resolution: slower GPUs trade sharpness for a steady frame rate.
 const resolution={max:Math.min(devicePixelRatio,touchDevice?1:1.5),min:touchDevice?.6:.7,frame:1/60,timer:0};
 function adaptResolution(rawDt){
@@ -486,7 +568,7 @@ function lapBanner(dt){
  if(car.lapStart!==lapSeen){
   const crossed=car.lapStart>lapSeen&&car.lastLap!==null&&car.lastLapValid!==null;lapSeen=car.lapStart;
   if(crossed){
-   const total=immersive?.active?1:immersive?.freeTotalLaps??3,valid=car.lastLapValid,record=valid&&car.laps>1&&car.best===car.lastLap;
+   const total=immersive?.active?immersive.storyLaps:immersive?.freeTotalLaps??3,valid=car.lastLapValid,record=valid&&car.laps>1&&car.best===car.lastLap;
    const position=immersive?.active?immersive.state.result?.position??immersive.state.position:immersive?.freePosition;
    $('lapBannerTitle').textContent=valid?`VOLTA ${Math.min(car.laps,total)} DE ${total}`:'VOLTA NÃO CONTOU';
    $('lapBannerTime').textContent=fmt(car.lastLap);
@@ -501,27 +583,44 @@ function lapBanner(dt){
 }
 function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
+ if(intro.active&&automatic)intro.stop();
+ if(intro.active&&!immersive.active&&immersive.freeCountdown>0){immersive.freeCountdown=3;$('raceCountdown').hidden=true;}
  if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;menu(true);}
- if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot():input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}immersive?.stepFree(1/120,command);}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
- automaticRecords.update(immersive);automaticAIRecords.update(immersive);
+ // The sound is heard from the rival the recon lap watches (N), otherwise from the player's car.
+ const heard=watchedRival()?.car??car;
+ if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
+ automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
  tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);lakeContact?.update(paused?0:dt,renderer.domElement.height);
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  // The same command drives the engine sound and the driver's hands and feet.
  const driveCommand=pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input();
- carAudio.update(car,driveCommand,skid,paused,mode);
- carAudio.updateScene({...immersive?.audioScene(),speed:Math.hypot(car.vx,car.vy),onRoad:car.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
+ const rivalSound=heard!==car?immersive.rivalSound(heard):null;
+ carAudio.update(heard,rivalSound?.command??driveCommand,rivalSound?.skid??skid,paused,mode);
+ carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
- updateOpenings(paused?0:dt);updateCar(dt);updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
- immersive?.update(paused?0:dt,camera);
+ // A watched rival is posed by immersive.update below: its camera follows after that.
+ updateOpenings(paused?0:dt);updateCar(dt);if(!watchedRival())updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,heard===car?carAudio.state:null).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ if(immersive?.visual)immersive.visual.renderAhead=renderAhead();immersive?.update(paused?0:dt,camera);if(watchedRival())updateCamera(dt);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
+ // Marshals, cameramen, crews, the terrace and the café idle; passing cars catch their eye.
+ updatePeople(paused?0:dt,camera,[carRoot,...(immersive?.visual?.rivals??[])]);
  raceResults.update(immersive,paused,$('settings').open);
  $('finishFade').classList.toggle('fading',!paused&&immersive.finishing);$('finishFade').style.opacity=String(!paused?immersive.finishOpacity:0);
+ // The broadcast camera shows the race without the game's floating name tags.
+ if(mode==='tv')for(const rival of immersive.visual.rivals)if(rival.userData.nameLabel)rival.userData.nameLabel.visible=false;
+ if(intro.update(paused?0:dt,camera,paused)){
+  sun.position.copy(carRoot.position).add(sunOffset);sun.target.position.copy(carRoot.position);sun.target.updateMatrixWorld();
+  // Name tags and money signs are game interface: the opening shots go without them.
+  if(!introHidden){introHidden=[];scene.traverse(o=>{if(o.isSprite&&o.visible)introHidden.push(o);});}
+  for(const o of introHidden)o.visible=false;
+ }
  // The results sheet is opaque; avoid spending mobile GPU time behind it.
  if(!raceResults.root.hidden)return;
  // Render the reflection from this frame's car pose before displaying the cockpit.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
- if(mode==='cockpit'&&!gridPreview()){
+ const watchedCar=watchedRival();
+ if(mode==='cockpit'&&!gridPreview()&&!watchedCar){
   // The mirror sees the road behind, not the body round it (the classic view hides it anyway).
   const bodyShown=!!model?.visible;cockpit.root.visible=false;driver.root.visible=false;if(model)model.visible=false;
   cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carBody.matrixWorld);
@@ -534,26 +633,42 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
   mirrorFrame=renderedFrame;
   renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;if(model)model.visible=bodyShown;
  }
- renderer.render(scene,camera);
+ // Long lenses (broadcast camera, opening shots) get depth of field focused on their subject.
+ const subject=watchedCar?.car??car,dof=intro.active?intro.dof:mode==='tv'?{focus:camera.position.distanceTo(watchedCar?.obj.position??carRoot.position),amount:.35}:null;
+ cinematic.render(scene,camera,{dt:paused?0:dt,speed:Math.hypot(subject.vx,subject.vy),mode,hazeBase:hazeBase(),dof});
 }
 function renderClassification(){
  const rows=[...(immersive.freeOrder??[])];
  rows.splice(immersive.freePosition-1,0,PLAYER_ENTRY);const list=$('finishingOrder');list.replaceChildren();
  rows.forEach((entry,i)=>{const row=document.createElement('li');row.classList.toggle('player-row',entry.number==='99');row.textContent=`${i+1}º · #${entry.number} ${entry.shortName}`;list.append(row);});
 }
-function updateMenuLabels(){pilotPicker.root.hidden=sessionStarted;$('circuitPicker').hidden=sessionStarted;const finished=!immersive?.active&&!!immersive?.freeResultReady;$('menu').classList.toggle('race-finished',finished);$('finishingOrder').hidden=!finished;if(finished)renderClassification();document.querySelector('#menu h1').textContent=finished?'Fim de corrida.':`Uma volta em ${circuit.name}.`;document.querySelector('#menu .eyebrow').textContent=finished?'BANDEIRADA / RESULTADO FINAL':'OLD STOCK / TEST DAY';const resume=sessionStarted&&(immersive?.active||!immersive?.freeResultReady)&&$('immersiveMode').checked===!!immersive?.active;$('start').textContent=loading?'Carregando circuito…':resume?'Voltar à pista →':finished?'Correr novamente →':sessionStarted?'Iniciar nova corrida →':'Entrar na pista →';$('restartRace').hidden=!resume;$('settingsResume').hidden=!sessionStarted||(!immersive?.active&&immersive?.freeResultReady);$('settingsRestart').hidden=$('settingsResume').hidden;$('raceResult').hidden=immersive?.active||!immersive?.freeResultReady;if(!immersive?.active&&immersive?.freeResultReady)$('raceResult').textContent=`Bandeirada! ${immersive.freePosition}º de ${GRID_SIZE} · ${immersive.freeTotalLaps} voltas · ${fmt(immersive.finishTime??car.clock)}`;}
+// A paused session that #start can resume (a finished free race can only be run again).
+function resumable(){return sessionStarted&&(immersive?.active||!immersive?.freeResultReady);}
+function updateMenuLabels(){pilotPicker.root.hidden=sessionStarted;$('circuitPicker').hidden=sessionStarted;const finished=!immersive?.active&&!!immersive?.freeResultReady;$('menu').classList.toggle('race-finished',finished);$('finishingOrder').hidden=!finished;if(finished)renderClassification();document.querySelector('#menu h1').textContent=finished?'Fim de corrida.':`Uma volta em ${circuit.name}.`;document.querySelector('#menu .eyebrow').textContent=finished?'BANDEIRADA / RESULTADO FINAL':'OLD STOCK / TEST DAY';const resume=resumable(),loadingStory=loading&&!resume&&preferences.values.immersive;$('start').textContent=loading&&!loadingStory?'Carregando circuito…':resume?'Voltar à pista →':finished?'Correr novamente →':'Modo Corrida →';$('storyStart').textContent=loadingStory?'Carregando circuito…':'Modo História →';$('storyStart').hidden=resume;$('restartRace').hidden=!resume;$('settingsResume').hidden=!sessionStarted||(!immersive?.active&&immersive?.freeResultReady);$('settingsRestart').hidden=$('settingsResume').hidden;$('raceResult').hidden=immersive?.active||!immersive?.freeResultReady;if(!immersive?.active&&immersive?.freeResultReady)$('raceResult').textContent=`Bandeirada! ${immersive.freePosition}º de ${GRID_SIZE} · ${immersive.freeTotalLaps} voltas · ${fmt(immersive.finishTime??car.clock)}`;}
 function resumeRace(){if(!sessionStarted||(!immersive.active&&immersive.freeResultReady))return;$('settings').close();menu(false);}
 $('settingsResume').onclick=resumeRace;
-function menu(show){if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();mobile?.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
+// P, or the window losing focus (another app, a screenshot tool), freezes the race and keeps it
+// on screen under a small badge; Escape opens the menu.
+let held=false;
+function hold(on){
+ if(!ready||on===held||on&&paused)return;
+ held=on;paused=on;carAudio.setPaused(on);if(!on)carAudio.unlock();
+ if(on&&document.pointerLockElement===$('view'))document.exitPointerLock();
+ keys.clear();mobile?.clear();cameraReturn.reset(performance.now());$('pauseBadge').hidden=!on;
+}
+$('pauseBadge').onclick=()=>hold(false);
+function menu(show){held=false;$('pauseBadge').hidden=true;if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();mobile?.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
 const openSettings=setupSettings(()=>menu(true),returnToMainMenu);
-const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({onRestart:()=>beginRace(true),onSettings:openSettings,onRecords:mode=>lapRecords.open(mode),onMainMenu:returnToMainMenu});
+const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({onRestart:()=>beginRace(true),onSettings:openSettings,onRecords:mode=>lapRecords.open(mode),onMainMenu:returnToMainMenu,
+ // Closing the sheet opens the podium: that click also gives the mouse to its free camera.
+ onPodium:()=>{if(immersive){immersive.podiumCamera=true;immersive.mouseFree=false;immersive.captureMouse();}}});
 const pilotPicker=new PilotPicker(),automaticRecords=new AutomaticRecords(pilotStorage()),automaticAIRecords=new AutomaticAIRecords(pilotStorage());
 $('recordsButton').onclick=()=>{lapRecords.circuit=circuit.id;lapRecords.open();};
 $('settingsButton').onclick=openSettings;
 mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(nextCameraMode());},onSkin:cycleLivery,onReset:()=>{if(ready&&!immersive.finishing){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
 document.addEventListener('keydown',e=>{
  if(lapRecords.dialog.open)return;
- if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape'||e.code==='KeyP')openSettings();else if(!paused){if(pitstop.coffee&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(!e.repeat&&pitstop.handleKey(e.code))e.preventDefault();}return;}
+ if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape')openSettings();else if(e.code==='KeyP')hold(!held);else if(!paused){if(pitstop.coffee&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(!e.repeat&&pitstop.handleKey(e.code))e.preventDefault();}return;}
  if($('settings').open){if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}return;}
  if(['INPUT','SELECT'].includes(e.target.tagName)&&!['Escape','KeyP'].includes(e.code))return;
  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();if(e.code!=='Space')keys.add(e.code);if(e.repeat||!ready)return;
@@ -561,28 +676,33 @@ document.addEventListener('keydown',e=>{
  // Space pulls the handbrake and leaves it pulled until the next press, like the touch button.
  if(e.code==='Space'&&!paused)mobile.setHandbrake(!mobile.handbrake);
  if(e.code==='KeyC')setCameraMode(nextCameraMode());
+ if(e.code==='KeyN')watchNext(e.shiftKey?-1:1);
  if(e.code==='KeyR'&&!immersive.finishing)reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
  if(e.code==='KeyV')cycleLivery();
- if(e.code==='KeyP')menu(!paused);
+ // P pauses on the track (from the menu it resumes, as before); Escape opens the menu.
+ if(e.code==='KeyP'){if(held||!paused)hold(!held);else menu(false);}
  if(e.code==='Escape')menu(true);
- if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){automatic=false;status('');}
-});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(false);keys.clear();mobile?.clear();if(ready)menu(true);});
-document.addEventListener('visibilitychange',()=>{carAudio.setFocused(!document.hidden&&document.hasFocus());if(document.hidden&&ready)menu(true);});
+ // Taking the wheel ends the recon lap: the cameras come back to the player's car.
+ if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){automatic=false;status('');if(watched){watched=0;followInitialized=false;tvCamera?.reset();}}
+});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(false);keys.clear();mobile?.clear();hold(true);});
+document.addEventListener('visibilitychange',()=>{carAudio.setFocused(!document.hidden&&document.hasFocus());if(document.hidden)hold(true);});
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer?.setSize(innerWidth,innerHeight,false);mobile?.clear();if(touchDevice&&innerHeight>innerWidth&&ready)menu(true);});
 $('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit');};
 $('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit');};
 $('skinButton').onclick=cycleLivery;
-async function beginRace(restart=false,tour=false){
+$('watchButton').onclick=()=>watchNext(1);
+async function beginRace(restart=false,tour=false,story=preferences.values.immersive){
  if(loading)return;
- const continuing=sessionStarted&&!restart&&!tour&&$('immersiveMode').checked===immersive.active&&!(!immersive.active&&immersive.freeResultReady);
+ const continuing=sessionStarted&&!restart&&!tour&&story===immersive.active&&!(!immersive.active&&immersive.freeResultReady);
  const pilot=continuing?immersive.pilotName:pilotPicker.commit();if(!pilot)return;
+ if(story!==preferences.values.immersive)chooseImmersive(story);
  if(!await loadCircuit())return;
- const same=sessionStarted&&$('immersiveMode').checked===immersive.active&&!(!immersive.active&&immersive.freeResultReady);
+ const same=sessionStarted&&preferences.values.immersive===immersive.active&&!(!immersive.active&&immersive.freeResultReady);
  if(same&&!restart&&!tour){menu(false);return;}
  automaticRecords.start(pilot);immersive.pilotName=pilot;immersive.recordSaveError='';
- pitstop?.reset();automatic=false;
- if($('immersiveMode').checked){immersive.start();}
+ pitstop?.reset();automatic=false;watched=0;
+ if(preferences.values.immersive){immersive.start();}
  else{if(immersive.active)immersive.disable();reset();setCameraMode('chase');updateCar(1);updateCamera(1);}
  if(!immersive.active&&!tour)immersive.beginCountdown();
  sessionStarted=true;automatic=tour&&!immersive.active;menu(false);
@@ -591,14 +711,17 @@ function returnToMainMenu(){
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  pitstop?.reset();$('settings').close();lapRecords.dialog.close();
  if(ready){immersive.disable();reset();}
- sessionStarted=false;automatic=false;raceResults.root.hidden=true;menu(true);showCircuitSelection();
+ sessionStarted=false;automatic=false;watched=0;raceResults.root.hidden=true;menu(true);showCircuitSelection();
 }
-$('start').onclick=()=>beginRace();$('restartRace').onclick=()=>beginRace(true);
+// Paused: #start resumes the running session. Otherwise each button starts its own mode.
+$('start').onclick=()=>beginRace(false,false,resumable()&&preferences.values.immersive);
+$('storyStart').onclick=()=>beginRace(false,false,true);
+$('restartRace').onclick=()=>beginRace(true);
 $('settingsRestart').onclick=()=>{$('settings').close();beginRace(true);};
-$('tour').onclick=()=>{if(!$('immersiveMode').checked)beginRace(true,true);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted)return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
+$('tour').onclick=()=>{$('settings').close();beginRace(true,true,false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted)return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
 // Keep the car and audio session; release the previous circuit before loading another.
 function clearCircuit(){
- const retired=[];
+ intro.stop();const retired=[];
  if(pitstop){pitstop.reset();pitstop.panel.remove();pitstop.hud.remove();pitstop.walkHud.remove();pitstop.markers.removeFromParent();retired.push(pitstop.markers);pitstop=null;}
  camera.clearViewOffset();
  if(immersive){immersive.dispose();immersive.visual.damage.removeFromParent();retired.push(immersive.visual.damage);immersive=null;}
@@ -619,7 +742,7 @@ function clearCircuit(){
 }
 async function loadCircuit(){
  const reuse=ready&&loadedCircuit===circuit.id;
- loading=true;ready=false;if(window.interlagos)window.interlagos.ready=false;$('start').disabled=true;$('tour').disabled=true;$('livery').disabled=true;
+ loading=true;ready=false;if(window.interlagos)window.interlagos.ready=false;$('start').disabled=true;$('storyStart').disabled=true;$('tour').disabled=true;$('livery').disabled=true;
  for(const button of document.querySelectorAll('[data-circuit]'))button.disabled=true;
  updateMenuLabels();
  try{
@@ -657,10 +780,22 @@ async function loadCircuit(){
  let pitLayout=null;if(data.pit){const pitLaneScene=createInterlagosPit(data,roadSurface,terrainTextures);scene.add(pitLaneScene.root);cameraObstacles.push(...pitLaneScene.obstacles);pitLayout=pitLaneScene.box;}
  // Curvelo: the same garage row and Box 99, on the infield behind its service lane.
  else if(circuit.id==='curvelo'){const pitScene=createCurveloPit(data,terrainTextures);scene.add(pitScene.root);cameraObstacles.push(...pitScene.obstacles);pitLayout=pitScene.box;}
+ recordTvs=pitLayout?.showRecords?pitLayout:null;recordTvsKey='';recordTvsAt=0;
  const branding=await createTrackBranding(data);scene.add(branding.root);
+ // Race-day dressing: sponsor banners on the rails, marshal posts and TV towers (trackside.js).
+ trackside=createTrackside(data);scene.add(trackside.root);landscape.clearAround(trackside.clearings);landscape.stats.trackside=trackside.stats;
+ // Broadcast view: the towers and low verge cameras film the car with a long lens.
+ const tvProbe=new TestCar(data),tvObstacles=[...cameraObstacles];branding.root.traverse(o=>{if(o.isMesh)tvObstacles.push(o);});
+ tvCamera=new TvCamera(data,trackside.towers,(x,y,i)=>{tvProbe.index=i;return tvProbe.sample(x,y).z;},tvObstacles);
+ landscape.clearAround(tvCamera.cameras.filter(c=>!c.tower).map(c=>({x:c.position.x,y:-c.position.z,r:3.5})));
  restBodyPose();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
- immersive.onMainMenu=returnToMainMenu;
+ immersive.onMainMenu=returnToMainMenu;immersive.laps=preferences.values.laps;immersive.visual.viewCamera=camera;
+ // Sessions started from the menu open with the cinematic intro (the 3-2-1 waits for it).
+ const beginCountdown=immersive.beginCountdown.bind(immersive),startStory=immersive.start.bind(immersive);
+ immersive.beginCountdown=()=>{beginCountdown();if(paused&&!automatic&&introWanted()){immersive.state.sounds=immersive.state.sounds.filter(sound=>sound.name!=='countdown');intro.play('race',introContext);}};
+ immersive.start=()=>{startStory();if(paused&&introWanted())intro.play('story',introContext);};
+ const disableStory=immersive.disable.bind(immersive);immersive.disable=()=>{intro.stop();disableStory();};
  // Box 99: Curvelo's service lane, or the surveyed garage at Interlagos.
  if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,openings,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
  pitstop?.setDamage(preferences.values.damage);
@@ -671,17 +806,20 @@ async function loadCircuit(){
  const roster=$('gridRoster');roster.replaceChildren();for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':` · Ritmo ${entry.level}/100`}`;roster.append(row);}
  // Compile the new programs while the loading label is still shown, instead of
  // freezing the first race frame (D3D shader compilation is slow on Windows).
- updateCar(1);updateCamera(1);try{await renderer.compileAsync(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}
- ready=true;loadedCircuit=circuit.id;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;$('start').textContent='Entrar na pista →';
- window.interlagos={ready:true,circuit:circuit.id,car,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
+ updateCar(1);updateCamera(1);try{await cinematic.compile(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}
+ ready=true;loadedCircuit=circuit.id;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;
+ window.interlagos={ready:true,circuit:circuit.id,car,renderAhead,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),pitInfo:()=>pitstop?.info()??null,
   audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),
+  cinematicInfo:()=>({...cinematic.info(),adaptation:cinematic.adaptation()}),tvInfo:()=>tvCamera.info(),tvCamera:()=>tvCamera,introInfo:()=>intro.info(),skipIntro:()=>intro.stop(),setCinematic:level=>cinematic.setLevel(level),cinematicLook:patch=>Object.assign(cinematic.look,patch||{}),
   skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),waterInfo:()=>landscape.waterInfo(),lakeInfo:()=>lakeContact?.info()??null,waterAt:(x,y)=>landscape.water.at(x,y),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
   openingsInfo:()=>openings.info(),holdOpening:(name,on=true)=>openings.hold(name,'teste',on),
   // materials: those shown on the rival (whatever its distance detail), numbers: its own number decals.
   rivalParts:()=>{const rival=immersive.visual.rivals[0],names=[],shown=new Set();let meshes=0;rival?.traverse(o=>{names.push(o.name);if(!o.isMesh)return;meshes++;let seen=true;for(let q=o;q&&q!==rival;q=q.parent)if(!q.visible&&q!==rival.userData.detail)seen=false;if(seen)for(const m of [o.material].flat())shown.add(m.name);});return {motor:names.includes('Motor_CONJUNTO'),tanque:names.includes('Tanque_combustivel_CONJUNTO'),meshes,materials:[...shown],numbers:names.filter(n=>n.startsWith('Numero_')).length};},
   driverInfo:()=>driver.info(),
+  rivalDrivers:()=>immersive.visual.rivals.map(o=>o.userData.driver?{...o.userData.driver.info(),shown:o.userData.detail.visible&&o.visible}:null),
+  watchInfo:()=>{const r=watchedRival();return {watched,number:r?.entry.number??null,camera:camera.position.toArray(),target:r?r.obj.position.toArray():carRoot.position.toArray(),rpm:(r?.car??car).rpm};},
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
   // Interior cameras ride on the sprung body, so report them in its frame.
   cockpitInfo:()=>({...cockpit.info(),eyeLocal:carBody.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
@@ -706,8 +844,8 @@ async function loadCircuit(){
   get state(){return {paused,automatic,mode,livery:activeLivery,wheels:wheels.length,drawCalls:renderer.info.render.calls};}};
  return true;
  }catch(err){console.error(err);ready=false;clearCircuit();status('Não foi possível carregar a pista. Clique em começar para tentar novamente.');return false;}
- finally{loading=false;$('start').disabled=false;$('tour').disabled=$('immersiveMode').checked;$('livery').disabled=false;for(const button of document.querySelectorAll('[data-circuit]'))button.disabled=false;updateMenuLabels();}
+ finally{loading=false;$('start').disabled=false;$('storyStart').disabled=false;$('tour').disabled=false;$('livery').disabled=false;for(const button of document.querySelectorAll('[data-circuit]'))button.disabled=false;updateMenuLabels();}
 }
-$('start').disabled=false;status('');updateMenuLabels();
+$('start').disabled=false;$('storyStart').disabled=false;status('');updateMenuLabels();
 window.interlagos={ready:false,audioInfo:()=>carAudio.info()};
 frame();

@@ -47,16 +47,15 @@ def open_menu(page, url=GAME_URL, timeout=120000):
     wait_js(page, "window.interlagos&&!document.querySelector('#start').disabled", timeout=timeout)
 
 
-def race_options(page, immersive=None, camera=None, livery=None, tap=False):
+def race_options(page, camera=None, livery=None, tap=False):
     """Change race settings from the opening menu or a paused race, then close the dialog.
 
+    The game mode is not a setting: enter_track picks it on the opening menu.
     #settingsClose keeps the current session; #settingsBack would end it."""
     press = page.tap if tap else page.click
     if not page.evaluate("document.querySelector('#settings').open"):
         press('#settingsButton' if page.is_visible('#settingsButton') else '#touchMenu' if page.is_visible('#touchMenu') else '#menuButton')
     press('#tab-race')
-    if immersive is not None:
-        page.locator('#immersiveMode').set_checked(immersive)
     if camera:
         page.select_option('#camera', camera)
     if livery:
@@ -65,21 +64,26 @@ def race_options(page, immersive=None, camera=None, livery=None, tap=False):
     press('#settingsClose')
 
 
-def enter_track(page, pilot='Piloto teste', timeout=120000, tap=False):
-    """Start or resume a session. The first entry needs a pilot name."""
+def enter_track(page, pilot='Piloto teste', timeout=120000, tap=False, story=False):
+    """Start or resume a session. The first entry needs a pilot name.
+
+    On the opening menu #start is Modo Corrida (free race) and story=True clicks #storyStart
+    (Modo História). On a paused session #start resumes whichever mode is running."""
     if pilot and page.is_visible('#pilotName') and not page.input_value('#pilotName'):
         page.fill('#pilotName', pilot)
-    (page.tap if tap else page.click)('#start')
+    (page.tap if tap else page.click)('#storyStart' if story else '#start')
     wait_js(page, 'window.interlagos?.ready&&!interlagos.state.paused', timeout=timeout)
 
 
 def pause_race(page, tap=False):
-    """Open the pause menu with the keyboard or the touch toolbar."""
+    """Open the pause menu with the keyboard (Escape) or the touch toolbar.
+
+    P only freezes the race on screen under the pause badge, without the menu."""
     if tap:
         page.tap('#touchMenu')
         page.tap('#settingsClose')
     else:
-        page.keyboard.press('KeyP')
+        page.keyboard.press('Escape')
     wait_js(page, 'interlagos.state.paused')
 
 

@@ -16,7 +16,7 @@ FIND_RAMP='''()=>{const car=interlagos.car,Probe=car.constructor,data=car.data,i
  return best;}'''
 LAUNCH='''spot=>{const c=interlagos.car;interlagos.reposition(spot.i);const p=c.surface;c.heading=Math.atan2(p.ty,p.tx)+spot.side*.45;c.x+=p.lx*spot.side*3;c.y+=p.ly*spot.side*3;
  c.vx=Math.cos(c.heading)*160/3.6;c.vy=Math.sin(c.heading)*160/3.6;c.settle();return true;}'''
-POSE='''()=>{const c=interlagos.car,p=c.pose(),snap=interlagos.cameraSnapshot();return {height:c.z-c.surface.z,wheelsDown:c.wheelsDown,hull:c.hullContact,upright:c.upright,overturned:c.overturned,rightings:c.rightings,travel:[...c.wheelTravel],
+POSE='''()=>{const c=interlagos.car,p=c.pose(interlagos.renderAhead()),snap=interlagos.cameraSnapshot();return {height:c.z-c.surface.z,wheelsDown:c.wheelsDown,hull:c.hullContact,upright:c.upright,overturned:c.overturned,rightings:c.rightings,travel:[...c.wheelTravel],
  airTime:c.airTime,renderError:Math.hypot(snap.car[0]-p.x,snap.car[1]-p.z,snap.car[2]+p.y),hud:document.querySelector('#surface').textContent,speed:Math.hypot(c.vx,c.vy)*3.6};}'''
 with sync_playwright() as p:
  browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
@@ -25,7 +25,7 @@ with sync_playwright() as p:
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
  try:
-  open_menu(page,os.environ.get('INTERLAGOS_URL',GAME_URL));race_options(page,immersive=False,camera='chase');enter_track(page);wait_race_start(page)
+  open_menu(page,os.environ.get('INTERLAGOS_URL',GAME_URL));race_options(page,camera='chase');enter_track(page);wait_race_start(page)
   spot=page.evaluate(FIND_RAMP);report['metrics']['spot']=spot;check('found_a_launching_bank',spot and spot['longest']>1)
   page.keyboard.down('KeyW');page.evaluate(LAUNCH,spot)
   # Airborne: the rendered body follows the physics pose and the wheels hang down.

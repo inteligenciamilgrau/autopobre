@@ -1,10 +1,11 @@
 import * as THREE from 'three';
 
-// Afternoon sun from the north-west (southern hemisphere), high enough for
-// readable shadows on the track and long enough to model the terrain.
-export const SUN_DIRECTION=new THREE.Vector3(-.52,.64,-.56).normalize();
+// Late-afternoon sun from the north-north-west (southern hemisphere), about 27° high:
+// long shadows that model the terrain, still bright enough to read the track, and
+// behind the main grandstand so its roof keeps the crowd in the shade.
+export const SUN_DIRECTION=new THREE.Vector3(-.34,.454,-.824).normalize();
 // Linear-space colours shared by the sky dome, the fog and the environment map.
-const ZENITH=new THREE.Color(.13,.3,.66),HORIZON=new THREE.Color(.58,.7,.83),GROUND=new THREE.Color(.2,.22,.17);
+const ZENITH=new THREE.Color(.075,.21,.6),HORIZON=new THREE.Color(.56,.66,.78),GROUND=new THREE.Color(.2,.22,.17);
 
 const vertexShader=`
 varying vec3 vDirection;

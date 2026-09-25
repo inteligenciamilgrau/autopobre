@@ -17,7 +17,7 @@ with sync_playwright() as p:
  try:
   open_menu(page);shot('abertura')
   page.tap('#settingsButton');check('settings_fit_landscape',page.evaluate("()=>{const r=document.querySelector('#settings').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.right<=innerWidth}"));shot('config')
-  page.uncheck('#immersiveMode');page.tap('#settingsBack');enter_track(page,tap=True);wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
+  page.tap('#settingsBack');enter_track(page,tap=True);wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
   check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio<=1'))
   session=context.new_cdp_session(page);points=[dict(center('#touchPedals'),y=page.locator('#touchPedals').bounding_box()['y']+18,id=1),dict(center('#touchSteering'),x=page.locator('#touchSteering').bounding_box()['x']+23,id=2)]
   session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':points});wait_js(page,"interlagos.mobileInfo().throttle>.9&&interlagos.mobileInfo().steering<-.5")
@@ -26,11 +26,11 @@ with sync_playwright() as p:
   session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':[dict(center('#touchHandbrake'),id=3)]});check('handbrake_held',page.evaluate("interlagos.mobileInfo().pressed.includes('Space')"));session.send('Input.dispatchTouchEvent',{'type':'touchEnd','touchPoints':[]})
   page.tap('#touchCamera');check('camera_button_works',page.evaluate('interlagos.state.mode')!='chase')
   page.set_viewport_size({'width':390,'height':844});wait_js(page,'interlagos.state.paused');check('portrait_prompt_pauses_game',page.is_visible('#rotatePhone'));shot('girar')
-  page.set_viewport_size({'width':667,'height':375});page.tap('#settingsButton');page.check('#immersiveMode');page.tap('#settingsBack');enter_track(page,tap=True)
+  page.set_viewport_size({'width':667,'height':375});page.tap('#settingsButton');page.tap('#settingsBack');enter_track(page,tap=True,story=True)
   page.evaluate("async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}")
   wait_js(page,"fixtureMode.visual.followPosition!=null");check('viewport_fills_after_rotation',page.evaluate("()=>{const r=document.querySelector('#touchControls').getBoundingClientRect();return Math.abs(r.width-innerWidth)<2&&Math.abs(r.height-innerHeight)<2&&Math.abs(visualViewport.width-innerWidth)<2}"));shot('boxes')
   page.evaluate("()=>{fixtureMode.state.talk(0);fixtureMode.ui();}");wait_js(page,"document.querySelector('[data-action=\"joke:0\"]')");page.tap('[data-action="joke:0"]');check('touch_dialogue_donates_and_closes',page.evaluate('fixtureMode.state.fan===null&&fixtureMode.state.donors.includes(0)'))
-  page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.action('prepare')}");page.tap('[data-action="buy"]');check('touch_fuel_purchase',page.evaluate("fixtureMode.state.phase==='starting'&&fixtureMode.state.fuel>0"));shot('partida')
+  page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.action('desk')}");page.tap('[data-action="buy"]');check('touch_fuel_purchase',page.evaluate("fixtureMode.state.phase==='starting'&&fixtureMode.state.fuel>0"));shot('partida')
   page.evaluate("()=>{const m=fixtureMode;m.state.cash=37.5;m.state.profile.fund=275;m.state.phase='race';m.state.finish(1);m.sync();}");wait_js(page,"document.querySelector('[data-action=\"afterPodium\"]')");check('podium_precedes_inspection',page.evaluate("fixtureMode.state.phase==='podium'&&!fixtureMode.state.inspected"));shot('podio')
   check('podium_even_ranks_left_and_first_highest',page.evaluate("()=>{const v=fixtureMode.visual,points=[1,2,3,4,5,6].map(n=>{const o=v.podium.getObjectByName('Podio_'+n);return {x:o.getWorldPosition(o.position.clone()).project(fixtureMode.camera).x,h:o.geometry.parameters.height}});return [1,3,5].every(i=>points[i].x<points[0].x)&&[2,4].every(i=>points[i].x>points[0].x)&&points.every(p=>p.h<=points[0].h)}"))
   page.tap('[data-action="afterPodium"]');check('no_disqualification_warning',not any(w in page.inner_text('#immersivePanel').lower() for w in ['desclassific','perder prêmio','perder o prêmio']))

@@ -2,7 +2,7 @@
 
 Os catorze rivais recebem a bandeirada antes da entrada dos boxes; a simulação corre até todos
 pararem nas vagas, e o Opala para na faixa rápida olhando a fila. INTERLAGOS_URL troca o servidor."""
-from browser_config import GAME_URL,browser_executable,browser_args,wait_js,open_menu,race_options,enter_track,wait_race_start
+from browser_config import GAME_URL,browser_executable,browser_args,wait_js,open_menu,enter_track,wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json,os
@@ -15,7 +15,7 @@ with sync_playwright() as p:
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.add_init_script("Object.defineProperty(Element.prototype,'requestPointerLock',{value:undefined,configurable:true})")
  try:
-  open_menu(page,os.environ.get("INTERLAGOS_URL",GAME_URL));race_options(page,immersive=False);enter_track(page);wait_race_start(page)
+  open_menu(page,os.environ.get("INTERLAGOS_URL",GAME_URL));enter_track(page);wait_race_start(page)
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
   wait_js(page,'window.fixtureMode?.field')
   # Every rival takes the flag 60-420 m before the pit entry, on the pit side of the road.

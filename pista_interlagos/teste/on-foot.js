@@ -10,9 +10,18 @@ import {wallsNear,pitFrameAt} from './pit-lane.js';
 
 const clamp=THREE.MathUtils.clamp,wrap=a=>Math.atan2(Math.sin(a),Math.cos(a)),R=.25,ZERO=new THREE.Vector3();
 
-export function footState(yaw,extra={}){return {yaw,pitch:.5,distance:4.8,cycle:0,steps:0,running:false,crouch:false,crouchAmount:0,lift:0,vz:0,floor:0,...extra};}
-export function turnFootView(s,dx,dy){s.yaw-=dx*.0025;s.pitch=clamp(s.pitch+dy*.0025,-.15,1.2);}
-export function zoomFootView(s,k){s.distance=clamp(s.distance+k*.5,2.2,7.5);}
+// A film-style third person: low, close, over the right shoulder, with the horizon in view.
+export function footState(yaw,extra={}){return {yaw,pitch:.3,distance:4.4,zoomFov:58,cycle:0,steps:0,running:false,crouch:false,crouchAmount:0,lift:0,vz:0,floor:0,...extra};}
+export function turnFootView(s,dx,dy){const k=.0025*(s.zoomFov??58)/58;s.yaw-=dx*k;s.pitch=clamp(s.pitch+dy*k,-.15,1.2);}
+// The wheel zooms in proportional steps, from 7.5 m out to the pilot's eyes (under half a
+// metre he hides), then keeps going with the lens (field of view down to minFov) to look at
+// details of an open engine bay or trunk; zooming out opens the lens first.
+export const FOOT_ZOOM=Object.freeze({min:.15,max:7.5,step:1.22,fov:58,minFov:14,lensStep:1.15});
+export function zoomFootView(s,k){
+ const fov=s.zoomFov??FOOT_ZOOM.fov;
+ if(k<0){if(s.distance>FOOT_ZOOM.min+1e-3)s.distance=Math.max(FOOT_ZOOM.min,s.distance/FOOT_ZOOM.step);else s.zoomFov=Math.max(FOOT_ZOOM.minFov,fov/FOOT_ZOOM.lensStep);}
+ else if(k>0){if(fov<FOOT_ZOOM.fov-1e-3)s.zoomFov=Math.min(FOOT_ZOOM.fov,fov*FOOT_ZOOM.lensStep);else s.distance=Math.min(FOOT_ZOOM.max,s.distance*FOOT_ZOOM.step);}
+}
 export function footJump(s){if(s.lift>0)return false;s.crouch=false;s.vz=3.3;return true;}
 
 // Floor height (world y) where a person can stand at a world position, or null.
@@ -21,16 +30,18 @@ export function footJump(s){if(s.lift>0)return false;s.crouch=false;s.vz=3.3;ret
 // garages of the pit block stop him, and so do the circuit's walls, except the low
 // ones he has jumped high enough to climb (not across the garage doors, where the
 // wall stands for the closed door). The layout's solid(pos, from, crew) and blocked(pos,
-// from) add people and parked cars; from is where he stands now.
+// from) add people and parked cars; from is where he stands now. walk(pos, elevation)
+// gets the height of his feet, and where overWalls(pos) its floors (the team stand's
+// steps and deck on the pit wall) take the place of the walls.
 export function footGround({car,pit=null,layout=null,blocked=null,crew=true}){
  const geo=car.pitGeo,g=pit?.garages,depth=pit?.block??21;
  const inBlock=(x,y,m)=>{if(!g)return false;const f=pitFrameAt(pit,x,y);return !!f&&f.s>g[0]-m&&f.s<g[1]+m&&f.d>f.front-m&&f.d<f.front+depth+m;};
  const climbable=new Set(geo?geo.walls.filter(w=>w.low&&!inBlock((w.x1+w.x2)/2,(w.y1+w.y2)/2,1)):[]);
  return (pos,elevation,from=null)=>{
-  const x=pos.x,y=-pos.z,room=layout?.walk?.(pos);if(room===null||from&&layout?.solid?.(pos,from,crew))return null;
+  const x=pos.x,y=-pos.z,room=layout?.walk?.(pos,elevation);if(room===null||from&&layout?.solid?.(pos,from,crew))return null;
   if(room===undefined&&inBlock(x,y,R))return null;
   let floor=room??car.sample(x,y).z-.055;
-  if(geo)for(const w of wallsNear(geo,x,y,R)){if(!climbable.has(w)||elevation<w.top-.5)return null;floor=Math.max(floor,w.top);}
+  if(geo&&!(room!==undefined&&layout?.overWalls?.(pos)))for(const w of wallsNear(geo,x,y,R)){if(!climbable.has(w)||elevation<w.top-.5)return null;floor=Math.max(floor,w.top);}
   return blocked?.(pos,from)?null:floor;
  };
 }
@@ -83,6 +94,8 @@ export function footLimbs(hero,s,dt,distance,arms=null){
 // world position) at the chosen yaw, pitch and distance, kept in the rooms by the layout.
 export function footEye(s,hero,layout,target,eye){
  target.set(hero.x,hero.y+1.35-.45*s.crouchAmount,hero.z);
+ // Over the right shoulder: the pilot stands a little left of the middle of the frame.
+ const shoulder=.4*Math.min(1,s.distance/3);target.x+=Math.sin(s.yaw)*shoulder;target.z+=Math.cos(s.yaw)*shoulder;
  eye.set(target.x-Math.cos(s.yaw)*Math.cos(s.pitch)*s.distance,target.y+Math.sin(s.pitch)*s.distance,target.z+Math.sin(s.yaw)*Math.cos(s.pitch)*s.distance);
  layout?.frameEye?.(eye,hero);
 }
@@ -120,10 +133,13 @@ export function clearView(target,position,obstacles,ground=null){
 // wall it comes close, so it rises and looks ahead over his head instead of filling
 // the view with his back; right at his head, `body` is hidden.
 export function placeFootCamera(camera,s,hero,{layout=null,obstacles=null,ground=null,dt=1/60,follow=null,body=null}={}){
- const target=new THREE.Vector3(),eye=new THREE.Vector3();footEye(s,hero,layout,target,eye);
- follow??=eye.clone();follow.lerp(eye,1-Math.exp(-Math.max(dt,.016)*16));clearView(target,follow,obstacles,ground);
- const close=clamp((1.4-Math.hypot(follow.x-target.x,follow.z-target.z))/1.4,0,1),fx=Math.cos(s.yaw),fz=-Math.sin(s.yaw);
- camera.position.copy(follow);camera.position.y+=.8*close;camera.up.set(0,1,0);camera.lookAt(target.x+fx*2.5*close,target.y-.3*close,target.z+fz*2.5*close);
+ const close=1-Math.min(1,Math.max(0,(s.distance-.5)/.9));
+ s.head??=hero.clone();if(s.head.distanceToSquared(hero)>1)s.head.copy(hero);else s.head.lerp(hero,1-Math.exp(-Math.max(dt,.016)*14));
+ const target=new THREE.Vector3(),eye=new THREE.Vector3();footEye(s,close>0?s.head:hero,layout,target,eye);
+ follow??=eye.clone();follow.lerp(eye,close>=1?1:1-Math.exp(-Math.max(dt,.016)*(16+60*close)));const walled=clearView(target,follow,obstacles,ground);
+ // Only a wall pushing the camera in makes it rise over his head; a close zoom stays where it was asked.
+ const rise=walled&&close<1?clamp((1.4-Math.hypot(follow.x-target.x,follow.z-target.z))/1.4,0,1):0,fx=Math.cos(s.yaw),fz=-Math.sin(s.yaw);
+ camera.position.copy(follow);camera.position.y+=.8*rise;camera.up.set(0,1,0);camera.lookAt(target.x+fx*2.5*rise,target.y-.3*rise,target.z+fz*2.5*rise);
  if(body)body.visible=camera.position.distanceTo(target)>.55;
  return follow;
 }

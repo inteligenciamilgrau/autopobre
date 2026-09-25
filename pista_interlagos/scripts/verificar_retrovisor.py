@@ -23,7 +23,7 @@ with sync_playwright() as p:
   return all(f['frame']==f['mirror'] and math.dist(f['eye'],[-.65,1.14,0])<1e-6 for f in frames) and len(set(f['frame'] for f in frames))==len(frames)
  try:
   # The free race starts behind the car; switch to the interior on track.
-  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton')
+  open_menu(page);enter_track(page);page.click('#cockpitButton')
   frames=sample();check('every_cockpit_frame_has_fresh_reflection',synced(frames))
   wait_race_start(page);page.evaluate('()=>{interlagos.reposition(600);const c=interlagos.car;c.vx=Math.cos(c.heading)*15;c.vy=Math.sin(c.heading)*15;}')
   page.keyboard.down('KeyA');frames=sample(12);page.keyboard.up('KeyA')

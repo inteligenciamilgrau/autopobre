@@ -65,7 +65,10 @@ export function buildPod(kit,position,tilt){
 
 // Overhead switch bank hung from the windscreen cage tube (photo 31).
 // Racing state: ignition, fuel pump, DH and lights on; wipers and headlights off.
+// The levers are groups named Interruptor_<label> (rotation.x SWITCH_TILT on, -SWITCH_TILT
+// off) and the start button's dome Botao_PART, so the story mode's engine start moves them.
 const SWITCH_ON=Object.freeze({IGN:true,BC1:true,DH:true,LAN:true,LIMP:false,FAROL:false});
+export const SWITCH_TILT=-.42;
 export function buildSwitchBank(kit,position,tilt,hanger){
  const {mesh,box,bar,m,panel,chrome}=kit;
  const bank=panel(position,kit.root,tilt);bank.name='Painel_botoes_Luizao';
@@ -76,12 +79,13 @@ export function buildSwitchBank(kit,position,tilt,hanger){
  for(const [label,x] of SWITCH_BANK){
   if(label==='PART'){
    mesh(new THREE.CylinderGeometry(.0125,.0125,.004,32).rotateX(Math.PI/2),m.plastic,[x,-.0005,.0045],bank);
-   mesh(new THREE.SphereGeometry(.0092,24,12,0,Math.PI*2,0,Math.PI/2).rotateX(Math.PI/2).scale(1,1,.5),m.shell,[x,-.0005,.0065],bank);
+   const dome=new THREE.Group();dome.name='Botao_PART';dome.position.set(x,-.0005,.0065);bank.add(dome);
+   mesh(new THREE.SphereGeometry(.0092,24,12,0,Math.PI*2,0,Math.PI/2).rotateX(Math.PI/2).scale(1,1,.5),m.shell,[0,0,0],dome);
    continue;
   }
   mesh(new THREE.CylinderGeometry(.0072,.0072,.0028,6).rotateX(Math.PI/2),chrome,[x,-.0015,.004],bank); // hex nut
   mesh(new THREE.CylinderGeometry(.0042,.0042,.0045,16).rotateX(Math.PI/2),chrome,[x,-.0015,.0065],bank);
-  const bat=new THREE.Group();bat.position.set(x,-.0015,.008);bat.rotation.x=SWITCH_ON[label]?-.42:.42;bank.add(bat);
+  const bat=new THREE.Group();bat.name='Interruptor_'+label;bat.position.set(x,-.0015,.008);bat.rotation.x=SWITCH_ON[label]?SWITCH_TILT:-SWITCH_TILT;bank.add(bat);
   mesh(new THREE.CylinderGeometry(.0019,.0026,.017,12).rotateX(Math.PI/2),chrome,[0,0,.0085],bat);
   mesh(new THREE.SphereGeometry(.0028,12,8),chrome,[0,0,.017],bat);
  }

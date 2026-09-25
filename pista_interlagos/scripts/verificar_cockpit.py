@@ -14,7 +14,7 @@ with sync_playwright() as p:
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  try:
   # The free race starts behind the car; switch to the interior on track.
-  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton');page.keyboard.down('KeyS');wait_race_start(page);frame()
+  open_menu(page);enter_track(page);page.click('#cockpitButton');page.keyboard.down('KeyS');wait_race_start(page);frame()
   page.screenshot(path=str(ROOT/'renders/cockpit_largada.png'))
   info=page.evaluate('interlagos.cockpitInfo()');report['views'].append(info)
   # The controls sit in the V06 body (the car stays visible round them), lowered onto its floor.
@@ -47,8 +47,8 @@ with sync_playwright() as p:
   page.keyboard.down('KeyB');page.wait_for_timeout(300);frame()
   check('b_only_inside_cockpit',page.evaluate('interlagos.viewControls().lookBack.amount')==0);page.keyboard.up('KeyB')
   modes=[]
-  for _ in range(6):page.keyboard.press('KeyC');modes.append(page.evaluate('interlagos.state.mode'))
-  check('six_camera_cycle',modes==['close','hood','cockpit','aerial','orbit','chase'])
+  for _ in range(7):page.keyboard.press('KeyC');modes.append(page.evaluate('interlagos.state.mode'))
+  check('seven_camera_cycle',modes==['close','hood','cockpit','tv','aerial','orbit','chase'])
   page.click('#cockpitButton');page.set_viewport_size({'width':1280,'height':720});frame();page.screenshot(path=str(ROOT/'renders/cockpit_16x9.png'))
   check('no_webgl_errors',not report['errors']);report['passed']=True
  finally:

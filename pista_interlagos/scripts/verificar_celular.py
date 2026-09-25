@@ -14,7 +14,7 @@ with sync_playwright() as p:
  def info():return page.evaluate('interlagos.cockpitInfo().phone')
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  try:
-  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton')
+  open_menu(page);enter_track(page);page.click('#cockpitButton')
   check('no_message_at_start',info()['count']==0)
   page.keyboard.press('Space')
   wait_js(page,'interlagos.cockpitInfo().phone.active')

@@ -18,7 +18,7 @@ with sync_playwright() as p:
   info=pose();report['poses'].append(info);check(name,all(a['reachable'] and abs(a['upper']-.275)<1e-5 and abs(a['lower']-.265)<1e-5 and abs(a['gripRadius']-.173)<1e-8 for a in info['arms']))
  try:
   # The free race starts behind the car; switch to the interior on track.
-  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton')
+  open_menu(page);enter_track(page);page.click('#cockpitButton')
   page.keyboard.down('KeyS');frame();check_arms('hands_on_wheel_neutral')
   page.screenshot(path=str(ROOT/'renders/piloto_interna.png'))
   page.keyboard.down('KeyA');wait_js(page,'interlagos.car.steer>.48');frame();check('no_body_lean_while_parked',abs(pose()['lean'])<.002);check_arms('full_left_reachable');page.keyboard.up('KeyA')

@@ -17,7 +17,7 @@ with sync_playwright() as p:
   wait_js(page,'interlagos.audioInfo().recordings?.available.length>0');available=page.evaluate('interlagos.audioInfo().recordings.available');report['files']=available
   if 'intro.mp3' in available:
    wait_js(page,"interlagos.audioInfo().recordings.file==='intro.mp3'&&interlagos.audioInfo().rms>.001");check('intro_streams_on_opening',True)
-  page.click('#settingsBack');enter_track(page)
+  page.click('#settingsBack');enter_track(page,story=True)
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
   if 'patrocinio.mp3' in available:
    wait_js(page,"interlagos.audioInfo().recordings.file==='patrocinio.mp3'&&interlagos.audioInfo().rms>.001");check('sponsor_track_in_paddock',True)

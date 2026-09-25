@@ -14,7 +14,7 @@ with sync_playwright() as p:
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  try:
-  open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton')
+  open_menu(page);enter_track(page);page.click('#cockpitButton')
   info=page.evaluate('interlagos.driverInfo()');report['driver']=info
   check('helmet_and_balaclava_loaded',info['helmet']['balaclava'] and info['helmet']['visor']=='raised')
   check('helmet_fits_below_roof',info['headHeight']<1.36)

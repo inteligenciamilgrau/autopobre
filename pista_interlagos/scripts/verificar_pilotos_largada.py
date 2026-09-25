@@ -38,7 +38,7 @@ with sync_playwright() as p:
   page.click('[data-records-circuit="curvelo"]');page.click('[data-records-mode="immersive"]');assert page.locator('#lapRecords tbody tr').count()==0
   page.click('[data-records-mode="normal"]');assert 'Ana <99>' in page.inner_text('#lapRecords tbody');page.screenshot(path=str(ROOT/f'renders/recordes_automaticos_{mobile}.png'));page.click('#recordsClose')
   page.reload(wait_until='domcontentloaded');wait_js(page,'window.interlagos');assert not page.evaluate('interlagos.ready');assert page.input_value('#pilotSelect')=='Bruno';assert page.is_hidden('#pilotName')
-  page.select_option('#pilotSelect','Ana <99>');page.click('#settingsButton');page.locator('#immersiveMode').set_checked(True);page.click('#settingsBack');page.click('#start');wait_js(page,'interlagos.ready')
+  page.select_option('#pilotSelect','Ana <99>');page.click('#storyStart');wait_js(page,'interlagos.ready')
   page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js'),old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();fixture.state.phase='grid';fixture.state.countdown=3;fixture.sync();}""")
   wait_js(page,"!document.querySelector('#raceCountdown').hidden&&document.querySelector('#countdownNumber').textContent==='3'")
   assert page.evaluate('interlagos.car.clock===0')

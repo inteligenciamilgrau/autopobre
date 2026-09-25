@@ -33,11 +33,11 @@ with sync_playwright() as p:
   assert page.locator('#lapRecords tbody tr').count()==1
   page.click('[data-records-circuit="interlagos"]');assert page.locator('#lapRecords tbody tr').count()==0
   page.click('#recordsClose');page.click('#resultsMainMenu');assert page.is_visible('#circuitPicker')
-  page.click('#settingsButton');page.locator('#immersiveMode').set_checked(True);page.click('#settingsBack');page.click('#start')
+  page.click('#storyStart')
   wait_js(page,"fixture.active&&fixture.state.phase==='crowd'")
   page.screenshot(path=str(ROOT/f'renders/curvelo_boxes_{mobile}.png'))
-  page.evaluate("fixture.state.cash=300;fixture.action('prepare')")
-  wait_js(page,"fixture.state.phase==='prepare'")
+  page.evaluate("fixture.state.cash=300;fixture.action('desk')")
+  wait_js(page,"!!document.querySelector('#immLitres')")
   assert '1–2 L' in page.inner_text('#immersivePanel')
   page.screenshot(path=str(ROOT/f'renders/curvelo_preparacao_{mobile}.png'))
   page.evaluate('fixture.onMainMenu()');page.click('[data-circuit="interlagos"]')

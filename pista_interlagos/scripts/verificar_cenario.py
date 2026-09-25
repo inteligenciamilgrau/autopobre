@@ -35,7 +35,7 @@ with sync_playwright() as p:
     # Errors, and the warning printed when the GLB terrain could not take the fitted ground.
     page.on('console', lambda m: report['errors'].append(m.text) if m.type == 'error' or (m.type == 'warning' and 'Terreno' in m.text) else None)
     open_menu(page, URL)
-    race_options(page, immersive=False, camera='chase')
+    race_options(page, camera='chase')
     enter_track(page, 'Piloto cenario')
     wait_race_start(page)
     info = page.evaluate('interlagos.sceneryInfo()')
@@ -51,9 +51,9 @@ with sync_playwright() as p:
         assert state['onRoad'], state
         page.screenshot(path=str(ROOT / f'renders/cenario_{name}.png'))
         report['views'].append({'name': name, **state})
-    # Aerial view over the grandstand: C cycles chase, close, hood, cockpit, aerial.
+    # Aerial view over the grandstand: C cycles chase, close, hood, cockpit, tv, aerial.
     page.evaluate(PLACE, ['track', 4150, -4, 0])
-    for _ in range(4):
+    for _ in range(5):
         page.keyboard.press('KeyC')
     page.wait_for_timeout(1500)
     page.screenshot(path=str(ROOT / 'renders/cenario_arquibancada_aerea.png'))

@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import {PlayerPreferences,PREFERENCES_KEY} from '../teste/player-preferences.js';
 const data=new Map(),storage={getItem:key=>data.get(key),setItem:(key,value)=>data.set(key,value)};
 let preferences=new PlayerPreferences(storage);
-assert.deepEqual(preferences.values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,realisticWater:false,classicInterior:false});
+assert.deepEqual(preferences.values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,realisticWater:false,classicInterior:false,cinematic:'auto',laps:3});
 preferences.update({immersive:false,livery:'seiva_danilo',camera:'cockpit'});
 preferences=new PlayerPreferences(storage);
-assert.deepEqual(preferences.values,{immersive:false,livery:'seiva_danilo',camera:'cockpit',circuit:'interlagos',damage:false,realisticWater:false,classicInterior:false});
+assert.deepEqual(preferences.values,{immersive:false,livery:'seiva_danilo',camera:'cockpit',circuit:'interlagos',damage:false,realisticWater:false,classicInterior:false,cinematic:'auto',laps:3});
 preferences.update({circuit:'curvelo'});
 assert.equal(new PlayerPreferences(storage).values.circuit,'curvelo');
 preferences.update({circuit:'../../private'});
@@ -25,9 +25,16 @@ preferences.update({classicInterior:true});assert.equal(new PlayerPreferences(st
 preferences.update({classicInterior:'yes'});assert.equal(new PlayerPreferences(storage).values.classicInterior,false);
 for(const corrupted of ['{"damage":1}','{"realisticWater":1}','not json','null','[]','42','{"immersive":"false","livery":"../../private","camera":"bad"}','{"circuit":{"toString":42}}']){
  data.set(PREFERENCES_KEY,corrupted);
- assert.deepEqual(new PlayerPreferences(storage).values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,realisticWater:false,classicInterior:false});
+ assert.deepEqual(new PlayerPreferences(storage).values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,realisticWater:false,classicInterior:false,cinematic:'auto',laps:3});
 }
 const denied=new PlayerPreferences({getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}});
 assert.doesNotThrow(()=>denied.update({immersive:false,camera:'orbit'}));
 assert.equal(denied.values.immersive,false);
+// Race length: 3 laps unless the player picks another whole number from 1 to 20.
+preferences.update({laps:5});assert.equal(new PlayerPreferences(storage).values.laps,5);
+preferences.update({laps:1});assert.equal(new PlayerPreferences(storage).values.laps,1);
+for(const bad of [0,21,2.5,'4',null,-3])assert.equal((preferences.update({laps:bad}),new PlayerPreferences(storage).values.laps),3,`laps ${bad} falls back to 3`);
 console.log('Preferences passed: defaults, both modes, independent fields, invalid data and unavailable storage.');
+// Film look: auto by default, only the known levels are kept.
+preferences.update({cinematic:'lite'});assert.equal(new PlayerPreferences(storage).values.cinematic,'lite');
+preferences.update({cinematic:'cinema'});assert.equal(new PlayerPreferences(storage).values.cinematic,'auto');

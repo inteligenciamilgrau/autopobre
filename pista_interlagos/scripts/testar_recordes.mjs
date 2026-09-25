@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {readRecords,saveRecord} from '../teste/lap-records.js';
+import {readRecords,saveRecord,trackRecords} from '../teste/lap-records.js';
 import {resultRows,formatTime} from '../teste/race-results.js';
 const values=new Map(),storage={getItem:k=>values.get(k),setItem:(k,v)=>values.set(k,v)};
 const candidate={name:'Stevan',mode:'normal',bestLap:150.25,bestRace:480.75};
@@ -19,4 +19,12 @@ assert.throws(()=>saveRecord({getItem:()=>null,setItem(){throw Error('quota')}},
 assert.deepEqual(readRecords({getItem:()=>'{broken'}),[]);assert.deepEqual(readRecords({getItem:()=>JSON.stringify([{...candidate,name:{}}])}),[]);
 const mode={freeOrder:[{number:'70',name:'Kleber Eletric',bestLap:149,totalTime:460,finished:true},{number:'73',name:'Konrad Viehmann',bestLap:null,totalTime:null,finished:false}],finishPosition:2,finishTime:470,finishBest:150};
 const rows=resultRows(mode);assert.deepEqual(rows.map(r=>r.number),['70','99','73']);assert.equal(rows[1].bestLap,150);assert.equal(rows[2].totalTime,null);assert.equal(formatTime(150.25),'02:30.250');assert.equal(formatTime(null),'—');
+// The garage TVs: this track and mode only, people and the AI together, fastest first; the pilot
+// playing is marked and keeps the last line with his own place when he is below the top rows.
+const tv=trackRecords(storage,'interlagos','normal','stevan');
+assert.equal(tv.lap.length,8);assert.ok(tv.lap.every((r,i)=>i===7||r.ai&&r.place===i+1),'AI references lead the lap list');assert.ok(tv.lap.slice(0,7).every((r,i,a)=>!i||r.time>=a[i-1].time));
+assert.deepEqual([tv.lap[7].me,tv.lap[7].number,tv.lap[7].time,tv.lap[7].place>8],[true,'99','02:30.250',true],'the pilot keeps the last line');
+assert.equal(trackRecords(storage,'interlagos','normal','outro').lap[7].me,false);
+const oval=trackRecords(storage,'curvelo','normal','Curvelo 54');assert.ok(oval.lap[0].me&&oval.lap[0].name==='Curvelo 54'&&oval.lap[0].place===1,'a fast pilot leads the oval board');
+assert.ok(oval.race.every(r=>r.time!=='—'));assert.ok(trackRecords(storage,'curvelo','immersive').lap.every(r=>r.ai),'modes stay apart on the TVs');
 console.log('Records persist, preserve personal bests, separate modes, reject invalid data and display actual result times.');

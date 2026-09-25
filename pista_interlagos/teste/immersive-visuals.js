@@ -2,10 +2,12 @@ import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {FANS,strapPath} from './immersive-state.js';
 import {RIVAL_ROSTER} from './race-roster.js';
-import {createPeople,setPose,POSES,OUTFITS} from './pit-crew.js';
+import {createPeople,setPose,POSES,OUTFITS,Idler} from './pit-crew.js';
 import {curveloPitFrame,serviceSpot,garageBays,pitPoint} from './pit-lane.js';
 import {footState,stepOnFoot,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
 import {shutOpenings,CarOpenings,carSpot,SPOT_OPENING} from './car-openings.js';
+import {createRivalDriver,CABIN_DROP} from './rival-driver.js';
+import {podiumBanner,podiumPlate,podiumRibbon,signBoard} from './pit-textures.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
 const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
@@ -29,8 +31,6 @@ export class ImmersiveVisuals {
   this.podium=new THREE.Group();this.stage.add(this.podium);
   this.box(this.stage,[0,-1.5,0],[26,3,23],0x353d3d);
   for(const z of [-10.5,10.5])this.box(this.stage,[0,.02,z],[25,.04,.18],0xeedbbb);
-  this.tag(this.podium,'AUTO-POBRE RACING',[-7,4.8,0],10,1.1,'#e7b454','#142329');
-  this.tag(this.podium,'STEVAN GAIPO · TODO MUNDO TEM UMA CONTA PRA PAGAR',[-7,3.85,0],10,.48,'#ffffff','#142329');
   // Before the race the pilot passes the hat round in front of the circuit's own pit
   // garages (pit-building.js): rivals' cars parked at their teams' doors, the Opala 99
   // inside Box 99 and six supporters on the working lane. The group is not turned, so
@@ -44,13 +44,15 @@ export class ImmersiveVisuals {
    const [x,dd,turn,idle]=spots[i],pos=L.point(x,L.spotD+dd),person=this.people.person(outfits[i]);person.position.copy(pos);person.rotation.y=L.heading+Math.PI+(dd>0?.5:-.5)+turn;setPose(person,POSES[idle]);this.crowd.add(person);
    const label=this.tag(this.crowd,fan.name,[pos.x,pos.y+2.1,pos.z],1.8,.30),dollar=this.tag(this.crowd,'$',[pos.x,pos.y+2.65,pos.z],.43,.56,'#ffe380','#19452b');
    const reaction=this.tag(this.crowd,'HAHA! + R$ '+fan.gift,[pos.x,pos.y+3.15,pos.z],2.4,.45,'#203823','#c7ed9c');reaction.visible=false;
-   return {pos,person,label,dollar,reaction,cheerUntil:0,idle,shown:idle};
+   // Waiting for the pilot they idle: phone, chatting, arms crossed (pit-crew.js).
+   const idler=new Idler(person,'fan',{props:{phone:this.people.carry('phone',person.userData.rig.limbs[1].hand)},seed:.2+i*.17});
+   return {pos,person,label,dollar,reaction,cheerUntil:0,idle,idler};
   });
   this.socialMarker=new THREE.Mesh(new THREE.OctahedronGeometry(.18),new THREE.MeshStandardMaterial({color:0x86e37c,emissive:0x28651f,roughness:.3}));this.crowd.add(this.socialMarker);
   // The pilot, out of the car in his cap; limbs listed left leg, left arm, right leg, right arm.
   this.hero=this.people.person(OUTFITS.driver);this.crowd.add(this.hero);const rig=this.hero.userData.rig.limbs;this.hero.userData.limbs=[rig[-1].leg,rig[-1].arm,rig[1].leg,rig[1].arm];
   this.heroStart=L.point(-1.5,L.spotD);this.heroYaw=L.heading;this.hero.position.copy(this.heroStart);this.hero.rotation.y=this.heroYaw;this.foot=footState(this.heroYaw,{floor:this.crowd.position.y+this.heroStart.y});
-  this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName);group.userData.entry=entry;this.root.add(group);return group;});
+  this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{driven:true});group.userData.entry=entry;this.root.add(group);return group;});
   this.parked=[];
   if(pit){
    // The four teams nearest Box 99 park nose in at their garage doors.
@@ -74,23 +76,47 @@ export class ImmersiveVisuals {
   this.crackedGlass=new THREE.Mesh(glassGeometry,new THREE.MeshBasicMaterial({map:this.crackTexture,transparent:true,side:THREE.DoubleSide,depthWrite:false,opacity:.9}));this.damage.add(this.crackedGlass);this.lastGlass=-1;
   this.debris=new THREE.Mesh(new THREE.IcosahedronGeometry(.085,0),this.mat(0x655a4d));this.root.add(this.debris);
   const leakGeometry=new THREE.BufferGeometry();leakGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(240*3),3));this.leak=new THREE.Points(leakGeometry,new THREE.PointsMaterial({color:0x4b341b,size:.22,transparent:true,opacity:.55,depthWrite:false}));this.leak.frustumCulled=false;this.root.add(this.leak);this.leakCount=0;this.leakCursor=0;this.leakTimer=0;
-  this.judge=this.people.person({top:0xe9e5d5,bottom:0x2d3338,hat:'cap',hatColor:0x37536a,glasses:true});this.root.add(this.judge);this.tag(this.judge,'JUIZ',[0,2.0,0],1.2,.38,'#fff','#37536a');
+  this.judge=this.people.person({top:0xe9e5d5,bottom:0x2d3338,hat:'cap',hatColor:0x37536a,glasses:true});this.root.add(this.judge);this.judgeIdle=new Idler(this.judge,'judge',{seed:.61});this.tag(this.judge,'JUIZ',[0,2.0,0],1.2,.38,'#fff','#37536a');
   this.closedPark=this.tag(this.root,'PARQUE FECHADO · AGUARDE A VISTORIA',[0,0,0],6,.7,'#fff','#285e69');
   this.pitSign=this.tag(this.root,'BOXES',[0,0,0],5,.7,'#fff','#8e4736');
   this.podiumHero=this.people.person(OUTFITS.driver);const cheer=this.podiumHero.userData.rig.limbs;this.podiumHero.userData.limbs=[cheer[-1].leg,cheer[-1].arm,cheer[1].leg,cheer[1].arm];this.podium.add(this.podiumHero);
+  this.podiumSlots=[];this.podiumRivals=[];this.podiumPlates=[];
   for(let i=0;i<6;i++){
    const height=[1.65,1.4,1.2,.95,.72,.45][i],z=i===0?0:i%2===1?(i+1)/2*2.8:-i/2*2.8;
    this.box(this.podium,[-2,height/2,z],[2,height,2.45],i===5?0xc89642:0x576a6c).name='Podio_'+(i+1);
-   this.tag(this.podium,`${i+1}º`,[-.75,height*.5,z],.8,.8,'#fff',i===5?'#8c5923':'#314447');
-   if(i<5){const color=RIVAL_ROSTER[i].color,h=this.people.person({top:color,bottom:0x2d3338,trim:0xf4f1ea,hat:'cap',hatColor:color,skin:[0xc68e6a,0x8d5a3b,0xe0b08f,0x6b4128,0xb77a55][i]});setPose(h,POSES[i%2?'folded':'stand']);h.position.set(-2,height,z);this.podium.add(h);}
-   else this.podiumHero.position.set(-2,height,z);
+   this.podiumSlots.push({height,z});if(i===5)this.podiumHero.position.set(-2,height,z);
   }
-  this.tag(this.podium,'A FOTO É SEMPRE EM SEXTO.',[-2,4.2,0],9,.7,'#f7c75b','#15272b');
+  this.dressPodium(null,'');
+  this.podiumDressing();
   this.box(this.podium,[-9,1.5,-5],[.25,3,5],0x747977);this.box(this.podium,[-6.7,3.05,-5],[4.8,.18,5],0x797b73);
   this.garageDoor=this.box(this.podium,[-4.35,1.3,-5],[.08,2.6,4.7],0x58615c);
-  this.blazer=this.car(0x294c62,'BLAZER');this.blazer.scale.set(1.06,1.18,1.05);this.blazer.position.set(-6.8,.1,-5);this.podium.add(this.blazer);
-  this.tag(this.podium,'OFICINA · BLAZER',[-5.8,3.5,-5],4,.55,'#f7d99b','#213c47');
+  this.blazer=this.car(0x294c62,'BLAZER');for(const label of this.blazer.children.filter(o=>o.isSprite))label.removeFromParent();this.blazer.scale.set(1.06,1.18,1.05);this.blazer.position.set(-6.8,.1,-5);this.podium.add(this.blazer);
  }
+ // The registration circle at the team stand on the pit wall (layout.desk, pit-box99.js),
+ // as a mission marker in GTA: a glowing ring on the deck, a beam fading upward, an arrow
+ // bobbing over it and a sign seen from anywhere in the paddock. Points are kept local.
+ addDesk(desk){
+  if(!desk)return;const o=this.crowd.position,local=v=>v.clone().sub(o);
+  this.desk={face:desk.face,look:desk.look,spot:local(desk.spot),team:local(desk.team),route:desk.route.map(local)};
+  const canvas=document.createElement('canvas');canvas.width=4;canvas.height=128;const ctx=canvas.getContext('2d'),g=ctx.createLinearGradient(0,0,0,128);g.addColorStop(0,'rgba(255,255,255,0)');g.addColorStop(1,'#fff');ctx.fillStyle=g;ctx.fillRect(0,0,4,128);
+  const fade=new THREE.CanvasTexture(canvas),glow=(extra={})=>new THREE.MeshBasicMaterial({color:0xffc21a,transparent:true,depthWrite:false,blending:THREE.AdditiveBlending,side:THREE.DoubleSide,...extra});
+  const marker=new THREE.Group();marker.name='Inscricao_equipe_99';marker.position.copy(this.desk.spot);
+  const beam=new THREE.Mesh(new THREE.CylinderGeometry(.46,.46,1.3,40,1,true).translate(0,.65,0),glow({map:fade,opacity:.5}));
+  const ring=new THREE.Mesh(new THREE.RingGeometry(.37,.46,48).rotateX(-Math.PI/2).translate(0,.015,0),glow({opacity:.95}));
+  const disc=new THREE.Mesh(new THREE.CircleGeometry(.37,48).rotateX(-Math.PI/2).translate(0,.012,0),glow({opacity:.16}));
+  const arrow=new THREE.Mesh(new THREE.ConeGeometry(.15,.32,4).rotateX(Math.PI),new THREE.MeshStandardMaterial({color:0xffc21a,emissive:0xb07a00,roughness:.35}));arrow.position.y=2.2;
+  marker.add(beam,ring,disc,arrow);this.crowd.add(marker);
+  const sign=this.tag(this.crowd,'INSCRIÇÃO · EQUIPE 99',[this.desk.spot.x,this.desk.spot.y+2.8,this.desk.spot.z],2.6,.4,'#1d1a0c','#ffc83a');sign.material.depthTest=false;sign.renderOrder=90;
+  this.deskMarker={marker,beam,ring,disc,arrow,sign};
+ }
+ // In the circle (it opens the registration), or near enough for the action key.
+ atDesk(){return this.nearDesk(.5);}
+ nearDesk(radius=1.7){if(!this.desk||this.inCar)return false;const p=this.hero.position,s=this.desk.spot;return Math.hypot(p.x-s.x,p.z-s.z)<radius&&Math.abs(p.y-s.y)<.6;}
+ // The way to the circle: to the foot of the steps, up onto the wall, then to the circle
+ // (the first legs are skipped once he is on the steps or up there).
+ deskRoute(){if(!this.desk)return null;const [foot,top,spot]=this.desk.route,y=this.hero.position.y;return (y>top.y-.15?[spot]:y>foot.y+.2?[top,spot]:[foot,top,spot]).map(v=>v.clone());}
+ // At the desk the pilot turns to the engineer and the camera frames the two of them and the screens.
+ faceDesk(){if(!this.desk)return;this.hero.rotation.y=this.desk.face;this.foot.yaw=this.desk.look;this.foot.pitch=.32;}
  // Paddock frame at the Box 99 service box: local points (unturned group) from lane
  // coordinates (x along the lane from Box 99, d across it) and back, and walking limits.
  crowdFrame(pit,fallback){
@@ -133,15 +159,16 @@ export class ImmersiveVisuals {
  mat(color){return this.materials[color]??=(new THREE.MeshStandardMaterial({color,roughness:.76}));}
  // The car GLB carries no interior (the player's cockpit is built at runtime, cockpit.js): the
  // other Opalas get a light one that shows through their windows, at the cockpit's own places:
- // seat, head restraint, steering wheel and column, dash top up to the windscreen. One material.
- lightInterior(){
-  const g=new THREE.Group(),dark=this.mat(0x17191b),add=(geometry,p,r=[0,0,0])=>{const o=new THREE.Mesh(geometry,dark);o.position.set(...p);o.rotation.set(...r);o.castShadow=o.receiveShadow=true;g.add(o);};
+ // seat, head restraint, steering wheel and column dropped onto the V06 floor as the player's
+ // are, dash top up to the windscreen. One material. A driven rival's wheel comes with its driver.
+ lightInterior({wheel=true}={}){
+  const g=new THREE.Group(),dark=this.mat(0x17191b),add=(geometry,p,r=[0,0,0],drop=CABIN_DROP)=>{const o=new THREE.Mesh(geometry,dark);o.position.set(p[0],p[1]+drop,p[2]);o.rotation.set(...r);o.castShadow=o.receiveShadow=true;g.add(o);};
   add(new THREE.BoxGeometry(.42,.08,.44),[-.17,.38,-.34]);
   add(new THREE.BoxGeometry(.08,.62,.46),[-.37,.72,-.34],[0,0,.16]);
   add(new THREE.BoxGeometry(.08,.22,.26),[-.44,1.13,-.34],[0,0,.16]);
-  add(new THREE.TorusGeometry(.175,.016,8,24).rotateY(Math.PI/2),[.22,.88,-.34],[0,0,-.38]);
+  if(wheel)add(new THREE.TorusGeometry(.175,.016,8,24).rotateY(Math.PI/2),[.22,.88,-.34],[0,0,-.38]);
   add(new THREE.CylinderGeometry(.022,.022,.4,8).rotateZ(Math.PI/2),[.41,.806,-.34],[0,0,-.38]);
-  add(new THREE.BoxGeometry(.37,.034,1.40),[.755,.89,0]);
+  add(new THREE.BoxGeometry(.37,.034,1.40),[.755,.89,0],[0,0,0],0);
   g.name='Interior_leve';return g;
  }
  box(parent,p,size,color){const o=new THREE.Mesh(new THREE.BoxGeometry(...size),this.mat(color));o.position.set(...p);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;}
@@ -186,12 +213,18 @@ export class ImmersiveVisuals {
   const mesh=new THREE.Mesh(geometry,this.materials.farCar);mesh.name='Rival_distante';mesh.castShadow=mesh.receiveShadow=true;mesh.visible=false;return mesh;
  }
  // Swap detailed and distant rival models around the player.
- detailLevel(obj){const u=obj.userData;if(!u.far)return;const far=obj.position.distanceToSquared(this.carRoot.position)>40*40;u.far.visible=far;u.detail.visible=!far;}
- rivalCar(template,color,number,name=''){
+ // Detailed car or light proxy by how big it looks: distance to the camera shortened by the lens
+ // zoom (the broadcast camera's long lens), or to the player's car when no camera is known.
+ detailLevel(obj){const u=obj.userData;if(!u.far)return;const cam=this.viewCamera;
+  const far=cam?obj.position.distanceTo(cam.position)*Math.tan(cam.fov*Math.PI/360)/Math.tan(29*Math.PI/180)>40:obj.position.distanceToSquared(this.carRoot.position)>40*40;
+  u.far.visible=far;u.detail.visible=!far;}
+ // driven: a rival out on track, with its driver (rival-driver.js) in the team's suit and helmet;
+ // the cars parked at the garages before the race stand empty.
+ rivalCar(template,color,number,name='',{driven=false}={}){
   if(!template)return this.car(color,number);
   const root=template.clone(true),materials=new Map(),pivots=[];
   const structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
-  for(const name of HIDDEN_ON_RIVALS)root.getObjectByName(name)?.removeFromParent();shutOpenings(root);root.add(this.lightInterior());
+  for(const name of HIDDEN_ON_RIVALS)root.getObjectByName(name)?.removeFromParent();shutOpenings(root);root.add(this.lightInterior({wheel:!driven}));
   const inside=[];root.traverse(o=>{if(o.isMesh&&o.userData.interno)inside.push(o);});inside.forEach(o=>o.removeFromParent());
   root.traverse(o=>{
    if(o.isMesh){
@@ -211,6 +244,7 @@ export class ImmersiveVisuals {
   for(const batch of batches.values()){const geometry=mergeGeometries(batch.geometries,false);if(geometry){const mesh=new THREE.Mesh(geometry,batch.material);mesh.castShadow=!batch.material.transparent||batch.material.opacity>=.95;mesh.receiveShadow=true;root.add(mesh);batch.objects.forEach(o=>o.removeFromParent());}batch.geometries.forEach(g=>g.dispose());}
   // Level of detail: beyond ~40 m the car is one vertex-coloured mesh (one draw call).
   const detail=new THREE.Group();detail.name='Rival_detalhe';while(root.children.length)detail.add(root.children[0]);root.add(detail);
+  if(driven){const driver=createRivalDriver({color,number});detail.add(driver.root);root.userData.driver=driver;}
   const far=this.farProxy(color);root.add(far);root.userData.detail=detail;root.userData.far=far;
   const label=name?this.tag(root,name,[0,2.08,0],2.7,.30,'#fff','#172a2ddb'):null;
   // The rival's own number where the Opala 99 carries its 99 (those stickers are
@@ -221,11 +255,30 @@ export class ImmersiveVisuals {
   this.numberPlates(template,detail).forEach((g,i)=>{const decal=new THREE.Mesh(g,sticker);decal.name=['Numero_lateral_','Numero_lateral_','Numero_teto_','Numero_traseiro_'][i]+number;decal.renderOrder=2;detail.add(decal);});
   root.userData.wheels=pivots;root.userData.nameLabel=label;return root;
  }
- truckModel(){const root=new THREE.Group();this.box(root,[0,.66,0],[4.9,.35,2],0xe5b13f);this.box(root,[1.5,1.25,0],[1.65,1,1.9],0xe3c271);this.box(root,[1.55,1.54,0],[1.72,.35,1.91],0x354951);this.box(root,[-.5,1.1,0],[2.4,.22,1.8],0x535c5d);for(const x of [-1.5,1.65])for(const z of [-1,1]){const w=new THREE.Mesh(new THREE.CylinderGeometry(.38,.38,.25,16).rotateX(Math.PI/2),this.mat(0x171a1c));w.position.set(x,.4,z);root.add(w);}this.tag(root,'REBOQUE · SEM PRESSA',[0,2.2,0],3.5,.5,'#222','#e5b13f');return root;}
+ // Flatbed tow truck ("guincho plataforma"): white cab with an orange stripe, aluminium bed,
+ // dual rear wheels and an amber light bar that flashes. It faces +x; the strap hooks at x -2.45.
+ truckModel(){const root=new THREE.Group(),glass=new THREE.MeshStandardMaterial({color:0x0c1114,roughness:.08,metalness:.3});
+  this.box(root,[-.1,.62,0],[5.3,.22,1.1],0x202326);
+  this.box(root,[2.05,1.42,0],[1.7,1.25,2.08],0xe9e7e0);this.box(root,[2.05,1.02,0],[1.72,.16,2.1],0xe06a1f);this.box(root,[2.05,2.08,0],[1.55,.08,1.98],0xd8d6cf);
+  const pane=(p,size)=>{const m=new THREE.Mesh(new THREE.BoxGeometry(...size),glass);m.position.set(...p);root.add(m);};
+  pane([2.91,1.72,0],[.04,.62,1.86]);for(const z of [-1,1])pane([2.25,1.74,z*1.045],[.95,.52,.02]);
+  this.box(root,[2.95,.78,0],[.16,.26,2.12],0x2b2e31);this.box(root,[2.93,1.18,0],[.04,.3,1.1],0x1c1f22);
+  for(const z of [-.78,.78]){const lamp=new THREE.Mesh(new THREE.BoxGeometry(.05,.16,.3),new THREE.MeshStandardMaterial({color:0xfff6dd,emissive:0xfff1c8,emissiveIntensity:1.2}));lamp.position.set(2.95,1.1,z);root.add(lamp);}
+  this.box(root,[-.75,1.02,0],[3.5,.12,2.2],0xa3a9ad);for(const z of [-1.07,1.07])this.box(root,[-.75,1.14,z],[3.5,.12,.06],0x7e8488);
+  this.box(root,[1.12,1.55,0],[.08,1.0,2.05],0x33373a);this.box(root,[-2.45,.78,0],[.28,.34,1.3],0xe0b33c);
+  const beacon=new THREE.Mesh(new THREE.BoxGeometry(.24,.12,1.3),new THREE.MeshStandardMaterial({color:0xffa21a,emissive:0xff8c00,emissiveIntensity:.3,roughness:.3}));beacon.position.set(2.1,2.18,0);root.add(beacon);root.userData.beacon=beacon;
+  for(const [x,z,wide] of [[2.3,-.95,0],[2.3,.95,0],[-1.35,-.82,1],[-1.35,.82,1]]){
+   const w=new THREE.Mesh(new THREE.CylinderGeometry(.42,.42,wide?.52:.28,18).rotateX(Math.PI/2),this.mat(0x151719));w.position.set(x,.42,z);root.add(w);
+   const hub=new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.02,12).rotateX(Math.PI/2),this.mat(0x8b9094));hub.position.set(x,.42,z+Math.sign(z)*(wide?.27:.15));root.add(hub);
+   this.box(root,[x,.9,z*1.03],[1.05,.06,wide?.62:.36],0x202326);
+  }
+  // The joke is painted on the doors, not floating over the truck.
+  for(const side of [-1,1])this.banner(root,'REBOQUE · SEM PRESSA',new THREE.Vector3(2.05,1.42,side*1.05),side>0?0:Math.PI,1.45,.3,'#1d1d1d','#e9e7e0');
+  root.traverse(o=>{if(o.isMesh)o.castShadow=true;});return root;}
  // Smoothed body roll and pitch from the rival's own cornering and braking.
  lean(obj,c){const u=obj.userData;u.roll=(u.roll??0)+(Math.max(-.03,Math.min(.03,(c.latAccel??0)*.0022))-(u.roll??0))*.15;u.pitch=(u.pitch??0)+(Math.max(-.025,Math.min(.015,(c.longAccel??0)*.002))-(u.pitch??0))*.15;obj.quaternion.multiply(leanRotation.setFromEuler(leanEuler.set(u.roll,0,u.pitch)));}
  // Rivals ride the same rigid body as the player: jumps, spins and rollovers show.
- setCarPose(obj,c){if(!c.pose){this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});return;}const p=c.pose();obj.position.set(p.x,p.z,-p.y);poseForward.set(p.forward[0],p.forward[2],-p.forward[1]);poseUp.set(p.up[0],p.up[2],-p.up[1]);poseSide.crossVectors(poseForward,poseUp).normalize();obj.quaternion.setFromRotationMatrix(poseMatrix.makeBasis(poseForward,poseUp,poseSide));}
+ setCarPose(obj,c){if(!c.pose){this.setPose(obj,{x:c.x,y:c.surface.z,z:-c.y,heading:c.heading,grade:c.surface.grade,bank:c.surface.bank});return;}const p=c.pose(this.renderAhead??0);obj.position.set(p.x,p.z,-p.y);poseForward.set(p.forward[0],p.forward[2],-p.forward[1]);poseUp.set(p.up[0],p.up[2],-p.up[1]);poseSide.crossVectors(poseForward,poseUp).normalize();obj.quaternion.setFromRotationMatrix(poseMatrix.makeBasis(poseForward,poseUp,poseSide));}
  setPose(obj,p){obj.position.set(p.x,p.y,p.z);const f=new THREE.Vector3(Math.cos(p.heading),p.grade||0,-Math.sin(p.heading)).normalize(),n=new THREE.Vector3(-(p.grade||0)*Math.cos(p.heading)+(p.bank||0)*Math.sin(p.heading),1,(p.grade||0)*Math.sin(p.heading)+(p.bank||0)*Math.cos(p.heading)).normalize(),side=new THREE.Vector3().crossVectors(f,n).normalize();n.crossVectors(side,f);obj.quaternion.setFromRotationMatrix(new THREE.Matrix4().makeBasis(f,n,side));}
  reset(){this.fans.forEach(f=>{f.cheerUntil=0;f.reaction.visible=false;f.dollar.visible=true;});this.followPosition=null;this.hero.rotation.y=this.heroYaw;this.hero.position.copy(this.heroStart);this.foot=footState(this.heroYaw,{floor:this.crowd.position.y+this.heroStart.y});this.leakCount=this.leakCursor=this.leakTimer=0;this.leak.geometry.setDrawRange(0,0);this.lastGlass=-1;this.ownOpenings?.closeAll(true);}
  // On foot in the paddock (on-foot.js), as in the pit stop's stroll: free to walk
@@ -281,34 +334,111 @@ export class ImmersiveVisuals {
   // Keep the cracks below the opaque sun strip and the mirror housing.
   ctx.clearRect(0,0,1024,120);this.crackTexture.needsUpdate=true;
  }
- updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
+ // focus: the car the cameras watch (main.js, recon lap), else the player's: name tags show round it.
+ updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);const focus=this.focus??this.carRoot.position;this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-focus.x,c.y+focus.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
  update(state,car,dt,rivals,projectile,towOrigin){
   this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;this.ownOpenings?.update(dt);
   const staged=['crowd','podium'].includes(state.phase);this.stage.visible=state.phase==='podium';this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged||!!this.inCar;if(this.own)this.own.visible=!this.inCar;if(this.inCar)this.hero.visible=false;
-  this.rivals.forEach((obj,i)=>{obj.visible=['prepare','starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
+  this.rivals.forEach((obj,i)=>{obj.visible=['starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
+  // The sign (seen through walls) fades out as the camera comes within a few metres of it.
+  if(this.deskMarker){const m=this.deskMarker,show=state.phase==='crowd'&&!this.inCar&&!state.desk,pulse=.5+.5*Math.sin(this.time*3.2);m.marker.visible=m.sign.visible=show;
+   if(show){m.beam.material.opacity=.36+.24*pulse;m.ring.material.opacity=.7+.3*pulse;m.arrow.position.y=2.2+.1*Math.sin(this.time*2.4);m.arrow.rotation.y=this.time*1.6;
+    const far=this.viewCamera?this.viewCamera.position.distanceTo(m.sign.getWorldPosition(this.signPosition??=new THREE.Vector3())):99;m.sign.material.opacity=THREE.MathUtils.clamp((far-5)/4,0,1);m.sign.visible=far>5;}}
   const selected=state.fan??this.nearSocial;this.socialMarker.visible=state.phase==='crowd'&&Number.isInteger(selected)&&!!this.fans[selected];if(this.socialMarker.visible){this.socialMarker.position.copy(this.fans[selected].pos).add(new THREE.Vector3(.4,2.85,0));this.socialMarker.rotation.y=this.time*1.5;}
-  this.fans.forEach((f,i)=>{const laughing=this.time<f.cheerUntil||state.fan===i&&state.feedback.includes('risada'),pose=laughing?'cheer':f.idle;if(f.shown!==pose){setPose(f.person,POSES[pose]);f.shown=pose;}f.person.rotation.z=laughing?Math.sin(this.time*9)*.08:0;f.dollar.visible=!state.donors.includes(i);f.reaction.visible=this.time<f.cheerUntil;f.reaction.position.y=3.15+Math.max(0,2.3-(f.cheerUntil-this.time))*.15;f.label.material.color.setHex(state.donors.includes(i)?0xc4eb93:0xffffff);});
+  this.fans.forEach((f,i)=>{const laughing=this.time<f.cheerUntil||state.fan===i&&state.feedback.includes('risada'),pose=laughing?'cheer':f.idle;if(this.crowd.visible)f.idler.update(dt,pose,{calm:laughing||state.fan===i});f.person.rotation.z=laughing?Math.sin(this.time*9)*.08:0;f.dollar.visible=!state.donors.includes(i);f.reaction.visible=this.time<f.cheerUntil;f.reaction.position.y=3.15+Math.max(0,2.3-(f.cheerUntil-this.time))*.15;f.label.material.color.setHex(state.donors.includes(i)?0xc4eb93:0xffffff);});
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);
   this.tankTethers.visible=state.tankDetached;const ta=this.tankTethers.geometry.attributes.position;for(let i=0;i<2;i++){ta.setXYZ(i*2,-1.6,.24,(i-.5)*.6);ta.setXYZ(i*2+1,this.tank.position.x+.24,this.tank.position.y,(i-.5)*.6);}ta.needsUpdate=true;
   this.drawCracks(state.glass);this.crackedGlass.visible=state.glass>0;
   if(state.tankDetached&&state.fuel>0&&!staged){this.leakTimer+=dt;if(this.leakTimer>.08){this.leakTimer=0;const x=car.x-Math.cos(car.heading)*2.3,y=car.y-Math.sin(car.heading)*2.3,p=car.sample(x,y);this.leak.geometry.attributes.position.setXYZ(this.leakCursor,x,p.z+.002,-y);this.leakCursor=(this.leakCursor+1)%240;this.leakCount=Math.min(240,this.leakCount+1);this.leak.geometry.attributes.position.needsUpdate=true;this.leak.geometry.setDrawRange(0,this.leakCount);}}
   this.leak.visible=!staged;this.debris.visible=!!projectile&&state.phase==='race';if(this.debris.visible){const t=projectile.age/projectile.duration;this.debris.position.lerpVectors(projectile.start,projectile.end,t);this.debris.position.y+=Math.sin(t*Math.PI)*.55;this.debris.rotation.set(this.time*12,this.time*9,0);}
   const towing=['tow','snag'].includes(state.phase);this.truck.visible=towing||state.phase==='broken';this.strap.visible=towing;
-  if(this.truck.visible){const point=trackPoint(this.data,towOrigin+(state.towDistance||0)+9);this.setPose(this.truck,point);if(towing){
+  if(this.truck.visible){const point=trackPoint(this.data,towOrigin+(state.towDistance||0)+9);this.setPose(this.truck,point);
+   // Amber light bar: two quick flashes per second.
+   const flash=(performance.now()/1000*2)%1;this.truck.userData.beacon.material.emissiveIntensity=flash<.12||(flash>.25&&flash<.37)?7:.25;if(towing){
    this.carRoot.updateWorldMatrix(true,false);this.truck.updateWorldMatrix(true,false);
    const start=new THREE.Vector3(2.22,.12,0).applyMatrix4(this.carRoot.matrixWorld),end=new THREE.Vector3(-2.45,.12,0).applyMatrix4(this.truck.matrixWorld);
    const points=strapPath(start.toArray(),end.toArray(),5),a=this.strap.geometry.attributes.position;
    points.forEach((p,i)=>{const next=points[Math.min(24,i+1)],previous=points[Math.max(0,i-1)],nx=-(next[2]-previous[2]),nz=next[0]-previous[0],n=Math.max(.001,Math.hypot(nx,nz));for(let side=0;side<2;side++)a.setXYZ(i*2+side,p[0]+nx/n*.035*(side*2-1),Math.max(p[1],car.sample(p[0],-p[2]).z+.025),p[2]+nz/n*.035*(side*2-1));});a.needsUpdate=true;this.strap.material.color.setHex(state.phase==='snag'?0xf34435:0xe9b640);
   }}
-  this.judge.visible=state.phase==='inspection';this.closedPark.visible=this.pitSign.visible=state.phase==='inspection';
+  this.judge.visible=state.phase==='inspection';this.closedPark.visible=this.pitSign.visible=state.phase==='inspection';if(this.judge.visible)this.judgeIdle.update(dt);
+  // The first five applaud (or not) the pilot in sixth.
+  if(state.phase==='podium')this.podiumIdlers?.forEach((idler,i)=>idler.update(dt,i%2?'folded':'stand'));
   if(this.judge.visible){const c=Math.cos(car.heading),s=Math.sin(car.heading),a=state.inspection*.65;this.judge.position.set(car.x+c*Math.cos(a)*2.7-s*2,car.surface.z,-car.y-s*Math.cos(a)*2.7-c*2);this.judge.rotation.y=car.heading;this.closedPark.position.set(car.x,car.surface.z+3.5,-car.y);const pit=trackPoint(this.data,45,11);this.pitSign.position.set(pit.x,pit.y+2,pit.z);}
   this.garageDoor.position.y=state.profile.released?4.2:1.3;this.blazer.position.x=state.profile.released?-3.9:-6.8;
   if(state.phase==='podium')this.podiumHero.userData.limbs?.forEach((limb,i)=>{if(i%2)limb.rotation.z=2.7+Math.sin(this.time*3)*.12;});
  }
- restoreCamera(){if(this.cameraRef&&this.savedFov!==undefined){this.cameraRef.fov=this.savedFov;this.cameraRef.updateProjectionMatrix();this.savedFov=undefined;}}
- camera(camera,state,dt=1/60){if(state.active&&['crowd','podium'].includes(state.phase)&&!this.inCar){if(this.savedFov===undefined){this.savedFov=camera.fov;this.cameraRef=camera;}camera.fov=58;camera.updateProjectionMatrix();if(state.phase==='crowd'){
+ unshift(camera=this.cameraRef){if(this.viewShifted){camera?.clearViewOffset();this.viewShifted=false;}}
+ restoreCamera(){this.unshift();if(this.cameraRef&&this.savedFov!==undefined){this.cameraRef.fov=this.savedFov;if(this.savedNear!==undefined)this.cameraRef.near=this.savedNear;this.cameraRef.updateProjectionMatrix();this.savedFov=this.savedNear=undefined;}}
+ camera(camera,state,dt=1/60){if(state.active&&['crowd','podium'].includes(state.phase)&&!this.inCar){if(this.savedFov===undefined){this.savedFov=camera.fov;this.savedNear=camera.near;this.cameraRef=camera;}camera.fov=58;camera.near=this.savedNear;camera.updateProjectionMatrix();if(state.phase==='crowd'){this.unshift(camera);
    // Third person behind the pilot, turned by the mouse (ImmersiveMode); the view widens
    // while he runs, and a wall between them brings the camera in front of it.
-   const s=this.foot;this.footFov=(this.footFov??58)+((s.running?65:58)-(this.footFov??58))*(1-Math.exp(-dt*5));camera.fov=this.footFov;camera.updateProjectionMatrix();
-   this.followPosition=placeFootCamera(camera,s,this.hero.getWorldPosition(new THREE.Vector3()),{layout:this.layout,obstacles:this.obstacles,ground:this.groundAt,dt,follow:this.followPosition,body:this.hero});}else{this.followPosition=null;const framing=document.body.classList.contains('touch-device')?-5:-3;camera.fov=46;camera.updateProjectionMatrix();camera.position.copy(this.stage.position).add(new THREE.Vector3(20,7.5,framing));camera.up.copy(up);camera.lookAt(this.stage.position.clone().add(new THREE.Vector3(-2,1.8,framing)));}}else this.restoreCamera();}
+   // The lens zoom (wheel past the pilot's eyes) sets the field of view; running widens it only at the normal lens.
+   const s=this.foot,lens=s.zoomFov??58;this.footFov=(this.footFov??58)+((s.running&&lens>=57?65:lens)-(this.footFov??58))*(1-Math.exp(-dt*8));camera.fov=this.footFov;
+   // Right at the eyes the near plane comes in, so parts a few centimetres away are not clipped.
+   camera.near=s.distance<.8?.03:this.savedNear;camera.updateProjectionMatrix();
+   this.followPosition=placeFootCamera(camera,s,this.hero.getWorldPosition(new THREE.Vector3()),{layout:this.layout,obstacles:this.obstacles,ground:this.groundAt,dt,follow:this.followPosition,body:this.hero});}else{this.followPosition=null;this.podiumCamera(camera,dt);}}else{this.podiumView=null;this.restoreCamera();}}
+ // Podium photo mode: it opens on the official framing, then drag (or touch) looks round,
+ // the wheel zooms in to the drivers' faces and W A S D / arrows walk the camera round the stage.
+ // It turns round the middle of the steps; a lens shift keeps them clear of the panel on the right.
+ podiumCamera(camera,dt){
+  this.podiumControls();
+  const zs=this.podiumSlots.map(slot=>slot.z),middle=(Math.min(...zs)+Math.max(...zs))/2;
+  if(!this.podiumView)this.podiumView={yaw:0,pitch:Math.asin(5.7/Math.hypot(22,5.7)),distance:Math.hypot(22,5.7),target:new THREE.Vector3(-2,1.9,middle)};
+  const panel=document.getElementById('immersivePanel'),shift=panel&&!panel.classList.contains('hidden')?panel.getBoundingClientRect().width/2:0;
+  if(shift){camera.setViewOffset(innerWidth,innerHeight,shift,0,innerWidth,innerHeight);this.viewShifted=true;}else this.unshift(camera);
+  const v=this.podiumView,k=this.podiumKeys,step=Math.min(dt,.1)*Math.max(2.5,v.distance*.35);
+  const ahead=(k.has('KeyW')||k.has('ArrowUp')?1:0)-(k.has('KeyS')||k.has('ArrowDown')?1:0),aside=(k.has('KeyD')||k.has('ArrowRight')?1:0)-(k.has('KeyA')||k.has('ArrowLeft')?1:0);
+  // Forward is away from the camera, along the ground.
+  v.target.x+=(-Math.cos(v.yaw)*ahead-Math.sin(v.yaw)*aside)*step;v.target.z+=(Math.sin(v.yaw)*ahead-Math.cos(v.yaw)*aside)*step;
+  v.target.x=Math.max(-14,Math.min(14,v.target.x));v.target.z=Math.max(-12,Math.min(12,v.target.z));
+  const c=Math.cos(v.pitch);camera.fov=46;camera.updateProjectionMatrix();
+  camera.position.copy(this.stage.position).add(v.target).add(new THREE.Vector3(Math.cos(v.yaw)*c*v.distance,Math.sin(v.pitch)*v.distance,-Math.sin(v.yaw)*c*v.distance));
+  camera.position.y=Math.max(camera.position.y,this.stage.position.y+.35);
+  camera.up.copy(up);camera.lookAt(this.stage.position.clone().add(v.target));
+ }
+ // The podium's dressing, fixed in the scene (sprites turned with the camera): the banner over
+ // the steps between two gilt poles, the joke's ribbon over the sixth step and the
+ // workshop's sign on its roof. Art in pit-textures.js; +x faces the photo camera.
+ podiumDressing(){
+  const g=this.podium,gilt=new THREE.MeshStandardMaterial({color:0xd8b24a,metalness:.85,roughness:.28});
+  const board=(map,w,h,x,y,z,backColor)=>{const front=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshStandardMaterial({map,roughness:.78}));front.position.set(x,y,z);front.rotation.y=Math.PI/2;front.castShadow=true;
+   const back=new THREE.Mesh(new THREE.PlaneGeometry(w,h),this.mat(backColor));back.position.set(x-.012,y,z);back.rotation.y=-Math.PI/2;g.add(front,back);return front;};
+  const x=-3.45,z0=-7.75,z1=10.55,top=6.15;
+  for(const z of [z0,z1]){const pole=new THREE.Mesh(new THREE.CylinderGeometry(.055,.08,top+.2,14),gilt);pole.position.set(x,(top+.2)/2,z);pole.castShadow=true;const knob=new THREE.Mesh(new THREE.SphereGeometry(.12,14,10),gilt);knob.position.set(x,top+.3,z);g.add(pole,knob);}
+  const bar=new THREE.Mesh(new THREE.CylinderGeometry(.035,.035,z1-z0,10),gilt);bar.rotation.x=Math.PI/2;bar.position.set(x+.03,top+.02,(z0+z1)/2);g.add(bar);
+  board(podiumBanner('AUTO-POBRE RACING','STEVAN GAIPO · TODO MUNDO TEM UMA CONTA PRA PAGAR'),z1-z0-.35,1.85,x+.05,top-.95,(z0+z1)/2,0x5e0d12).name='Faixa_podio';
+  // The ribbon hangs on two cords from the banner's hem, right over the sixth step.
+  const rz=this.podiumSlots[5].z;board(podiumRibbon('A FOTO É SEMPRE EM SEXTO.'),4.2,.52,x+.08,3.78,rz,0xc98f1c).name='Faixa_sexto';
+  for(const dz of [-1.9,1.9]){const cord=new THREE.Mesh(new THREE.CylinderGeometry(.01,.01,.2,5),gilt);cord.position.set(x+.08,4.14,rz+dz);g.add(cord);}
+  board(signBoard('OFICINA','BLAZER NO CONSERTO','#213c47','#f7d99b',{h:224}),3.6,.8,-4.3,3.58,-5,0x213c47).name='Placa_oficina';
+ }
+ // Places 1-5 go to the first five rivals of the classification (the pilot always stands sixth:
+ // the joke), in their team colours, each with a plate at the foot of the step: place and name.
+ dressPodium(order,pilot){
+  const entries=(order?.length?order:RIVAL_ROSTER).slice(0,5),key=entries.map(e=>e.number).join(',')+'|'+pilot;
+  if(key===this.podiumKey)return;this.podiumKey=key;
+  for(const h of this.podiumRivals){h.removeFromParent();h.traverse(o=>{if(o.isMesh)o.geometry.dispose();});}
+  for(const plate of this.podiumPlates){plate.removeFromParent();plate.geometry.dispose();plate.material.map.dispose();plate.material.dispose();}
+  this.podiumRivals=[];this.podiumPlates=[];this.podiumIdlers=[];
+  const skins=[0xc68e6a,0x8d5a3b,0xe0b08f,0x6b4128,0xb77a55];
+  this.podiumSlots.forEach(({height,z},i)=>{
+   if(i<5){const color=entries[i].color,h=this.people.person({top:color,bottom:0x2d3338,trim:0xf4f1ea,hat:'cap',hatColor:color,skin:skins[i]});setPose(h,POSES[i%2?'folded':'stand']);h.position.set(-2,height,z);this.podium.add(h);this.podiumRivals.push(h);this.podiumIdlers.push(new Idler(h,'podium',{seed:.3+i*.19}));}
+   const name=i<5?entries[i].shortName:(pilot||'Stevan Gaipo');
+   // The plate is fixed on the step's front (and its back, for the free camera behind).
+   const ph=Math.min(.56,height*.72),map=podiumPlate(i+1,name,{color:i<5?entries[i].color:0xd82125,hero:i===5,w:2.2,h:ph}),material=new THREE.MeshStandardMaterial({map,roughness:.42,metalness:.35});
+   for(const side of [1,-1]){const plate=new THREE.Mesh(new THREE.PlaneGeometry(2.2,ph),material);plate.position.set(-2+side*1.006,height-ph/2-.06,z);plate.rotation.y=side*Math.PI/2;plate.name='Placa_podio_'+(i+1);this.podium.add(plate);this.podiumPlates.push(plate);}
+  });
+ }
+ podiumControls(){
+  if(this.podiumKeys||typeof document==='undefined')return;
+  const keys=this.podiumKeys=new Set(),view=document.getElementById('view'),active=()=>!!this.podiumView&&this.podium.visible,moves=['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'];
+  document.addEventListener('keydown',e=>{if(active()&&moves.includes(e.code))keys.add(e.code);});
+  document.addEventListener('keyup',e=>keys.delete(e.code));addEventListener('blur',()=>keys.clear());
+  view?.addEventListener('pointerdown',e=>{if(active())this.podiumDrag={id:e.pointerId,x:e.clientX,y:e.clientY};});
+  view?.addEventListener('pointermove',e=>{const d=this.podiumDrag;if(!d||d.id!==e.pointerId||!active()||document.pointerLockElement===view)return;const v=this.podiumView;
+   v.yaw-=(e.clientX-d.x)*.005;v.pitch=Math.max(-.12,Math.min(1.35,v.pitch+(e.clientY-d.y)*.004));d.x=e.clientX;d.y=e.clientY;});
+  addEventListener('pointerup',e=>{if(this.podiumDrag?.id===e.pointerId)this.podiumDrag=null;});
+  document.addEventListener('mousemove',e=>{if(!active()||document.pointerLockElement!==view)return;const v=this.podiumView;v.yaw-=e.movementX*.0032;v.pitch=Math.max(-.12,Math.min(1.35,v.pitch+e.movementY*.0028));});
+  view?.addEventListener('wheel',e=>{if(active())this.podiumView.distance=Math.max(1.2,Math.min(45,this.podiumView.distance*(e.deltaY>0?1.15:1/1.15)));},{passive:true});
+ }
 }

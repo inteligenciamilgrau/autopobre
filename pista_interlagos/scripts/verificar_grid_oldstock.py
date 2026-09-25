@@ -1,6 +1,6 @@
 """Browser QA for the 15-car roster, branding and results on desktop/mobile."""
 from pathlib import Path
-from browser_config import browser_executable,browser_args,wait_js,open_menu,race_options,enter_track
+from browser_config import browser_executable,browser_args,wait_js,open_menu,enter_track
 from playwright.sync_api import sync_playwright
 import json
 ROOT=Path(__file__).resolve().parents[1]
@@ -15,7 +15,7 @@ with sync_playwright() as p:
   open_menu(page)
   assert page.evaluate("document.querySelector('.old-stock-opening').naturalWidth>0")
   page.screenshot(path=str(ROOT/f'renders/oldstock_abertura_{mobile}.png'))
-  race_options(page,immersive=False);enter_track(page)
+  enter_track(page)
   # The roster is filled once the circuit has loaded: read it from the pause settings.
   page.click('#touchMenu' if mobile else '#menuButton');page.click('#tab-race');page.click('.grid-roster summary')
   assert page.locator('#gridRoster li').count()==15 and 'Kleber Eletric' in page.inner_text('#gridRoster')
@@ -37,8 +37,8 @@ with sync_playwright() as p:
   wait_js(page,'interlagos.state.paused&&fixtureMode.freeFinished')
   assert '15º de 15' in page.inner_text('#raceResult') and page.locator('#finishingOrder li').count()==15
   page.screenshot(path=str(ROOT/f'renders/oldstock_resultado_{mobile}.png'))
-  page.click('#resultsSettings');page.check('#immersiveMode');page.click('#settingsClose');page.click('#resultsContinue')
-  page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.state.phase='prepare';fixtureMode.sync();}")
+  page.click('#resultsMainMenu');page.click('#storyStart');wait_js(page,'interlagos.immersiveInfo().active')
+  page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.state.phase='starting';fixtureMode.sync();}")
   assert len(page.evaluate('fixtureMode.rivals'))==14
   page.evaluate("()=>{fixtureMode.state.phase='race';fixtureMode.state.finish(15);fixtureMode.sync();}")
   podium=page.evaluate('({place:fixtureMode.state.podiumPlace,result:fixtureMode.state.result.position,fund:fixtureMode.state.profile.fund})')

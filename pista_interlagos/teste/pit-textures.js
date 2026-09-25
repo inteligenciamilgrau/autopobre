@@ -23,7 +23,8 @@ const BOLD='"Arial Black","Arial Bold",Arial,sans-serif',CHALK='"Segoe Print","C
 export const garageFloor=()=>canvasTexture((ctx,w,h)=>{
  const mx=w/12.6,my=h/15.8,X=x=>(x+6.3)*mx,Y=d=>h-d*my;
  const g=ctx.createLinearGradient(0,h,0,0);g.addColorStop(0,'#7c8386');g.addColorStop(1,'#949b9d');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
- flecks(ctx,w,h,30000,7,['#565c5f','#c9cdcf','#2c3134','#9c2a2a','#e8e2d0'],2.4);
+ flecks(ctx,w,h,16000,7,['#646a6d','#aeb2b3','#3c4144','#7e4a46','#cfc9ba'],1.6);
+ smudges(ctx,w,h,60,23,'rgba(40,42,40,.1)',1.4*mx);
  smudges(ctx,w,h,26,3,'rgba(30,34,36,.16)',60,[X(-3),Y(10),6*mx,8*my]);
  // Tyre marks where the Opala rolls in, oil drips where it stands.
  ctx.lineCap='round';for(const x of [-.8,.8]){ctx.strokeStyle='rgba(18,20,22,.2)';ctx.lineWidth=.21*mx;ctx.beginPath();ctx.moveTo(X(x*1.15),Y(0));ctx.bezierCurveTo(X(x*1.05),Y(2.5),X(x),Y(5),X(x),Y(8.4));ctx.stroke();}
@@ -165,14 +166,20 @@ export const facadeGlass=()=>canvasTexture((ctx,w,h)=>{
 
 // Painted service box on the working lane, 7.2 m along the lane x 3.8 m across:
 // team red, yellow outline, hatched ends and white wheel marks (right = forward).
+// Road paint, thin over the asphalt and worn through where the tyres stop and spin.
 export const serviceBox=()=>canvasTexture((ctx,w,h)=>{
  const m=w/7.2,X=s=>(s+3.6)*m,Y=d=>h/2-d*m;
- ctx.clearRect(0,0,w,h);ctx.fillStyle='rgba(176,22,28,.42)';ctx.fillRect(0,0,w,h);flecks(ctx,w,h,5000,12,['#000','#fff'],3);
- ctx.save();ctx.beginPath();ctx.rect(X(2.55),0,X(3.6)-X(2.55),h);ctx.rect(0,0,X(-2.55),h);ctx.clip();ctx.strokeStyle='rgba(240,196,25,.95)';ctx.lineWidth=.16*m;for(let k=-10;k<60;k++){ctx.beginPath();ctx.moveTo(k*.4*m,h);ctx.lineTo(k*.4*m+h,0);ctx.stroke();}ctx.restore();
- ctx.strokeStyle='#f0c419';ctx.lineWidth=.14*m;ctx.strokeRect(.07*m,.07*m,w-.14*m,h-.14*m);ctx.fillStyle='#f0c419';for(const s of [-2.55,2.55])ctx.fillRect(X(s)-.05*m,0,.1*m,h);
+ ctx.clearRect(0,0,w,h);ctx.fillStyle='rgba(120,26,30,.34)';ctx.fillRect(0,0,w,h);
+ ctx.save();ctx.beginPath();ctx.rect(X(2.55),0,X(3.6)-X(2.55),h);ctx.rect(0,0,X(-2.55),h);ctx.clip();ctx.strokeStyle='rgba(214,172,44,.82)';ctx.lineWidth=.16*m;for(let k=-10;k<60;k++){ctx.beginPath();ctx.moveTo(k*.4*m,h);ctx.lineTo(k*.4*m+h,0);ctx.stroke();}ctx.restore();
+ ctx.strokeStyle='#d2ab3c';ctx.lineWidth=.14*m;ctx.strokeRect(.07*m,.07*m,w-.14*m,h-.14*m);ctx.fillStyle='#d2ab3c';for(const s of [-2.55,2.55])ctx.fillRect(X(s)-.05*m,0,.1*m,h);
  ctx.fillStyle='#f4f1e6';for(const s of [1.53,-1.117])for(const d of [-.8,.8]){ctx.fillRect(X(s)-.05*m,Y(d)-.28*m,.1*m,.56*m);ctx.fillRect(X(s)-.3*m,Y(d)+(d>0?-.34:.28)*m,.6*m,.06*m);}
  ctx.save();ctx.translate(X(-3.05),h/2);ctx.rotate(Math.PI/2);write(ctx,'99',0,0,`900 ${1.05*m}px ${BOLD}`,'#f4f1e6',{stroke:'rgba(0,0,0,.35)',width:.05*m});ctx.restore();
  ctx.save();ctx.translate(X(3.07),h/2);ctx.rotate(Math.PI/2);write(ctx,'PARE',0,0,`900 ${.5*m}px ${BOLD}`,'#f4f1e6',{stroke:'rgba(0,0,0,.35)',width:.04*m});ctx.restore();
+ // Wear: rubber where the wheels stand and spin away, scuffs, and paint lifted in patches.
+ ctx.globalCompositeOperation='destination-out';smudges(ctx,w,h,90,31,'rgba(0,0,0,.55)',.22*m);smudges(ctx,w,h,40,37,'rgba(0,0,0,.35)',.5*m);
+ ctx.globalCompositeOperation='source-over';
+ for(const d of [-.8,.8]){const g=ctx.createLinearGradient(X(-3.6),0,X(3.6),0);g.addColorStop(0,'rgba(14,14,14,0)');g.addColorStop(.3,'rgba(14,14,14,.4)');g.addColorStop(1,'rgba(14,14,14,.12)');ctx.fillStyle=g;ctx.fillRect(0,Y(d)-.13*m,w,.26*m);}
+ smudges(ctx,w,h,30,41,'rgba(20,18,16,.22)',.3*m);flecks(ctx,w,h,1800,12,['#1a1a1a','#6e6a62'],2);
 },1024,540);
 
 // Lollipop discs held in front of the windscreen.
@@ -188,6 +195,24 @@ export const timingScreen=(rows,title='CRONOMETRAGEM · INTERLAGOS')=>canvasText
   ctx.fillStyle=row.color;ctx.fillRect(52,y-9,6,18);write(ctx,row.number,66,y,'bold 18px Consolas,monospace','#ffffff',{align:'left'});write(ctx,row.name.toUpperCase(),116,y,'18px Consolas,monospace','#d8e4ea',{align:'left',max:230});write(ctx,row.time,w-16,y,'18px Consolas,monospace',row.me?'#ffe38a':'#8fe39a',{align:'right'});});
  ctx.fillStyle='rgba(255,255,255,.05)';for(let y=0;y<h;y+=3)ctx.fillRect(0,y,w,1);
 },512,320);
+
+// Record board for the garage TVs, in the timing screens' style and redrawn when the records
+// change: show({title, subtitle, rows}) with rows {place, number, name, time, color, me, ai}.
+export function recordBoard(){
+ const w=512,h=320,k=SMALL?.5:1,canvas=document.createElement('canvas');canvas.width=w*k;canvas.height=h*k;const ctx=canvas.getContext('2d');
+ const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=8;
+ const show=({title,subtitle,rows})=>{
+  ctx.setTransform(k,0,0,k,0,0);ctx.fillStyle='#0b1116';ctx.fillRect(0,0,w,h);ctx.fillStyle='#16324a';ctx.fillRect(0,0,w,40);write(ctx,title,16,21,'bold 20px Arial','#e9f1f5',{align:'left',max:w-32});
+  ctx.fillStyle='#1d2a33';ctx.fillRect(0,40,w,26);write(ctx,subtitle,16,53,'bold 15px Arial','#f0c419',{align:'left',max:w-32});
+  if(!rows.length)write(ctx,'Nenhum tempo ainda: faça uma volta!',w/2,h/2+20,'18px Consolas,monospace','#8fa3ad',{max:w-40});
+  rows.forEach((row,i)=>{const y=86+i*29;if(row.me){ctx.fillStyle='#6b1418';ctx.fillRect(0,y-14,w,28);}write(ctx,String(row.place??i+1).padStart(2,' '),16,y,'bold 18px Consolas,monospace','#f0c419',{align:'left',max:34});
+   ctx.fillStyle=css(row.color);ctx.fillRect(52,y-9,6,18);write(ctx,row.number,66,y,'bold 18px Consolas,monospace','#ffffff',{align:'left'});
+   write(ctx,row.name.toUpperCase(),116,y,'18px Consolas,monospace','#d8e4ea',{align:'left',max:row.ai?200:230});if(row.ai)write(ctx,'IA',328,y,'bold 12px Arial','#7f96a3',{align:'left'});
+   write(ctx,row.time,w-16,y,'18px Consolas,monospace',row.me?'#ffe38a':'#8fe39a',{align:'right'});});
+  ctx.fillStyle='rgba(255,255,255,.05)';for(let y=0;y<h;y+=3)ctx.fillRect(0,y,w,1);map.needsUpdate=true;
+ };
+ return {map,show};
+}
 
 // Tyre sidewall for the caps of stacked tyres: rim, spokes and lettering.
 export const tyreWall=()=>canvasTexture((ctx,w,h)=>{
@@ -269,3 +294,36 @@ export const racePoster=()=>canvasTexture((ctx,w,h)=>{
 
 // Plaque on the café counter.
 export const plaque=(text,bg='#f7f1dc',fg='#8f141a')=>canvasTexture((ctx,w,h)=>{ctx.fillStyle='#6f4526';ctx.fillRect(0,0,w,h);ctx.fillStyle=bg;ctx.fillRect(8,8,w-16,h-16);text.split('\n').forEach((line,i,all)=>write(ctx,line,w/2,h/2+(i-(all.length-1)/2)*h*.32,`900 ${h*.26}px ${BOLD}`,fg,{max:w-30}));},256,128);
+
+// The story's podium (immersive-visuals.js): the banner over the steps, the plates on
+// their fronts and the joke's ribbon. Cloth: red with gold trim and chequered ends.
+export const podiumBanner=(title,subtitle)=>canvasTexture((ctx,w,h)=>{
+ const bg=ctx.createLinearGradient(0,0,0,h);bg.addColorStop(0,'#6e0d13');bg.addColorStop(.45,'#b3161d');bg.addColorStop(1,'#5d0b10');ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
+ const sq=h/8;for(const x0 of [0,w-sq*3])for(let i=0;i<3;i++)for(let j=0;j<8;j++){ctx.fillStyle=(i+j)%2?'#141414':'#f4f1ea';ctx.fillRect(x0+i*sq,j*sq,sq,sq);}
+ for(const y of [h*.05,h*.88]){ctx.fillStyle='#e9b93a';ctx.fillRect(sq*3,y,w-sq*6,h*.05);ctx.fillStyle='rgba(255,240,190,.55)';ctx.fillRect(sq*3,y,w-sq*6,h*.012);}
+ // Stars flank the title; soft folds run down the cloth.
+ const star=(x,y,r)=>{ctx.beginPath();for(let k=0;k<10;k++){const a=-Math.PI/2+k*Math.PI/5,q=k%2?r*.45:r;ctx.lineTo(x+Math.cos(a)*q,y+Math.sin(a)*q);}ctx.closePath();ctx.fillStyle='#f3cf55';ctx.fill();};
+ for(const x of [w*.2,w*.8])star(x,h*.4,h*.12);
+ write(ctx,title,w/2,h*.4,`900 ${h*.34}px ${BOLD}`,'#f6d35c',{stroke:'#3b080b',width:h*.04,max:w*.52});
+ write(ctx,subtitle,w/2,h*.72,`bold ${h*.12}px ${BOLD}`,'#fff4dc',{stroke:'rgba(40,5,8,.6)',width:h*.015,max:w*.7});
+ for(let k=0;k<16;k++){const x=sq*3+k*(w-sq*6)/16,f=ctx.createLinearGradient(x,0,x+(w-sq*6)/16,0);f.addColorStop(0,'rgba(0,0,0,.1)');f.addColorStop(.5,'rgba(255,255,255,.05)');f.addColorStop(1,'rgba(0,0,0,.1)');ctx.fillStyle=f;ctx.fillRect(x,0,(w-sq*6)/16,h);}
+},3072,316);
+// Step plate: brushed dark metal, the place in a medal disc (gold, silver, bronze, steel;
+// the pilot's sixth in old gold), the name in white and the team colour underneath.
+export const podiumPlate=(place,name,{color=0x5d666b,hero=false,w=2.2,h=.5}={})=>canvasTexture((ctx,W,H)=>{
+ const bg=ctx.createLinearGradient(0,0,0,H);bg.addColorStop(0,'#2d3538');bg.addColorStop(1,'#161b1d');ctx.fillStyle=bg;ctx.fillRect(0,0,W,H);
+ for(let y=0;y<H;y+=3){ctx.fillStyle=`rgba(255,255,255,${.015+(y*7919%13)/13*.02})`;ctx.fillRect(0,y,W,1);}
+ const medal=hero?['#e2b04a','#8c5923']:place===1?['#f5d467','#a8801d']:place===2?['#e9edf0','#8e979c']:place===3?['#e0a06a','#8a5129']:['#b7c0c4','#5d676b'];
+ ctx.strokeStyle=medal[0];ctx.lineWidth=H*.05;ctx.strokeRect(H*.06,H*.06,W-H*.12,H*.76);
+ ctx.fillStyle=css(color);ctx.fillRect(H*.06,H*.86,W-H*.12,H*.08);
+ const r=H*.3,cx=H*.5,cy=H*.44,g=ctx.createRadialGradient(cx-r*.3,cy-r*.3,r*.1,cx,cy,r);g.addColorStop(0,medal[0]);g.addColorStop(1,medal[1]);ctx.fillStyle=g;ctx.beginPath();ctx.arc(cx,cy,r,0,7);ctx.fill();
+ write(ctx,place+'º',cx,cy+H*.02,`900 ${H*.3}px ${BOLD}`,'#1b1d1f',{max:r*1.7});
+ write(ctx,name.toLocaleUpperCase('pt-BR'),(H+W)/2,H*.45,`900 ${H*.3}px ${BOLD}`,'#f7f3e8',{stroke:'rgba(0,0,0,.5)',width:H*.02,max:W-H*1.25});
+},512,Math.round(512*h/w));
+// Ribbon hung over the sixth step, pointers down at both ends.
+export const podiumRibbon=text=>canvasTexture((ctx,w,h)=>{
+ const bg=ctx.createLinearGradient(0,0,0,h);bg.addColorStop(0,'#ffd95a');bg.addColorStop(1,'#e8a91e');ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);
+ ctx.fillStyle='#1b2a2d';ctx.fillRect(0,0,w,h*.08);ctx.fillRect(0,h*.92,w,h*.08);
+ write(ctx,text,w/2,h*.52,`900 ${h*.5}px ${BOLD}`,'#1b2a2d',{max:w*.78});
+ ctx.fillStyle='#b3161d';for(const x of [w*.055,w*.945]){ctx.beginPath();ctx.moveTo(x-w*.03,h*.25);ctx.lineTo(x+w*.03,h*.25);ctx.lineTo(x,h*.8);ctx.closePath();ctx.fill();}
+},1024,128);

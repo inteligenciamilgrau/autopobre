@@ -94,6 +94,17 @@ export function guardrailClearance(data,s,side){
  const smooth=t=>{t=clamp(t,0,1);return t*t*(3-2*t);};
  return 5+30*smooth((s-770)/100)*(1-smooth((s-1110)/95));
 }
+// Body axes in the world (x, y horizontal, z up) for a heading, pitch and roll:
+// forward, left, up, and the pitch axis.
+function bodyAxes(heading,pitch,roll,axes){
+ const {f,l,u,j}=axes,ch=Math.cos(heading),sh=Math.sin(heading),cp=Math.cos(pitch),sp=Math.sin(pitch),cr=Math.cos(roll),sr=Math.sin(roll);
+ f[0]=ch*cp;f[1]=sh*cp;f[2]=-sp;
+ l[0]=ch*sr*sp-sh*cr;l[1]=sh*sr*sp+ch*cr;l[2]=sr*cp;
+ u[0]=ch*cr*sp+sh*sr;u[1]=sh*cr*sp-ch*sr;u[2]=cr*cp;
+ j[0]=-sh;j[1]=ch;j[2]=0;
+ return axes;
+}
+const renderAxes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};
 export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.pitGeo=pitGeometry(data);this.axes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};this.reset();}
  resetGrid(){const target=this.data.meta.reconstructed_xy_m-GRID_START_BACK;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));this.awaitingStart=true;}
@@ -165,17 +176,17 @@ export class TestCar {
  }
  // Ground height and slope under one contact point near the car.
  ground(x,y){return this.sample(x,y,this.index);}
- // Body axes in the world (x, y horizontal, z up): forward, left, up, and the pitch axis.
- updateAxes(){
-  const {f,l,u,j}=this.axes,ch=Math.cos(this.heading),sh=Math.sin(this.heading),cp=Math.cos(this.pitch),sp=Math.sin(this.pitch),cr=Math.cos(this.roll),sr=Math.sin(this.roll);
-  f[0]=ch*cp;f[1]=sh*cp;f[2]=-sp;
-  l[0]=ch*sr*sp-sh*cr;l[1]=sh*sr*sp+ch*cr;l[2]=sr*cp;
-  u[0]=ch*cr*sp+sh*sr;u[1]=sh*cr*sp-ch*sr;u[2]=cr*cp;
-  j[0]=-sh;j[1]=ch;j[2]=0;
-  this.upright=u[2];return this.axes;
- }
+ updateAxes(){bodyAxes(this.heading,this.pitch,this.roll,this.axes);this.upright=this.axes.u[2];return this.axes;}
  // Rendering pose: the model origin sits on the ground below the centre of mass.
- pose(){const {f,l,u}=this.updateAxes();return {x:this.x-u[0]*CG_HEIGHT,y:this.y-u[1]*CG_HEIGHT,z:this.z-u[2]*CG_HEIGHT,forward:[...f],left:[...l],up:[...u]};}
+ // ahead is the time since the last fixed step. A frame falls between steps, and a car
+ // drawn where the last step left it moves in uneven jumps (one step, then two), which a
+ // fixed camera panning with it shows as shaking; the step's own velocities carry it on.
+ pose(ahead=0){
+  let {f,l,u}=this.updateAxes();
+  if(ahead)({f,l,u}=bodyAxes(this.heading+this.yaw*ahead,this.pitch+this.pitchRate*ahead,this.roll+this.rollRate*ahead,renderAxes));
+  const x=this.x+this.vx*ahead,y=this.y+this.vy*ahead,z=this.z+this.vz*ahead;
+  return {x:x-u[0]*CG_HEIGHT,y:y-u[1]*CG_HEIGHT,z:z-u[2]*CG_HEIGHT,forward:[...f],left:[...l],up:[...u]};
+ }
  // Velocity of a body point at offset r from the centre of mass.
  pointVelocity(r,out){
   const {f,j}=this.axes,wx=this.rollRate*f[0]+this.pitchRate*j[0],wy=this.rollRate*f[1]+this.pitchRate*j[1],wz=this.rollRate*f[2]+this.yaw;

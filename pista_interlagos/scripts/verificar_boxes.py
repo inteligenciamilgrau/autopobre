@@ -26,7 +26,7 @@ with sync_playwright() as p:
     page.on('pageerror', lambda e: report['errors'].append(str(e)))
     page.on('console', lambda m: report['errors'].append(m.text) if m.type == 'error' else None)
     open_menu(page, URL)
-    race_options(page, immersive=False, camera='chase')
+    race_options(page, camera='chase')
     enter_track(page, 'Piloto boxes')
     wait_race_start(page)
     info = page.evaluate("""()=>{const P=interlagos.car.data.pit;return {samples:P.samples.length,length:P.length_m,entry:P.entry_main_s,exit:P.exit_main_s,walls:P.walls.map(w=>w.name),limit:P.limit};}""")

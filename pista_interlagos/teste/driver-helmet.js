@@ -1,6 +1,18 @@
 import * as THREE from 'three';
 
-// Photo-based full-face helmet: local +X faces forward, +Y up, +/-Z sides.
+// Full-face shell profile, chin to crown: [height, radius toward the front and back, radius to
+// the sides, forward offset]. Local +X faces forward, +Y up, +/-Z sides; the rivals' helmets
+// (rival-driver.js) share it.
+const rings=[[-.139,.067,.073,-.009],[-.118,.118,.105,.012],[-.073,.144,.121,.017],
+ [-.021,.140,.123,.008],[.006,.137,.124,.002],[.055,.131,.122,-.004],
+ [.096,.119,.111,-.012],[.127,.096,.091,-.019],[.151,.059,.058,-.025],[.161,.001,.001,-.028]];
+export const HELMET_RINGS=rings.map(r=>r[0]);
+export function helmetSurface(y,a,lift=0){
+ let i=0;while(i<rings.length-2&&rings[i+1][0]<y)i++;
+ const r=rings[i],b=rings[i+1],t=THREE.MathUtils.clamp((y-r[0])/(b[0]-r[0]),0,1),mix=k=>THREE.MathUtils.lerp(r[k],b[k],t);
+ return new THREE.Vector3(mix(3)+(mix(1)+lift)*Math.cos(a),y,(mix(2)+lift)*Math.sin(a));
+}
+// Photo-based full-face helmet.
 export async function createHelmet(){
  const root=new THREE.Group();root.name='Capacete_preto_vermelho_balaclava';
  const paint=new THREE.MeshPhysicalMaterial({color:0x101218,roughness:.23,metalness:.12,clearcoat:1,clearcoatRoughness:.15});
@@ -20,15 +32,7 @@ export async function createHelmet(){
  function sphere(p,scale,m){const o=mesh(new THREE.SphereGeometry(1,32,20),m);o.position.set(...p);o.scale.set(...scale);return o;}
  function tube(points,r,m){return mesh(new THREE.TubeGeometry(new THREE.CatmullRomCurve3(points),Math.max(16,points.length*2),r,8,false),m);}
  // Separate crown, eye aperture and projecting chin guard, not a solid ball over the face.
- const rings=[[-.139,.067,.073,-.009],[-.118,.118,.105,.012],[-.073,.144,.121,.017],
-  [-.021,.140,.123,.008],[.006,.137,.124,.002],[.055,.131,.122,-.004],
-  [.096,.119,.111,-.012],[.127,.096,.091,-.019],[.151,.059,.058,-.025],[.161,.001,.001,-.028]];
- function surface(y,a,lift=0){
-  let i=0;while(i<rings.length-2&&rings[i+1][0]<y)i++;
-  const r=rings[i],b=rings[i+1],t=THREE.MathUtils.clamp((y-r[0])/(b[0]-r[0]),0,1),mix=k=>THREE.MathUtils.lerp(r[k],b[k],t);
-  return new THREE.Vector3(mix(3)+(mix(1)+lift)*Math.cos(a),y,(mix(2)+lift)*Math.sin(a));
- }
- const n=80,positions=[],indices=[];
+ const surface=helmetSurface,n=80,positions=[],indices=[];
  for(const r of rings)for(let j=0;j<=n;j++)positions.push(...surface(r[0],j/n*Math.PI*2).toArray());
  for(let i=0;i<rings.length-1;i++)for(let j=0;j<n;j++){
   const a=(j+.5)/n*Math.PI*2,front=Math.cos(a)>Math.cos(1.02);

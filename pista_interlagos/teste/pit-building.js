@@ -61,7 +61,7 @@ export function createPitBuildings({pit,c,lerp,at,root,obstacles,textures,labels
   if(b!==b99?.index)plane(parts.glass,p,front-.03,bay-1.2,2.5,5.45);
   // Fascia, terrace balustrade and a few people enjoying the view.
   box(parts.frames,p,front-.12,0,bay,.3,.35,8.2);plane(parts.rail,p,front+.3,bay,.95,8.55);box(parts.steel,p,front+.3,0,bay,.06,.06,9.47);
-  if(b%3===1)for(const off of [-2.2,1.6]){const w=at(p,front+1.1);crowd.push({outfit:{top:[0xf2f0ea,0x2f6db5,0xe690a8,0x1b1d20][(b+(off>0?1:0))%4],bottom:0x2d3338,skin:skins[(b+2)%5],hairStyle:['short','long','curly'][b%3]},pose:off<0?'stand':'folded',x:w.x+p[c.tx]*off,y:base+8.2,z:w.z-p[c.ty]*off,yaw:hd-Math.PI/2+off*.1});}
+  if(b%3===1)for(const off of [-2.2,1.6]){const w=at(p,front+1.1);crowd.push({outfit:{top:[0xf2f0ea,0x2f6db5,0xe690a8,0x1b1d20][(b+(off>0?1:0))%4],bottom:0x2d3338,skin:skins[(b+2)%5],hairStyle:['short','long','curly'][b%3]},pose:off<0?'stand':'folded',idle:'terrace',x:w.x+p[c.tx]*off,y:base+8.2,z:w.z-p[c.ty]*off,yaw:hd-Math.PI/2+off*.1});}
   // Canopy: two sloped membrane panels per bay meeting at a ridge on the bay's
   // centre line, with edge beams at the front and back and a ridge tube.
   const o=at(p,front+mid);
@@ -94,14 +94,15 @@ export function createPitBuildings({pit,c,lerp,at,root,obstacles,textures,labels
  // working lane where the car stops in the race, the crew and the Tia.
  const box99=b99?createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,labels}):null;
  if(tyres.length)root.add(tyreStacks(tyres,box99?.sidewall??tyreWall()));
- const baked=people.bake(crowd);if(baked)root.add(baked);
+ // Everyone placed for good idles there (pit-crew.js): crews, terrace, café, stand.
+ const waiting=people.crowd(crowd,{name:'Pessoas_paradas_boxes',seed:2});if(waiting)root.add(waiting);
  return {box:box99?.layout??null,box99,bays};
 }
 
 // Curvelo's garage row, on the infield behind its service lane (see curveloPitFrame).
 export function createCurveloPit(data,textures){
  const pit=curveloPitFrame(data),root=new THREE.Group();root.name='Boxes_Curvelo';const obstacles=[];
- const {box}=createPitBuildings({pit,...laneFrame(pit),root,obstacles,textures,labels:{label:'CURVELO · BOX 99',title:'Cuida do Opala, uai!',name:'Box 99 de Curvelo'}});
+ const {box}=createPitBuildings({pit,...laneFrame(pit),root,obstacles,textures,labels:{label:'CURVELO · BOX 99',title:'Cuida do Opala, uai!',name:'Box 99 de Curvelo',track:'CURVELO'}});
  // The service lane has no surveyed stations: the box is found by lap distance and offset.
  box.inBox=inPitBox;
  root.add(curveloPitSigns(data));

@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {CarCondition,CAR_PARTS,PitService,PLACE_NAMES} from './car-condition.js';
 import {pitLane,inPitBox} from './pit-lane.js';
 import {trackPoint} from './immersive-visuals.js';
-import {footState,stepOnFoot,footGround,clearView,placeFootCamera,turnFootView,footJump} from './on-foot.js';
+import {footState,stepOnFoot,footGround,clearView,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
 import {OPENINGS,carSpot,SPOT_OPENING} from './car-openings.js';
 const money=n=>'R$ '+n.toFixed(2).replace('.',','),pct=n=>Math.round(n*100)+'%';
 const idle={throttle:0,brake:1,left:0,right:0,reverse:0,handbrake:0},still={throttle:0,brake:0,left:0,right:0};
@@ -40,7 +40,7 @@ export class PitStop {
   window.addEventListener('pointerup',e=>{if(this.drag?.id===e.pointerId)this.drag=null;});
   const shift=e=>{if(e.code==='ShiftLeft'||e.code==='ShiftRight')this.shift=e.type==='keydown';};
   document.addEventListener('keydown',shift);document.addEventListener('keyup',shift);window.addEventListener('blur',()=>{this.shift=false;});
-  view?.addEventListener('wheel',e=>{const k=Math.sign(e.deltaY);if(inCar())this.view.distance=clamp(this.view.distance*(1+k*.12),3,18);else if(free())this.coffee.distance=clamp(this.coffee.distance+k*.5,2.2,7.5);},{passive:true});
+  view?.addEventListener('wheel',e=>{const k=Math.sign(e.deltaY);if(inCar())this.view.distance=clamp(this.view.distance*(1+k*.14),1.8,18);else if(free())zoomFootView(this.coffee,k);},{passive:true});
   $('pitFill2').onclick=()=>this.startFuel(2);$('pitFillAll').onclick=()=>this.startFuel(12);
   for(const button of this.panel.querySelectorAll('[data-snack]'))button.onclick=()=>this.buySnack(button.dataset.snack);
   for(const button of this.panel.querySelectorAll('[data-repair]'))button.onclick=()=>{if(this.service.startRepair(button.dataset.repair,button.dataset.kind)){this.message=this.orderMessage(button.dataset.repair);mode.state.emitSound('judgeCheck');}else this.message='Confira o saldo: esta peça pode já estar na fila.';this.render();};
@@ -204,7 +204,7 @@ export class PitStop {
   const v=this.view??=this.startView(),flat=Math.cos(v.elev)*v.distance,target=new THREE.Vector3(c.x,c.surface.z+1,-c.y),eye=target.clone().addScaledVector(forward,Math.cos(v.angle)*flat).addScaledVector(inside,Math.sin(v.angle)*flat).add(new THREE.Vector3(0,Math.sin(v.elev)*v.distance,0));
   if(walking){
    if(this.savedFov===undefined){this.savedFov=camera.fov;camera.fov=58;camera.updateProjectionMatrix();}
-   const s=this.coffee,fov=s.running?65:58;if(Math.abs(camera.fov-fov)>.05){camera.fov+=(fov-camera.fov)*(1-Math.exp(-dt*5));camera.updateProjectionMatrix();}
+   const s=this.coffee,lens=s.zoomFov??58,fov=s.running&&lens>=57?65:lens;if(Math.abs(camera.fov-fov)>.05){camera.fov+=(fov-camera.fov)*(1-Math.exp(-dt*5));camera.updateProjectionMatrix();}
   }
   if(!this.panel.hidden){camera.setViewOffset(innerWidth,innerHeight,this.panel.getBoundingClientRect().width/2,0,innerWidth,innerHeight);this.viewShifted=true;}
   // On foot the camera follows the pilot (on-foot.js, smoothed from where it was); in

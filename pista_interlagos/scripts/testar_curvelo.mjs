@@ -38,12 +38,14 @@ for(let i=80;i<300;i+=11)for(const d of [-7.6,7.6]){
 scene.traverse(o=>{o.geometry?.dispose();});
 const report=[];
 for(const active of [false,true]){
- const m=Object.create(ImmersiveMode.prototype);Object.assign(m,{data,car:new TestCar(data),state:new ImmersiveState(),field:new RaceField(data,{seed:1}),parts:{reset(){}},contacts(){},sync(){},wallImpact(){},freeTotalLaps:3});
+ const m=Object.create(ImmersiveMode.prototype);Object.assign(m,{data,car:new TestCar(data),state:new ImmersiveState(),field:new RaceField(data,{seed:1}),parts:{reset(){}},contacts(){},sync(){},wallImpact(){},laps:3,storyLaps:3});
  m.car.resetGrid();m.resetField();if(active){m.state.active=true;m.state.phase='race';m.state.fuel=12;m.state.health=1;m.raceProgress=0;m.previousS=m.car.surface.s;m.debrisTimer=1e9;m.contactCooldown=0;}
  const initial=m.car.surface.s;assert(initial>1100&&m.rivals.every(r=>r.car.surface.s>initial&&r.car.surface.s<L),'all cars behind the stripe');
  let steps=0,offroad=0;
- while(!m.finishing&&steps<120*250){const input=recognitionInput(m.car);if(active)m.step(input,1/120);else{m.car.step(input,1/120);m.stepFree(1/120,input);}if(!m.car.surface.onRoad)offroad++;steps++;}
- assert(m.finishing,'actual full laps must reach the finish transition');assert.equal(m.car.laps,active?1:3);assert(m.finishBest>20&&m.finishBest<100);assert(offroad/steps<.01,'recognition lap remains on road');
+ const flagAt=new Map();while(!m.finishing&&steps<120*250){const input=recognitionInput(m.car);if(active)m.step(input,1/120);else{m.car.step(input,1/120);m.stepFree(1/120,input);}if(!m.car.surface.onRoad)offroad++;steps++;for(const r of m.rivals)if(r.finished&&!flagAt.has(r))flagAt.set(r,r.progress);}
+ // The rivals race the same three laps as the player: each takes the flag after three laps.
+ assert(flagAt.size>0&&[...flagAt.values()].every(p=>p>=3*L),'rivals race the chosen laps too');
+ assert(m.finishing,'actual full laps must reach the finish transition');assert.equal(m.car.laps,3,'both modes race the standard three laps');assert(m.finishBest>20&&m.finishBest<100);assert(offroad/steps<.01,'recognition lap remains on road');
  const finishTime=m.finishTime;for(let j=0;j<600;j++)m.step({},1/120);
  assert(active?m.state.phase==='podium':m.freeResultReady);assert.equal(m.finishTime,finishTime);assert.equal(m.freeOrder.length,14);
  report.push({immersive:active,laps:m.car.laps,time:finishTime,best:m.finishBest,offroad});

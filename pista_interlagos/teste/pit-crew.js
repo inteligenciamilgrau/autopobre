@@ -9,8 +9,9 @@ import {crewBack,lollipop} from './pit-textures.js';
 // boxy figures of the immersive mode, so the pit walk animates either kind.
 const M=new THREE.Matrix4(),Q=new THREE.Quaternion(),E=new THREE.Euler(),SC=new THREE.Vector3(),TR=new THREE.Vector3();
 const wrap=a=>Math.atan2(Math.sin(a),Math.cos(a));
+// Parts stay indexed: a fifth of the vertices to skin and shade for the same triangles.
 function piece(geometry,color,pos=[0,0,0],rot=[0,0,0],scale=[1,1,1]){
- const g=geometry.index?geometry.toNonIndexed():geometry;if(g!==geometry)geometry.dispose();g.deleteAttribute('uv');
+ const g=geometry;g.deleteAttribute('uv');
  g.applyMatrix4(M.compose(TR.set(...pos),Q.setFromEuler(E.set(...rot)),SC.set(...scale)));
  const c=new THREE.Color(color),n=g.attributes.position.count,rgb=new Float32Array(n*3);for(let i=0;i<n;i++){rgb[i*3]=c.r;rgb[i*3+1]=c.g;rgb[i*3+2]=c.b;}
  g.setAttribute('color',new THREE.BufferAttribute(rgb,3));return g;
@@ -55,6 +56,8 @@ function torsoGeometry(o){
  if(o.apron)p.push(piece(block(.02,.36,.3),o.apron,[.13+.03*b,.2,0]));
  return merge(p);
 }
+// Eyelids (skin, a shade darker) hang from their bone on the brow line over each eye.
+const lidsGeometry=o=>merge([-1,1].map(z=>piece(ball(.024,10,6),darker(o.skin,.93),[.1,-.024,z*.037],[0,0,0],[.55,1,1.05])));
 function hipsGeometry(o){
  const p=[piece(tube(.155,.15,.2,14),o.bottom,[0,-.03,0],[0,0,0],[.72,1,1.05]),piece(tube(.157,.157,.045,14),o.belt,[0,.06,0],[0,0,0],[.73,1,1.06])];
  if(o.skirt)p.push(piece(tube(.165,.26,.56,16),o.skirt,[0,-.3,0],[0,0,0],[.82,1,1]));
@@ -67,8 +70,10 @@ function thighGeometry(o,side){const p=[piece(capsule(.072,.3),o.skirt?(o.legs??
 function shinGeometry(o,side){const p=[piece(capsule(.058,.3),o.skirt?(o.legs??o.skin):o.bottom,[0,-.2,0]),piece(block(.24,.1,.11),o.shoes,[.045,-.45,0]),piece(ball(.056,10,7),o.shoes,[.155,-.455,0],[0,0,0],[1,.8,1])];if(o.trim&&!o.skirt)p.push(piece(block(.012,.3,.012),o.trim,[0,-.2,side*.059]));return merge(p);}
 
 // Poses: hips drop (y), forward lean, head nod; per side [left, right]: thigh swing,
-// knee bend, arm raise, elbow bend and arm spread (radians).
-const pose=(y,lean,head,thigh,knee,arm,elbow,spread=[.1,.1])=>({y,lean,head,turn:0,thigh,knee,arm,elbow,spread});
+// knee bend, arm raise, elbow bend and arm spread (radians). The idle moves also use
+// head turn (+ left) and tilt, torso twist (+ left), hips sway (metres, + right) and
+// the forearm turned in about the upper arm (roll, per side); lid closes the eyes (0-1).
+const pose=(y,lean,head,thigh,knee,arm,elbow,spread=[.1,.1])=>({y,lean,head,turn:0,twist:0,tilt:0,sway:0,lid:0,thigh,knee,arm,elbow,spread,roll:[0,0]});
 export const POSES={
  stand:pose(0,0,0,[0,0],[0,0],[.06,.06],[.18,.18]),
  ready:pose(-.04,.14,.05,[.12,.12],[.22,.22],[.3,.3],[.55,.55],[.14,.14]),
@@ -86,15 +91,22 @@ export const POSES={
  wipe:pose(0,.22,.25,[0,0],[0,0],[.2,1.05],[.4,.5],[.1,.05]),
  cheer:pose(0,-.05,-.2,[0,0],[0,0],[2.6,2.6],[.3,.3],[.3,.3]),
 };
-const clonePose=p=>({...p,thigh:[...p.thigh],knee:[...p.knee],arm:[...p.arm],elbow:[...p.elbow],spread:[...p.spread]});
-function copyPose(to,from){for(const key of ['y','lean','head','turn'])to[key]=from[key];for(const key of ['thigh','knee','arm','elbow','spread'])for(const i of [0,1])to[key][i]=from[key][i];}
+const SCALARS=['y','lean','head','turn','twist','tilt','sway','lid'],PAIRS=['thigh','knee','arm','elbow','spread','roll'];
+const clonePose=p=>({...p,twist:p.twist??0,tilt:p.tilt??0,sway:p.sway??0,lid:p.lid??0,thigh:[...p.thigh],knee:[...p.knee],arm:[...p.arm],elbow:[...p.elbow],spread:[...p.spread],roll:[...(p.roll??[0,0])]});
+function copyPose(to,from){for(const key of SCALARS)to[key]=from[key]??0;for(const key of PAIRS)for(const i of [0,1])to[key][i]=from[key]?.[i]??0;}
 function applyPose(rig,p){
  rig.hips.position.y=.93+p.y;rig.torso.rotation.z=-p.lean;rig.head.rotation.z=-p.head;rig.head.rotation.y=p.turn;
- for(const [i,side] of [[0,-1],[1,1]]){const l=rig.limbs[side];l.leg.rotation.z=p.thigh[i];l.shin.rotation.z=-p.knee[i];l.arm.rotation.z=p.arm[i];l.arm.rotation.x=-side*p.spread[i];l.fore.rotation.z=p.elbow[i];}
+ // Weight on one leg: the hips slide over it, the legs lean in to keep the feet put
+ // and the chest leans back over the middle.
+ const sway=p.sway??0,splay=Math.asin(Math.max(-.3,Math.min(.3,sway/.86)));
+ rig.hips.position.z=sway;rig.torso.rotation.x=-splay*.8;rig.torso.rotation.y=p.twist??0;rig.head.rotation.x=p.tilt??0;
+ // Open eyelids fold away into the brow line; closing, they come down from it.
+ if(rig.lids){const lid=Math.max(0,Math.min(1,p.lid??0));if(lid<.02)rig.lids.scale.setScalar(.001);else rig.lids.scale.set(1,Math.max(.08,lid),1);}
+ for(const [i,side] of [[0,-1],[1,1]]){const l=rig.limbs[side];l.leg.rotation.z=p.thigh[i];l.leg.rotation.x=splay;l.shin.rotation.z=-p.knee[i];l.arm.rotation.z=p.arm[i];l.arm.rotation.x=-side*p.spread[i];l.fore.rotation.z=p.elbow[i];l.fore.rotation.y=side*(p.roll?.[i]??0);}
 }
 // Holds a figure in a pose (people standing still: supporters, the podium).
 export function setPose(root,pose){root.userData.pose=clonePose(pose);applyPose(root.userData.rig,root.userData.pose);}
-function blendPose(cur,target,k){for(const key of ['y','lean','head','turn'])cur[key]+=((target[key]??0)-cur[key])*k;for(const key of ['thigh','knee','arm','elbow','spread'])for(const i of [0,1])cur[key][i]+=(target[key][i]-cur[key][i])*k;}
+function blendPose(cur,target,k){for(const key of SCALARS)cur[key]+=((target[key]??0)-cur[key])*k;for(const key of PAIRS)for(const i of [0,1])cur[key][i]+=((target[key]?.[i]??0)-cur[key][i])*k;}
 // Walking and running layered over the current pose.
 function gait(cur,phase,amount,run){
  for(const [i,sign] of [[0,1],[1,-1]]){const s=Math.sin(phase)*sign,c=Math.cos(phase)*sign;
@@ -103,19 +115,153 @@ function gait(cur,phase,amount,run){
  cur.lean+=((run?.22:.04)-cur.lean)*amount;cur.y+=(-(run?.05:.02)+Math.abs(Math.sin(phase))*.03-cur.y)*amount;cur.head+=(0-cur.head)*amount;
 }
 
+// ---- Idle life: nobody waits like a statue. ----
+// Arm targets [raise, elbow, spread, forearm roll], solved on the rig so the hand lands
+// where it should: cup at the mouth, cap brim, brow, watch, phone, radio at the ear,
+// hips, behind the back. The arms hang from the torso, so they hold in any base pose.
+const ARMS={
+ sip:[1.54,2.19,.41,.4],cap:[2.06,1.39,0,.56],brow:[1.94,1.65,.37,.27],fan:[.94,2.25,-.14,.44],
+ wrist:[.62,1.52,.34,.99],phone:[.7,1.54,.46,.93],photo:[1.24,1.3,.18,.44],ear:[1.2,2.44,1.7,-1.45],
+ back:[-.82,.84,-.31,.11],hip:[-.43,1.59,.69,1.12],point:[1.83,0,-.31,0],chin:[1.44,2.2,.25,.8],
+ clap:[.85,1.49,.35,.81],folded:[.38,1.75,.34,0],up:[2.8,.25,.25,0],camera:[1.22,1.71,0,.18],
+};
+function reach(s,i,[arm,elbow,spread,roll],k){s.arm[i]+=(arm-s.arm[i])*k;s.elbow[i]+=(elbow-s.elbow[i])*k;s.spread[i]+=(spread-s.spread[i])*k;s.roll[i]+=(roll-s.roll[i])*k;}
+const both=(s,arms,k)=>{reach(s,0,arms,k);reach(s,1,arms,k);};
+// Gestures: duration range (s); hands ('one' takes a free hand, 'left'/'right'/'both' need
+// those free, 'posture' is fine with a tool in the hand); the prop shown (needs: only for
+// people who carry it); standing: only on their feet; eyesFree: can go on while watching
+// a car. move(s,k,g,t): s the shown pose, k the fade in and out, g its dice, t its clock.
+const GESTURES={
+ look:{dur:[2,4.5],move:(s,k,g)=>{s.turn+=g.dir*g.amount*k;s.twist+=g.dir*g.amount*.25*k;s.head+=g.pitch*k;s.tilt+=g.dir*.05*k;}},
+ shift:{dur:[3,7],standing:true,eyesFree:true,move:(s,k,g)=>{const free=g.dir>0?0:1;s.sway+=g.dir*.045*k;s.knee[free]+=.2*k;s.thigh[free]+=.06*k;s.tilt-=g.dir*.05*k;}},
+ tap:{dur:[1.6,3],standing:true,eyesFree:true,move:(s,k,g,t)=>{s.knee[g.side]+=(.1+.07*Math.max(0,Math.sin(t*10)))*k;s.thigh[g.side]+=.05*k;}},
+ folded:{dur:[4,9],hands:'posture',eyesFree:true,move:(s,k)=>both(s,ARMS.folded,k)},
+ hips:{dur:[3,7],hands:'posture',eyesFree:true,move:(s,k)=>{both(s,ARMS.hip,k);s.lean-=.03*k;}},
+ back:{dur:[4,8],hands:'posture',eyesFree:true,move:(s,k)=>{both(s,ARMS.back,k);s.lean-=.02*k;}},
+ stretch:{dur:[2.2,3],hands:'posture',ramp:.8,move:(s,k)=>{both(s,ARMS.up,k);s.lean-=.12*k;s.head-=.25*k;s.y+=.012*k;s.lid+=.6*k;}},
+ cap:{dur:[1.3,2],hands:'one',move:(s,k,g,t)=>{reach(s,g.side,ARMS.cap,k);s.head+=.08*k;s.roll[g.side]+=Math.sin(t*6)*.1*k;}},
+ brow:{dur:[1.5,2.3],hands:'one',move:(s,k,g,t)=>{reach(s,g.side,ARMS.brow,k);s.spread[g.side]+=Math.sin(t*6)*.12*k;s.head-=.05*k;}},
+ fan:{dur:[2.5,4],hands:'one',move:(s,k,g,t)=>{reach(s,g.side,ARMS.fan,k);s.spread[g.side]+=Math.sin(t*13)*.2*k;s.roll[g.side]+=Math.sin(t*13)*.3*k;s.head-=.08*k;}},
+ wrist:{dur:[1.4,2.4],hands:'left',move:(s,k)=>{reach(s,0,ARMS.wrist,k);s.head+=.45*k;s.turn+=.22*k;}},
+ phone:{dur:[4,9],hands:'right',prop:'phone',needs:true,move:(s,k,g,t)=>{reach(s,1,ARMS.phone,k);s.elbow[1]+=Math.sin(t*9)*.03*k;s.head+=.5*k;s.turn-=.1*k;}},
+ photo:{dur:[2.5,4],hands:'both',prop:'phone',needs:true,move:(s,k,g)=>{both(s,ARMS.photo,k);s.head-=.05*k;s.twist+=g.dir*.2*k;}},
+ ear:{dur:[2,4.5],hands:'right',prop:'radio',eyesFree:true,move:(s,k)=>{reach(s,1,ARMS.ear,k);s.tilt+=.12*k;s.head+=.1*k;}},
+ point:{dur:[1.8,3],hands:'right',move:(s,k,g)=>{reach(s,1,ARMS.point,k);s.twist+=g.dir*.3*k;s.turn+=g.dir*.3*k;s.head-=.08*k;}},
+ chin:{dur:[3,6],hands:'one',move:(s,k,g)=>{reach(s,g.side,ARMS.chin,k);s.head+=.12*k;s.lean+=.06*k;}},
+ clap:{dur:[2,4],hands:'both',move:(s,k,g,t)=>{both(s,ARMS.clap,k);const beat=Math.sin(t*11)*.14*k;s.spread[0]+=beat;s.spread[1]+=beat;s.head-=.05*k;}},
+ sip:{dur:[2.2,3],hands:'right',prop:'cup',needs:true,eyesFree:true,move:(s,k)=>{reach(s,1,ARMS.sip,k*k*(3-2*k));s.head-=.15*k;}},
+ talk:{dur:[3,7],move:(s,k,g,t)=>{s.twist+=g.dir*.3*k;s.turn+=g.dir*.35*k;s.head+=Math.sin(t*2.6)*.07*k;if(g.free)reach(s,g.side,[.45+.15*Math.sin(t*2.3),1.05+.3*Math.sin(t*3.1+g.dir),.18,.35],k);}},
+ nod:{dur:[2,4],move:(s,k,g,t)=>{s.head+=(.06+.06*Math.sin(t*3.2))*k;s.turn+=g.dir*.3*k;}},
+ type:{dur:[3,8],hands:'both',move:(s,k,g,t)=>{s.elbow[0]+=Math.sin(t*13)*.05*k;s.elbow[1]+=Math.sin(t*11+1)*.05*k;s.arm[0]+=Math.sin(t*7)*.03*k;s.arm[1]+=Math.sin(t*8+2)*.03*k;s.head+=.18*k;}},
+};
+// What each kind of person does while waiting, with weights.
+const KINDS={
+ stand:{look:4,shift:3,folded:2,hips:1,back:1,cap:1,brow:.6,wrist:1,phone:1.2,stretch:.5,talk:2,tap:.6,chin:.4},
+ crew:{look:4,shift:3,folded:2,hips:1.5,back:1,cap:1,brow:1,wrist:.6,stretch:.8,talk:2,tap:.6},
+ seated:{look:3,sip:3,talk:2.5,phone:1,chin:1,nod:1.2,cap:.3},
+ desk:{type:5,look:2,ear:1.5,chin:1,talk:1,nod:1,stretch:.4},
+ marshal:{look:3,shift:3,back:2,folded:1.5,ear:1.5,wrist:1,brow:.6,hips:1,stretch:.3},
+ camera:{look:3,shift:2,ear:2,folded:1.5,stretch:1,brow:.6,back:1,hips:1,wrist:.6,phone:.6},
+ terrace:{look:3,shift:3,folded:1.5,point:1.2,photo:1,phone:1.2,talk:2.5,hips:1,chin:.5},
+ counter:{look:3,shift:3,hips:1.5,folded:1.5,fan:1.2,phone:1,sip:1,brow:.8,chin:.5,tap:.6},
+ fan:{look:3,shift:3,folded:1.5,phone:1.2,photo:.8,talk:2.5,hips:1,point:.8,wrist:.6,tap:.5},
+ judge:{look:2,chin:2,wrist:1,back:2,folded:1.5,hips:1,shift:2,cap:.5},
+ podium:{clap:4,look:2,folded:1,shift:2,hips:1,point:.6},
+ busy:{look:1},
+};
+// What they carry (hidden until a gesture takes it out, except the café's cups) and how
+// far (m) a passing car catches their eye.
+const KIND_PROPS={seated:['cup','phone'],stand:['phone'],terrace:['phone'],fan:['phone'],camera:['phone'],marshal:['radio'],counter:['cup','phone']};
+const KIND_WATCH={marshal:120,camera:240,terrace:170,desk:150,stand:45,fan:0};
+const STANDING=new Set(['stand','rest','folded']);
+function dice(seed){let x=Math.floor(Math.abs(seed)*2147483646)%2147483646+1;return ()=>(x=x*16807%2147483647)/2147483647;}
+const smooth=x=>{x=Math.max(0,Math.min(1,x));return x*x*(3-2*x);};
+
+// One person's idle: breathing and a drifting gaze all the time, a car that catches
+// the eye, and now and then a gesture (with pauses in between).
+export class IdleMind{
+ // hands: [left, right] free for gestures; props: what the person carries.
+ constructor(kind='stand',{hands=[true,true],props=[],seed=Math.random()}={}){
+  this.kind=kind;this.table=Object.entries(KINDS[kind]??KINDS.stand);this.hands=hands;this.props=new Set(props);this.rand=dice(seed);
+  this.t=this.rand()*60;this.phase=this.rand()*7;this.gesture=null;this.wait=.3+this.rand()*3;this.using=null;this.attention=0;this.aim=0;this.pitch=0;this.blink=-1;this.blinkIn=this.rand()*4;
+ }
+ side(hands){
+  const [l,r]=this.hands,coin=this.rand()<.5?0:1;
+  if(hands==='posture'&&this.posture===false)return null;if(!hands||hands==='posture')return coin;if(hands==='both')return l&&r?1:null;if(hands==='left')return l?0:null;if(hands==='right')return r?1:null;
+  return l&&r?coin:l?0:r?1:null;
+ }
+ pick(pose,watching){
+  const standing=STANDING.has(pose),options=[];let total=0;
+  for(const [name,weight] of this.table){
+   const G=GESTURES[name];if(!G||G.standing&&!standing||G.needs&&!this.props.has(G.prop)||watching&&!G.eyesFree)continue;
+   const side=this.side(G.hands);if(side===null)continue;options.push([name,weight,side]);total+=weight;
+  }
+  let r=this.rand()*total;
+  for(const [name,weight,side] of options)if((r-=weight)<=0){const G=GESTURES[name],[a,b]=G.dur;return {name,G,side,free:this.hands[side],T:a+this.rand()*(b-a),t:0,dir:this.rand()<.5?-1:1,amount:.5+this.rand()*.6,pitch:(this.rand()-.45)*.35};}
+  return null;
+ }
+ // s: the shown pose, already a copy of the base; calm: at work or on the move (only
+ // breathing); look: {angle, pitch} of a car in view (radians, + left / + up), or null.
+ apply(s,dt,{pose='stand',calm=false,look=null}={}){
+  this.t+=dt;const t=this.t,ph=this.phase,breath=Math.sin(t*1.6+ph);
+  s.y+=breath*.004;s.lean+=breath*.012;s.spread[0]+=breath*.012;s.spread[1]+=breath*.012;
+  // A blink every few seconds (.17 s, lids down faster than up), now and then a double one.
+  if(this.blink>=0){this.blink+=dt;const b=this.blink;s.lid=Math.max(s.lid,b<.07?b/.07:Math.max(0,1-(b-.07)/.1));if(b>=.17){this.blink=-1;this.blinkIn=this.rand()<.15?.12:1.8+this.rand()*4.5;}}
+  else if((this.blinkIn-=dt)<=0)this.blink=0;
+  s.turn+=Math.sin(t*.37+ph)*.1+Math.sin(t*.91+ph*2)*.04;s.head+=Math.sin(t*.53+ph*3)*.035;s.tilt+=Math.sin(t*.29+ph)*.03;
+  if(!calm&&STANDING.has(pose))s.sway+=Math.sin(t*.23+ph)*.012;
+  let g=this.gesture;
+  if(g){
+   if(calm)g.T=Math.min(g.T,g.t+.35);g.t+=dt;
+   const ramp=Math.min(g.G.ramp??.5,g.T/2),k=smooth(g.t/ramp)*smooth((g.T-g.t)/ramp);
+   g.G.move(s,k,g,g.t);this.using=g.G.prop&&this.props.has(g.G.prop)&&k>.2?g.G.prop:null;
+   if(g.t>=g.T){this.gesture=g=null;this.using=null;this.wait=.8+this.rand()*3.2;}
+  }else if(!calm&&(this.wait-=dt)<=0){this.gesture=this.pick(pose,this.attention>.3);this.wait=1+this.rand()*2;}
+  // A car in view: the head follows it, the chest turns a little with it.
+  this.attention+=((look?1:0)-this.attention)*Math.min(1,dt*2.5);
+  if(look){this.aim+=wrap(look.angle-this.aim)*Math.min(1,dt*5);this.pitch+=(look.pitch-this.pitch)*Math.min(1,dt*5);}
+  if(this.attention>.01){const w=this.attention;s.turn+=(Math.max(-1.15,Math.min(1.15,this.aim*.75))-s.turn)*w;s.twist+=Math.max(-.45,Math.min(.45,this.aim*.3))*w;s.head+=Math.max(-.2,Math.min(.4,-this.pitch*.7))*w;}
+ }
+}
+
+// A single figure from person() idling on its spot (supporters, the judge, the podium):
+// it blends to the pose asked for and adds the idle life on top.
+export class Idler{
+ constructor(person,kind='stand',{hands,seed,props={}}={}){this.person=person;this.cur=clonePose(person.userData.pose);this.show=clonePose(this.cur);this.props=props;this.mind=new IdleMind(kind,{hands,props:Object.keys(props),seed});}
+ update(dt,pose='stand',{calm=false,look=null,snap=false}={}){
+  blendPose(this.cur,POSES[pose]??POSES.stand,snap?1:1-Math.exp(-dt*7));copyPose(this.show,this.cur);this.mind.apply(this.show,dt,{pose,calm,look});
+  applyPose(this.person.userData.rig,this.show);for(const [name,prop] of Object.entries(this.props))prop.visible=this.mind.using===name;
+ }
+}
+
 // Bones of a figure in its rest pose, with the part geometries that ride on each.
 function skeletonFor(o){
  const bones=[],bone=(name,parent,x,y,z)=>{const b=new THREE.Bone();b.name=name;b.position.set(x,y,z);parent?.add(b);bones.push(b);return b;};
- const hips=bone('Quadril',null,0,.93,0),torso=bone('Tronco',hips,0,0,0),head=bone('Cabeca',torso,0,.6,0),limbs={},parts=[[hipsGeometry(o),hips],[torsoGeometry(o),torso]],upper=upperGeometry(o),fore=foreGeometry(o);
+ const hips=bone('Quadril',null,0,.93,0),torso=bone('Tronco',hips,0,0,0),head=bone('Cabeca',torso,0,.6,0),lids=bone('Palpebras',head,0,.142,0),limbs={},parts=[[hipsGeometry(o),hips],[torsoGeometry(o),torso],[lidsGeometry(o),lids]],upper=upperGeometry(o),fore=foreGeometry(o);
  for(const side of [-1,1]){
   const arm=bone('Membro_braco_'+side,torso,0,.47,side*.2),forearm=bone('Antebraco_'+side,arm,0,-.28,0),hand=bone('Mao_'+side,forearm,0,-.29,0),leg=bone('Membro_perna_'+side,hips,0,0,side*.095),shin=bone('Canela_'+side,leg,0,-.43,0);
   limbs[side]={arm,fore:forearm,hand,leg,shin};parts.push([side<0?upper:upper.clone(),arm],[side<0?fore:fore.clone(),forearm],[thighGeometry(o,side),leg],[shinGeometry(o,side),shin]);
  }
- return {bones,parts,rig:{hips,torso,head,limbs},head:headGeometry(o)};
+ return {bones,parts,rig:{hips,torso,head,lids,limbs},head:headGeometry(o)};
 }
 
+// Cloth, skin and hair: soft sheen on the rim, and a fine weave in the normals up close.
+function fabricMaterial(){
+ // A faint sheen only: a strong one coats every figure in a milky, washed-out layer.
+ const material=new THREE.MeshPhysicalMaterial({name:'Pessoas_boxes',vertexColors:true,roughness:.8,sheen:.14,sheenRoughness:.9,sheenColor:new THREE.Color(.3,.3,.3)});
+ material.onBeforeCompile=shader=>{
+  shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vClothPos;').replace('#include <begin_vertex>','#include <begin_vertex>\nvClothPos=transformed;');
+  shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying vec3 vClothPos;').replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+vec3 weave=vec3(sin(vClothPos.y*900.0)*.5+sin(vClothPos.x*1300.0+vClothPos.z*1100.0)*.5,0.0,sin(vClothPos.z*900.0+vClothPos.x*700.0)*.5);
+normal=normalize(normal+weave*.035*(1.0-smoothstep(1.5,5.0,-vViewPosition.z)));`).replace('#include <color_fragment>',`#include <color_fragment>
+// Pure paint colours read as toys: fabric dyes are a touch duller.
+diffuseColor.rgb=mix(vec3(dot(diffuseColor.rgb,vec3(.2126,.7152,.0722))),diffuseColor.rgb,.94);`);
+ };
+ material.customProgramCacheKey=()=>'people-fabric-v3';
+ return material;
+}
 export function createPeople(){
- const material=new THREE.MeshStandardMaterial({name:'Pessoas_boxes',vertexColors:true,roughness:.72});let backMaterial=null;
+ const material=fabricMaterial();let backMaterial=null;
  // One skinned mesh per body (every vertex follows a single bone) plus the head, so
  // the head can give way to the driver's helmet.
  function person(outfit,{shadows=true}={}){
@@ -130,25 +276,119 @@ export function createPeople(){
  }
  // Props carried by the crew, in the same vertex-coloured material.
  function prop(parts,parent,name){const m=new THREE.Mesh(merge(parts),material);m.name=name;m.castShadow=true;parent.add(m);return m;}
- // Static people posed and merged into one mesh: café customers, rival crews, the
- // pit wall stand and the terrace.
- function bake(entries){
-  if(!entries.length)return null;const parts=[],anchor=new THREE.Group();
-  for(const e of entries){
-   const {parts:pieces,rig,head}=skeletonFor({...BASE,...e.outfit}),pose=clonePose(POSES[e.pose]??POSES.stand);if(e.turn)pose.turn=e.turn;
-   anchor.position.set(e.x,e.y,e.z);anchor.rotation.set(0,e.yaw,0);anchor.add(rig.hips);applyPose(rig,pose);anchor.updateMatrixWorld(true);
-   for(const [g,b] of pieces)parts.push(g.applyMatrix4(b.matrixWorld));parts.push(head.applyMatrix4(rig.head.matrixWorld));anchor.remove(rig.hips);
-  }
-  const mesh=new THREE.Mesh(mergeGeometries(parts,false),material);parts.forEach(g=>g.dispose());mesh.name='Pessoas_paradas_boxes';mesh.castShadow=mesh.receiveShadow=true;return mesh;
+ // A cup, phone or radio in a person()'s hand, hidden until a gesture takes it out.
+ function carry(name,hand){const m=new THREE.Mesh(PROPS[name](),material);m.name='Objeto_'+name;m.castShadow=true;m.visible=false;hand.add(m);return m;}
+ // People who stay at their spot, idling (see Crowd): café customers, rival crews, the
+ // pit wall stand, the terrace, marshals and cameramen. Grouped by neighbourhood.
+ function crowd(entries,{name='Pessoas_paradas_boxes',cell=48,seed=1}={}){
+  if(!entries.length)return null;const group=new THREE.Group(),cells=new Map();group.name=name;
+  for(const e of entries){const key=Math.floor(e.x/cell)+':'+Math.floor(e.z/cell);if(!cells.has(key))cells.set(key,[]);cells.get(key).push(e);}
+  let n=0;for(const list of cells.values()){const c=new Crowd(list,material,seed+n*.618);c.mesh.name=`${name}_${++n}`;group.add(c.mesh);}
+  return group;
  }
- return {material,person,prop,bake};
+ return {material,person,prop,carry,crowd};
 
 }
 
+// Things held in the right hand (hand bone frame: -y toward the fingers, +x up when the
+// forearm points forward) and the TV camera head on its tripod (+x toward the lens).
+const PROPS={
+ cup:()=>merge([piece(tube(.036,.03,.085,12),0xf4f1ea,[0,-.035,0],[0,0,-Math.PI/2]),piece(tube(.031,.031,.004,12),0x3b2415,[.041,-.035,0],[0,0,-Math.PI/2])]),
+ phone:()=>merge([piece(block(.012,.13,.066),0x15171a,[.046,-.05,0]),piece(block(.002,.114,.056),0x6f9fc4,[.053,-.05,0])]),
+ radio:()=>merge([piece(block(.035,.12,.058),0x1b1d20,[.03,-.035,0]),piece(tube(.006,.006,.1,6),0x1b1d20,[.03,-.14,.015])]),
+};
+const cameraHead=()=>merge([piece(block(.62,.3,.26),0x1b1d20,[0,.12,0]),piece(tube(.09,.11,.42,10),0x0e0f10,[.46,.14,0],[0,0,Math.PI/2]),piece(block(.12,.09,.09),0x2a2d30,[-.3,.22,-.1]),piece(block(.3,.04,.2),0x3a3f44,[0,-.05,0])]);
+
+// People who stay at their spot, idling. One skinned mesh per neighbourhood (a draw
+// call each, culled together; every vertex on a single bone like person()), updated
+// by updatePeople. Entries: {outfit, pose, x, y, z, yaw, idle?, hands?, props?, watch?,
+// camera?} in the parent's frame; idle is a KINDS name (default seated or stand);
+// camera {x, y, z, back, drop} puts a TV camera head on a panning tripod top there, the
+// operator `back` metres behind it and `drop` below.
+const LIVE=new Set(),CENTRE=new THREE.Vector3(),EYE=new THREE.Vector3(),AT=new THREE.Vector3(),CARS=[],POOL=[];
+class Crowd{
+ constructor(entries,material,seed){
+  const rand=dice(seed),bones=[],slot=new Map(),geometries=[],roots=[];this.folk=[];
+  const bone=(name,parent,x=0,y=0,z=0)=>{const b=new THREE.Bone();b.name=name;b.position.set(x,y,z);parent?.add(b);slot.set(b,bones.length);bones.push(b);return b;};
+  const skin=(g,b)=>{g.applyMatrix4(b.matrixWorld);const n=g.attributes.position.count,index=new Uint16Array(n*4),weight=new Float32Array(n*4),k=slot.get(b);for(let i=0;i<n;i++){index[i*4]=k;weight[i*4]=1;}
+   g.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(index,4));g.setAttribute('skinWeight',new THREE.Float32BufferAttribute(weight,4));geometries.push(g);};
+  for(const e of entries){
+   const o={...BASE,...e.outfit},{bones:own,parts,rig,head}=skeletonFor(o),kind=e.idle??(['sit','stool'].includes(e.pose)?'seated':'stand');
+   const spot=bone('Lugar',null,e.x,e.y,e.z);spot.rotation.y=e.yaw;roots.push(spot);let feet=spot,camera=null;
+   if(e.camera){const c=e.camera;spot.position.set(c.x,c.y,c.z);camera={spot,tilt:bone('Camera_tv',spot),pan:0,speed:0,step:0,busy:0,back:c.back};feet=bone('Operador',spot,-c.back,-c.drop,0);}
+   feet.add(rig.hips);for(const b of own){slot.set(b,bones.length);bones.push(b);}
+   const carried=e.props??KIND_PROPS[kind]??[],props={};for(const name of carried)props[name]=bone('Objeto_'+name,rig.limbs[1].hand);
+   spot.updateMatrixWorld(true);
+   for(const [g,b] of parts)skin(g,b);skin(head,rig.head);for(const name of carried)skin(PROPS[name](),props[name]);if(camera)skin(cameraHead(),camera.tilt);
+   const base=POSES[e.pose]??POSES.stand;
+   this.folk.push({rig,pose:e.pose??'stand',base,show:clonePose(base),mind:new IdleMind(kind,{hands:e.hands,props:carried,seed:rand()}),props,always:kind==='seated'?['cup']:[],camera,spot,yaw:e.yaw,watch:e.watch??KIND_WATCH[kind]??0,look:{angle:0,pitch:0,tilt:0}});
+  }
+  const mesh=this.mesh=new THREE.SkinnedMesh(mergeGeometries(geometries,false),material);geometries.forEach(g=>g.dispose());
+  mesh.castShadow=mesh.receiveShadow=true;for(const r of roots)mesh.add(r);mesh.bind(new THREE.Skeleton(bones));
+  // Culled as a group: the spots, with room for raised arms and the camera heads.
+  const box=new THREE.Box3();for(const r of roots)box.expandByPoint(r.position);box.expandByScalar(2.6);mesh.boundingBox=box;mesh.boundingSphere=box.getBoundingSphere(new THREE.Sphere());
+  this.centre=mesh.boundingSphere.center.clone();this.radius=mesh.boundingSphere.radius;this.due=0;this.tick=0;this.attached=false;
+  for(const f of this.folk){for(const [name,b] of Object.entries(f.props))b.scale.setScalar(f.always.includes(name)?1:1e-4);applyPose(f.rig,f.show);}
+  LIVE.add(this);
+ }
+ // The nearest car within `range` of a spot, as seen from its heading (null if none, or behind).
+ sight(f,range,cars,eye){
+  if(!range||!cars.length)return null;AT.copy(f.spot.position).applyMatrix4(this.mesh.matrixWorld);let best=null,d2=range*range;
+  for(const c of cars){const dx=c.x-AT.x,dz=c.z-AT.z,d=dx*dx+dz*dz;if(d<d2){d2=d;best=c;}}
+  if(!best)return null;const dx=best.x-AT.x,dz=best.z-AT.z,flat=Math.hypot(dx,dz),angle=wrap(Math.atan2(-dz,dx)-f.yaw);if(Math.abs(angle)>2.3)return null;
+  f.look.angle=angle;f.look.pitch=Math.atan2(best.y+.6-AT.y-eye,flat);f.look.tilt=Math.atan2(best.y+.5-AT.y,flat);return f.look;
+ }
+ update(dt,cars){
+  for(const f of this.folk){
+   const s=f.show,c=f.camera;copyPose(s,f.base);
+   if(!c){f.mind.apply(s,dt,{pose:f.pose,look:this.sight(f,f.watch,cars,1.6)});}
+   else{
+    // The cameraman keeps the lens on the nearest car in range, panning the head and
+    // stepping round the tripod with it; with nothing to film he idles beside it.
+    const look=this.sight(f,f.watch,cars,0),film=!!look&&Math.abs(look.angle)<1.35,before=c.pan;
+    c.pan+=Math.max(-2.6*dt,Math.min(2.6*dt,((film?look.angle:0)-c.pan)*Math.min(1,dt*(film?6:.8))));
+    c.speed=dt>0?Math.abs(c.pan-before)/dt:0;c.busy+=((film?1:0)-c.busy)*Math.min(1,dt*3);
+    c.spot.rotation.y=f.yaw+c.pan;c.tilt.rotation.z+=((film?Math.max(-.5,Math.min(.15,look.tilt)):-.06)-c.tilt.rotation.z)*Math.min(1,dt*4);
+    f.mind.apply(s,dt,{pose:f.pose,calm:c.busy>.2});
+    const w=c.busy;s.lean+=(.3-s.lean)*w;s.y+=(-.06-s.y)*w;s.head+=(.2-s.head)*w;s.turn*=1-w;s.twist*=1-w;s.sway*=1-w;
+    for(const i of [0,1]){s.thigh[i]+=(.1-s.thigh[i])*w;s.knee[i]+=(.15-s.knee[i])*w;}both(s,ARMS.camera,w);
+    const walk=Math.min(1,c.speed*c.back/.5);c.step+=dt*c.speed*c.back*9;
+    if(walk>.05)for(const [i,sign] of [[0,1],[1,-1]]){s.thigh[i]+=Math.sin(c.step)*sign*.22*walk;s.knee[i]+=Math.max(0,Math.cos(c.step)*sign)*.4*walk;}
+   }
+   applyPose(f.rig,s);
+   for(const [name,b] of Object.entries(f.props))if(!f.always.includes(name))b.scale.setScalar(f.mind.using===name?1:1e-4);
+  }
+ }
+}
+const shown=o=>{for(;o;o=o.parent)if(!o.visible)return false;return true;};
+// Once a frame (main.js): people near the camera idle every frame, the ones farther off
+// every fourth, beyond 300 m not at all; past 200 m they cast no shadow and past 800 m (a
+// pixel or two tall) they are not drawn. cars: Object3Ds (the player's car and the rivals) whose positions catch the
+// eye of marshals, cameramen and spectators.
+export function updatePeople(dt,camera,cars=[]){
+ CARS.length=0;for(const o of cars)if(o&&shown(o)){const v=POOL[CARS.length]??(POOL[CARS.length]=new THREE.Vector3());CARS.push(v.setFromMatrixPosition(o.matrixWorld));}
+ EYE.setFromMatrixPosition(camera.matrixWorld);
+ for(const c of LIVE){
+  let root=c.mesh;while(root.parent)root=root.parent;
+  if(!root.isScene){if(c.attached)LIVE.delete(c);continue;}c.attached=true;
+  CENTRE.copy(c.centre).applyMatrix4(c.mesh.matrixWorld);const far=CENTRE.distanceTo(EYE)-c.radius;c.mesh.visible=far<800;c.mesh.castShadow=far<200;
+  if(far>300||!shown(c.mesh)){c.due=0;continue;}
+  c.due+=dt;if(far>90&&(c.tick=(c.tick+1)%4))continue;c.update(c.due,CARS);c.due=0;
+ }
+}
+export {ARMS as IDLE_ARMS,GESTURES as IDLE_GESTURES,KINDS as IDLE_KINDS,applyPose,clonePose};
+// Test hook: how many idle crowds are live and what their people are doing.
+export function peopleInfo(){return [...LIVE].map(c=>({name:c.mesh.name,people:c.folk.length,attached:c.attached,visible:c.mesh.visible,
+ doing:c.folk.map(f=>f.mind.gesture?.name??(f.camera&&f.camera.busy>.5?'filmando':null)),using:c.folk.map(f=>f.mind.using),kinds:c.folk.map(f=>f.mind.kind),
+ spots:c.folk.map(f=>{const w=f.spot.getWorldPosition(new THREE.Vector3());return [w.x,w.y,w.z,f.yaw];}),pan:c.folk.map(f=>f.camera?f.camera.pan:null)}));}
+
 // One animated person: walks or jogs to a target spot, turns to face its heading,
 // settles into a pose and layers small work movements on top.
+// idle: {kind, hands, posture, props (name: mesh in hand), seed} for the IdleMind that
+// fills the waits; calm (set by the owner) keeps it to breathing and glances.
 class Actor{
- constructor(person,x,y,yaw){this.person=person;this.x=x;this.y=y;this.yaw=yaw;this.speed=0;this.phase=0;this.t=Math.random()*9;this.act=null;this.look=0;this.target={x,y,yaw,pose:'stand'};this.show=clonePose(person.userData.pose);}
+ constructor(person,x,y,yaw,idle={}){this.person=person;this.x=x;this.y=y;this.yaw=yaw;this.speed=0;this.phase=0;this.t=Math.random()*9;this.act=null;this.look=0;this.calm=false;this.target={x,y,yaw,pose:'stand'};this.show=clonePose(person.userData.pose);
+  this.props=idle.props??{};this.mind=new IdleMind(idle.kind??'crew',{hands:idle.hands,props:Object.keys(this.props),seed:idle.seed});this.mind.posture=idle.posture??true;}
  go(x,y,yaw,pose,pass=false){Object.assign(this.target,{x,y,yaw,pose,pass});}
  step(dt,ground){
   const dx=this.target.x-this.x,dy=this.target.y-this.y,dist=Math.hypot(dx,dy),p=this.person.userData.pose;this.t+=dt;let moving=0;
@@ -157,7 +397,8 @@ class Actor{
   blendPose(p,POSES[this.target.pose]??POSES.stand,1-Math.exp(-dt*7));
   if(moving>.05)gait(p,this.phase,moving,this.speed>2.3);
   // Work movements and breathing go on a copy, so they never build up in the pose.
-  const s=this.show,t=this.t;copyPose(s,p);s.turn+=this.look;s.y+=Math.sin(t*1.7)*.004;s.lean+=Math.sin(t*1.7)*.01;
+  const s=this.show,t=this.t;copyPose(s,p);s.turn+=this.look;
+  this.mind.apply(s,dt,{pose:this.target.pose,calm:this.calm||moving>.05||!!this.act});for(const [name,prop] of Object.entries(this.props))prop.visible=this.mind.using===name;
   if(moving<=.05){
    if(this.act==='gun'){s.elbow[1]+=Math.sin(t*38)*.06;s.lean+=Math.sin(t*3)*.02;}
    else if(this.act==='wrench'){s.arm[1]+=Math.sin(t*6)*.18;s.elbow[1]+=Math.sin(t*6+1)*.25;s.arm[0]+=Math.sin(t*2.3)*.06;}
@@ -231,7 +472,9 @@ export class PitCrew{
  // homes: [{x,y,yaw,pose}] in track coordinates (y north); ground(x,y) gives the floor height.
  constructor(people,{homes,ground}){
   this.root=new THREE.Group();this.root.name='Equipe_box99';this.ground=ground;this.homes=homes;
-  this.actors=ROLES.map(([name,extra],i)=>{const person=people.person({...CREW,...extra});person.name=name;this.root.add(person);const h=homes[i];const a=new Actor(person,h.x,h.y,h.yaw);a.go(h.x,h.y,h.yaw,h.pose);return a;});
+  // At the door they idle with the free hand: the chief holds the lollipop, the fuel
+  // man his can and the three mechanics their gun or spanner in the right hand.
+  this.actors=ROLES.map(([name,extra],i)=>{const person=people.person({...CREW,...extra});person.name=name;this.root.add(person);const h=homes[i];const a=new Actor(person,h.x,h.y,h.yaw,{kind:'crew',hands:[true,i===1],posture:i!==0,seed:.07+i*.131});a.go(h.x,h.y,h.yaw,h.pose);return a;});
   const hand=i=>this.actors[i].person.userData.rig.limbs[1].hand;
   // Wheel guns, fuel dump can, spanner and the front jack.
   // Each mechanic has a wheel gun and a spanner and shows the one his job needs.
@@ -259,6 +502,8 @@ export class PitCrew{
    else{const home=this.homes[i];({x,y,yaw,pose}=home);if(i===0&&departing)pose='wave';actor.act=i===0&&departing?'wave':null;}
    // Round the parked car rather than through it.
    const way=parked&&Math.hypot(actor.x-car.x,actor.y-car.y)<12?detour(local(actor.x,actor.y),local(x,y),actor.corner):null;
+   // With the car in the box they wait at their places ready, no stretching.
+   actor.calm=active;
    if(way){actor.corner=way.corner;const [wx,wy]=toWorld(...way.point);actor.go(wx,wy,Math.atan2(wy-actor.y,wx-actor.x),'stand',true);actor.act=null;}
    else{actor.corner=-1;actor.go(x,y,yaw,pose);}
    actor.step(dt,this.ground);
@@ -280,18 +525,24 @@ export class PitCrew{
 }
 
 // The Tia: turns to a customer coming close, waves, serves what was bought and
-// wipes the counter in between.
+// wipes the counter now and then; in between she fans herself, checks her phone,
+// sips her own coffee, puts her hands on her hips...
 export class CafeHost{
- constructor(people,{x,y,yaw,ground}){this.actor=new Actor(people.person(OUTFITS.tia),x,y,yaw);this.actor.person.name='Tia_da_lanchonete';this.home={x,y,yaw};this.ground=ground;this.greeted=false;this.wave=0;this.idle=0;}
+ constructor(people,{x,y,yaw,ground}){
+  const person=people.person(OUTFITS.tia),hand=person.userData.rig.limbs[1].hand;
+  this.actor=new Actor(person,x,y,yaw,{kind:'counter',props:{cup:people.carry('cup',hand),phone:people.carry('phone',hand)},seed:.41});this.actor.person.name='Tia_da_lanchonete';this.home={x,y,yaw};this.ground=ground;this.greeted=false;this.wave=0;this.idle=0;
+ }
  get root(){return this.actor.person;}
  update(dt,{hero,walking,snack,near}){
   this.root.visible=near;if(!near)return;
   const a=this.actor,dx=hero?hero.x-a.x:0,dy=hero?-hero.z-a.y:0,dist=walking?Math.hypot(dx,dy):99;
   if(dist<3.4&&!this.greeted){this.greeted=true;this.wave=1.8;}if(dist>6)this.greeted=false;
-  this.wave=Math.max(0,this.wave-dt);this.idle=(this.idle+dt)%9;
+  this.wave=Math.max(0,this.wave-dt);this.idle=(this.idle+dt)%16;
   const look=dist<6?wrap(Math.atan2(dy,dx)-this.home.yaw):0,yaw=this.home.yaw+Math.max(-.8,Math.min(.8,look))*.6;
-  const pose=snack>2.4?'serve':this.wave>0?'wave':this.idle>5.5?'wipe':'stand';
+  const pose=snack>2.4?'serve':this.wave>0?'wave':this.idle>12.5?'wipe':'stand';
   a.look+=(Math.max(-.6,Math.min(.6,look*.5))-a.look)*Math.min(1,dt*4);
+  // A customer at the counter has her attention: no phone then.
+  a.calm=pose!=='stand'||dist<3.4;
   a.go(this.home.x,this.home.y,yaw,pose);a.act=pose==='wave'?'wave':pose==='wipe'?'wipe':null;a.step(dt,this.ground);
  }
 }

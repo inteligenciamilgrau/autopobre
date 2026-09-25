@@ -1,6 +1,9 @@
 import {circuitId} from './circuits.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
-export const CAMERA_MODES=Object.freeze(['chase','close','hood','cockpit','aerial','orbit']);
+// 'tv' films from the trackside towers and verge cameras (tv-camera.js).
+// Race length in laps, for the free race and the story alike, on every circuit.
+export const LAPS=Object.freeze({min:1,max:20,standard:3});
+export const CAMERA_MODES=Object.freeze(['chase','close','hood','cockpit','tv','aerial','orbit']);
 const liveries=['assinaturas_omp','seiva_danilo'];
 export function normalizePreferences(value){
  const source=value&&typeof value==='object'?value:{};
@@ -14,7 +17,11 @@ export function normalizePreferences(value){
   // Lakes with reflections and wind ripples cost an extra scene render per frame: opt-in.
   realisticWater:typeof source.realisticWater==='boolean'?source.realisticWater:false,
   // The cockpit view shows the V06 body round the controls; true keeps the old box interior.
-  classicInterior:typeof source.classicInterior==='boolean'?source.classicInterior:false
+  classicInterior:typeof source.classicInterior==='boolean'?source.classicInterior:false,
+  // Film look (cinematic.js): 'auto' is the full look on computers and the light one on phones.
+  cinematic:['auto','full','lite','off'].includes(source.cinematic)?source.cinematic:'auto',
+  // Laps of every race (Modo Corrida and Modo História): 3 unless the player picks more or fewer.
+  laps:Number.isInteger(source.laps)&&source.laps>=LAPS.min&&source.laps<=LAPS.max?source.laps:LAPS.standard
  };
 }
 function browserStorage(){try{return globalThis.localStorage;}catch{return null;}}

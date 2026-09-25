@@ -11,7 +11,8 @@ def build():
     # A previous build may be replaced, but unexpected files are never published or deleted.
     if dist.is_symlink() or (hasattr(dist, 'is_junction') and dist.is_junction()):
         raise ValueError('dist must be a regular directory')
-    retired_files = {'assets/audio/race2.mp3', 'assets/texturas/asfalto_base_v1.png'}
+    retired_files = {'assets/audio/race2.mp3', 'assets/texturas/asfalto_base_v1.png',
+                     'assets/texturas/asfalto_diff_v2.jpg', 'assets/texturas/asfalto_nor_gl_v2.jpg', 'assets/texturas/asfalto_rough_v2.jpg'}
     expected = set(PUBLIC_FILES) | set(OPTIONAL_AUDIO) | retired_files | {'assets/audio/tracks.json', '_headers', '.nojekyll'}
     if dist.exists():
         for p in dist.rglob('*'):

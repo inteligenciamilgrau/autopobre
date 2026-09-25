@@ -1,5 +1,5 @@
 """Visual QA of the asphalt PBR maps and live rival tyre marks."""
-from browser_config import browser_executable,browser_args,wait_js,open_menu,race_options,enter_track
+from browser_config import browser_executable,browser_args,wait_js,open_menu,enter_track
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -13,7 +13,7 @@ with sync_playwright() as p:
   page=context.new_page();page.set_default_timeout(90000)
   page.on('pageerror',lambda e:report['errors'].append(str(e)))
   page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
-  open_menu(page);race_options(page,immersive=False);enter_track(page)
+  open_menu(page);enter_track(page)
   page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();fixtureMode.stepFree=()=>{};interlagos.car.step=()=>{};}""")
   for mode,index in [('hood',85),('chase',700)]:
    page.evaluate("([mode,index])=>{interlagos.reposition(index);const s=document.querySelector('#camera');s.value=mode;s.dispatchEvent(new Event('change'))}",[mode,index])

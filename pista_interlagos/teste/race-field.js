@@ -22,6 +22,11 @@ export function styleForDriver(entry){
  // Interlagos) some seconds in hand over the fastest rivals.
  return {...base,maxSpeed:base.maxSpeed*(.96+.06*r),cornerGrip:base.cornerGrip*(.89+.1*r),braking:base.braking*(.93+.06*r),engineScale:1+(base.engineScale-1)*(.7+.5*r),passCooldown:base.passCooldown+(1-r)*.5};
 }
+// The Opala 99 driven in the recon lap with the rivals' racecraft: about 1:54 alone at Interlagos,
+// and from the back of the grid usually into the top six in three laps. The player's car has no
+// engine scale, so its time comes from the corners, the brakes and decisive passing.
+export const HERO_STYLE=Object.freeze({name:'Herói',maxSpeed:56,cornerGrip:10,braking:9.8,brakeResponse:.85,throttleResponse:.85,lookAhead:.54,passDistance:48,passSide:1,laneRate:2.4,passCooldown:1.2,lineUse:.98,apex:1,followTime:.2,aggression:1,defend:.6,consistency:.85});
+export const HERO_RATING=.92;
 // Four separating axes describe the full, rotated body, including side contacts.
 export function bodyContact(a,b){
  const aa=axes(a),bb=axes(b),ac=center(a),bc=center(b),delta=[bc[0]-ac[0],bc[1]-ac[1]];
@@ -137,7 +142,7 @@ const trackGap=(from,to,L)=>{let gap=to.surface.s-from.surface.s;if(gap>L/2)gap-
 export class RaceField {
  constructor(data,{onStep,onReset,seed}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
  reset(startS=0,{grid=false,seed=this.seed}={}){
-  this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;
+  this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;this.hero=null;
   // A fresh seed per start: the same grid never races the same way twice.
   this.raceSeed=seed??Math.floor(Math.random()*4294967296);const rand=this.random=random(this.raceSeed),pick=(lo,hi)=>lo+(hi-lo)*rand();
   this.gridLeadIn=grid?(this.data.meta.reconstructed_xy_m-startS)%this.data.meta.reconstructed_xy_m:0;
@@ -173,11 +178,37 @@ export class RaceField {
   }
   // One physics step for a rival, then its race distance and the flag.
   const drive=(r,input)=>{const c=r.car;r.tow=c.draft;c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&!r.finished&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}};
-  for(const r of this.rivals){
-   if(r.pit){drive(r,this.pitInput(r,bodies,dt));continue;}
+  for(const r of this.rivals)drive(r,r.pit?this.pitInput(r,bodies,dt):this.decide(r,bodies,driverOf,player,dt,totalLaps));
+  for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
+   if(Math.abs((bodies[i].z??bodies[i].surface.z)-(bodies[j].z??bodies[j].surface.z))>1.6)continue;
+   const hit=resolveContact(bodies[i],bodies[j]);if(!hit)continue;
+   if(hit.speed>1.6&&this.time-(this.cooldowns.get(`${i}:${j}`)??-10)>.35){this.cooldowns.set(`${i}:${j}`,this.time);this.collisions++;impacts.push({...hit,player:i===0});for(const k of [i,j])if(k>0)this.rivals[k-1].stun=Math.min(1.5,hit.speed*.06);}
+  }
+  for(const c of bodies){c.surface=c.sample(c.x,c.y);c.index=c.surface.i;}
+  if(this.onStep)this.rivals.forEach((r,i)=>this.onStep(r,i,commands[i],dt));
+  return impacts;
+ }
+ // The recon lap's driver for the player's car: the same racecraft as the rivals, a hero's style
+ // and dice of its own. Call once per physics step, before step().
+ heroInput(car,dt,style=HERO_STYLE){
+  if(this.hero?.car!==car||this.hero.style!==style){
+   const rand=random((this.raceSeed^0x99)>>>0),pick=(lo,hi)=>lo+(hi-lo)*rand(),rating=HERO_RATING;
+   this.hero={car,entry:{number:'99',rating},style,random:rand,progress:0,lastS:car.surface.s,finished:false,stun:0,
+    lineUse:clamp(style.lineUse*pick(.97,1.02),.8,1),apex:style.apex,
+    wander:{amp:pick(.08,.3)*(1.4-rating),rate:pick(.06,.14)*2*Math.PI,phase:pick(0,2*Math.PI)},
+    rhythm:{amp:.01+.035*(1-style.consistency)*(1.4-rating),rates:[pick(.04,.09),pick(.11,.23)].map(f=>f*2*Math.PI),phases:[pick(0,2*Math.PI),pick(0,2*Math.PI)]},
+    reaction:.15+pick(0,.4)*(1.3-rating),merge:pick(1.2,2.5),form:1,lap:-1,day:1,
+    lane:car.surface.d,blend:1,blendTarget:1,mode:'line',rival:null,passSide:0,modeTime:0,cooldown:1,defended:-1,rolled:-1,mistake:null,brakePedal:0,mistakes:0,passes:0,stuck:0,pit:null,yieldSide:0,yieldTime:0};
+  }
+  return this.decide(this.hero,[car,...this.rivals.map(r=>r.car)],new Map(this.rivals.map(r=>[r.car,r])),car,dt,0);
+ }
+ // One driver's steering and pedals for this step: speed plan, racecraft, mistakes and recovery.
+ // A driver may bring its own seeded dice (r.random) so it leaves the field's race untouched.
+ decide(r,bodies,driverOf,player,dt,totalLaps){
+  const L=this.data.meta.reconstructed_xy_m,a=this.data.samples,n=a.length,line=this.line,ds=line.ds,t=this.time,rand=r.random??this.random;
    const c=r.car,st=r.style,here=c.surface,i=c.index,d=here.d,speed=Math.hypot(c.vx,c.vy),along=c.vx*here.tx+c.vy*here.ty,fx=Math.cos(c.heading),fy=Math.sin(c.heading);
    const lap=Math.floor(Math.max(0,r.progress-this.gridLeadIn)/L);
-   if(lap!==r.lap){r.lap=lap;r.form=r.day*(1+(this.random()-.5)*.03*(1.4-st.consistency));}
+   if(lap!==r.lap){r.lap=lap;r.form=r.day*(1+(rand()-.5)*.03*(1.4-st.consistency));}
    r.cooldown=Math.max(0,r.cooldown-dt);r.modeTime+=dt;
    const wander=r.wander.amp*Math.sin(t*r.wander.rate+r.wander.phase),fit=(v,k)=>clamp(v,line.laneLo[k],line.laneHi[k]);
    // Planned offset at sample k: the personal racing line, blended toward a chosen lane.
@@ -202,9 +233,9 @@ export class RaceField {
    // brakes too late or carries too much speed, and runs wide.
    if(bend&&corner!==r.rolled&&toCorner<140&&toCorner>40&&speed>22&&!r.finished){
     r.rolled=corner;const chance=(.006+.03*(1-r.entry.rating))*(pressured?1.7:1)*(attack?1+.6*st.aggression:1);
-    if(this.random()<chance){
+    if(rand()<chance){
      // Either a hesitant corner (early braking, lost time) or an overcooked one that runs wide.
-     const over=this.random()<.55?-.35:.35+.45*this.random();r.mistake={corner,grip:st.cornerGrip+(12.2-st.cornerGrip)*over,brake:st.braking+(12.5-st.braking)*over};r.mistakes++;
+     const over=rand()<.55?-.35:.35+.45*rand();r.mistake={corner,grip:st.cornerGrip+(12.2-st.cornerGrip)*over,brake:st.braking+(12.5-st.braking)*over};r.mistakes++;
     }
    }
    // Speed plan: every bend ahead on the planned path caps the speed through the braking curve.
@@ -266,7 +297,7 @@ export class RaceField {
     }
     // Defence: with a car close behind before a braking zone, cover the inside, once per corner.
     if(r.mode==='line'&&behind&&bend&&toCorner>30&&toCorner<150&&corner!==r.defended&&behind.gap>-15&&behind.v>along-2){
-     r.defended=corner;if(this.random()<st.defend)Object.assign(r,{mode:'defend',lane:.6*(bend.dir>0?line.laneHi[i]:line.laneLo[i]),blendTarget:.35+.5*st.defend,modeTime:0});
+     r.defended=corner;if(rand()<st.defend)Object.assign(r,{mode:'defend',lane:.6*(bend.dir>0?line.laneHi[i]:line.laneLo[i]),blendTarget:.35+.5*st.defend,modeTime:0});
     }
     if(r.mode==='defend'&&(corner!==r.defended||toCorner<8||r.modeTime>6))Object.assign(r,{mode:'line',blendTarget:0});
    }
@@ -307,18 +338,9 @@ export class RaceField {
    // Wedged against a wall or a car while wanting to go: back out with the wheels turned so the
    // nose swings toward the line, then drive on.
    r.blocked=speed<1.5&&target>4&&t>r.reaction+1?(r.blocked??0)+dt:0;
-   if(r.blocked>2.5){r.recover=1.2+this.random();r.blocked=0;}
+   if(r.blocked>2.5){r.recover=1.2+rand();r.blocked=0;}
    if(r.recover>0){r.recover-=dt;Object.assign(input,{reverse:1,throttle:0,brake:0,left:alpha<0?1:0,right:alpha>0?1:0});}
-   drive(r,input);
-  }
-  for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
-   if(Math.abs((bodies[i].z??bodies[i].surface.z)-(bodies[j].z??bodies[j].surface.z))>1.6)continue;
-   const hit=resolveContact(bodies[i],bodies[j]);if(!hit)continue;
-   if(hit.speed>1.6&&this.time-(this.cooldowns.get(`${i}:${j}`)??-10)>.35){this.cooldowns.set(`${i}:${j}`,this.time);this.collisions++;impacts.push({...hit,player:i===0});for(const k of [i,j])if(k>0)this.rivals[k-1].stun=Math.min(1.5,hit.speed*.06);}
-  }
-  for(const c of bodies){c.surface=c.sample(c.x,c.y);c.index=c.surface.i;}
-  if(this.onStep)this.rivals.forEach((r,i)=>this.onStep(r,i,commands[i],dt));
-  return impacts;
+   return input;
  }
  // Pit lane after the flag: pure pursuit along the fast lane, over to the working lane for the
  // last 12 m before the slot, 56 km/h in the limit zone and a car length behind the car in front.

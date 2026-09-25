@@ -17,7 +17,7 @@ with sync_playwright() as p:
  own='interlagos.skidInfo().perWheel.reduce((n,w)=>n+w.segments,0)'
  def frame():page.evaluate('()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))')
  try:
-  open_menu(page);race_options(page,immersive=False);enter_track(page)
+  open_menu(page);enter_track(page)
   check('starts_without_marks',info()['segments']==0)
   page.keyboard.down('KeyS');frame();check('parked_brake_no_marks',info()['segments']==0);wait_race_start(page);page.keyboard.up('KeyS')
   # Known initial speed on the Reta Oposta, then actual keyboard controls drive the effect.

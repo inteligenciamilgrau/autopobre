@@ -1,4 +1,4 @@
-from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
+from browser_config import browser_executable, browser_args, wait_js, open_menu, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -16,7 +16,7 @@ with sync_playwright() as p:
  own='interlagos.skidInfo().perWheel.reduce((n,w)=>n+w.segments,0)'
  def setup(kmh):page.evaluate('(v)=>{interlagos.reposition(600);const c=interlagos.car;c.vx=Math.cos(c.heading)*v/3.6;c.vy=Math.sin(c.heading)*v/3.6;}',kmh)
  try:
-  open_menu(page);race_options(page,immersive=False);enter_track(page);wait_race_start(page)
+  open_menu(page);enter_track(page);wait_race_start(page)
   setup(20);page.keyboard.down('KeyA');wait_js(page,'interlagos.car.clock>1')
   report['slow_turn']=page.evaluate('()=>{const c=interlagos.car;return {rearSlip:Math.abs(-c.vx*Math.sin(c.heading)+c.vy*Math.cos(c.heading)-c.yaw*1.117),marks:'+own+',squeal:interlagos.audioInfo().skid,speed:interlagos.telemetry().speed};}')
   r=report['slow_turn'];check('low_speed_turn_grips',r['rearSlip']<.2 and r['speed']>10)

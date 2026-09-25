@@ -7,7 +7,8 @@ import {STAND,standLayout,standPoint,roofHeight} from './track-clearance.js';
 // concrete blocks built into the bank, benches split by aisles, and a roof on
 // back columns that shades every row. Layout from track-clearance.js, which also
 // keeps the ground below it. Game art sized to the LiDAR, not a survey.
-const SEAT_COLORS=[[.07,.2,.42],[.07,.2,.42],[.05,.3,.14],[.62,.5,.05],[.05,.3,.14],[.07,.2,.42]];
+// Sun-faded plastic seats: navy, bottle green and a worn yellow sector.
+const SEAT_COLORS=[[.05,.1,.22],[.05,.1,.22],[.05,.17,.1],[.4,.32,.09],[.05,.17,.1],[.05,.1,.22]];
 const SECTIONS=[-10.5,-3.5,3.5,10.5],SECTION_LENGTH=6.2;
 export function createGrandstands(data,textures,ground=null){
  const blocks=standLayout(data),root=new THREE.Group();root.name='Arquibancadas_Interlagos';

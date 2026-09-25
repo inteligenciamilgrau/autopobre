@@ -94,6 +94,8 @@ export class CarAudio {
  update(car,command,skid,paused,mode){
   if(this.paused!==paused)this.setPaused(paused);
   if(paused)return this.state;
+  // Listening to another car (a watched rival) is not a gear change.
+  if(car!==this.source){this.source=car;this.lastGear=null;}
   const speed=Math.hypot(car.vx,car.vy)*3.6;
   const wheelspin=car.rearSlipSpeed??0,physicsGear=Number.isInteger(car.gear)&&Number.isFinite(car.rpm);
   let gear=Number.isInteger(this.state.gear)?this.state.gear:1;

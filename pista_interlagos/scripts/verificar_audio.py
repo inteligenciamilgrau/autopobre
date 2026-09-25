@@ -1,4 +1,4 @@
-from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
+from browser_config import browser_executable, browser_args, wait_js, open_menu, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json
@@ -17,7 +17,6 @@ with sync_playwright() as p:
  try:
   open_menu(page)
   check('silent_before_user_gesture',info()['context']=='locked')
-  race_options(page,immersive=False)
   page.screenshot(path=str(ROOT/'renders/audio_opcoes.png'))
   enter_track(page);page.keyboard.down('KeyS');wait_js(page,"interlagos.audioInfo().context==='running'&&interlagos.audioInfo().rms>.001")
   check('engine_outputs_audio_after_start',info()['rpm']==950 and info()['rms']>.001)
@@ -34,7 +33,7 @@ with sync_playwright() as p:
   check('mute_silences_output',info()['muted']);page.keyboard.press('KeyM');wait_js(page,'interlagos.audioInfo().rms>.001')
   check('unmute_restores_output',not info()['muted'])
   page.keyboard.press('KeyP');wait_js(page,"interlagos.audioInfo().paused&&interlagos.audioInfo().worldGain<.00001&&interlagos.audioInfo().music.theme==='menu'");check('pause_silences_car_keeps_menu_music',info()['paused'] and info()['music']['theme']=='menu')
-  page.click('#settingsButton');page.click('#tab-audio')
+  page.keyboard.press('Escape');page.click('#settingsButton');page.click('#tab-audio')
   page.locator('#volume').fill('30');check('volume_control',abs(info()['volume']-.3)<1e-6)
   # Render the actual Web Audio graph offline: verifies nonzero, distinct and unclipped waveforms.
   report['offline']=page.evaluate('''async()=>{
@@ -51,7 +50,7 @@ with sync_playwright() as p:
   sounds=report['offline'];check('audio_graph_has_signal_without_clipping',all(.001<s['rms']<.5 and s['peak']<.99 for s in sounds.values()))
   check('engine_pitch_rises_with_rpm',sounds['engine']['crossings']>sounds['idle']['crossings']*2)
   check('skid_adds_distinct_high_frequency_sound',sounds['skid']['crossings']>sounds['engine']['crossings'])
-  open_menu(page);race_options(page,immersive=False)
+  open_menu(page)
   check('volume_persists',abs(info()['volume']-.3)<1e-6)
   check('no_browser_audio_errors',not report['errors'] and not info()['error']);report['passed']=True
  finally:

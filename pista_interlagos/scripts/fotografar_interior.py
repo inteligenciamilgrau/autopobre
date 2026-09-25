@@ -18,7 +18,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from browser_config import browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
+from browser_config import browser_executable, browser_args, wait_js, open_menu, enter_track, wait_race_start
 
 ROOT = Path(__file__).resolve().parents[1]
 OUT = ROOT / 'renders/interior'
@@ -99,7 +99,6 @@ def main():
 
         try:
             open_menu(page, url=f'http://127.0.0.1:{args.port}/pista_interlagos/teste/')
-            race_options(page, immersive=False)
             enter_track(page)
             page.click('#cockpitButton')
             page.keyboard.down('KeyS')  # freio: o carro fica parado na largada

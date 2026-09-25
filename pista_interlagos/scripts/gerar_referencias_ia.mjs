@@ -6,7 +6,8 @@ import {RaceField} from '../teste/race-field.js';
 const rows=[];
 for(const id of ['interlagos','curvelo']){
  const data=id==='curvelo'?createCurveloData():JSON.parse(readFileSync(new URL('../dados/pista.json',import.meta.url)));data.meta.id=id;
- for(const [mode,laps] of [['normal',3],['immersive',1]]){
+ // Both modes race the standard distance (LAPS.standard in player-preferences.js): 3 laps.
+ for(const [mode,laps] of [['normal',3],['immersive',3]]){
   const player=new TestCar(data);player.resetGrid();const field=new RaceField(data,{seed:1});field.reset(player.surface.s,{grid:true});player.x=10000;player.y=10000;player.surface=player.sample(player.x,player.y);
   for(let i=0;i<120*900&&field.rivals.some(r=>!r.finished);i++)field.step(player,1/120,laps);
   for(const r of field.rivals){if(!r.finished||!r.car.best)throw Error('Missing valid AI finish: '+id+' '+r.entry.number);rows.push({circuit:id,mode,number:r.entry.number,bestLap:Math.round(r.car.best*1000)/1000,bestRace:Math.round(r.finishTime*1000)/1000});}

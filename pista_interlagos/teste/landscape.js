@@ -158,7 +158,7 @@ vec3 lakeRingSlope(vec2 p,float time,float footprint){
  return vec3(o.xy,clamp(o.z,0.0,1.0));
 }`;
 
-function waterMesh(field,bodies,ripples){
+function waterMesh(field,bodies,ripples,shore){
  const positions=[],indices=[],{nx,x0,y0,sx,sy}=field;
  for(const body of bodies){
   const rows=new Map();
@@ -170,13 +170,17 @@ function waterMesh(field,bodies,ripples){
   }
  }
  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();
- const material=new THREE.MeshStandardMaterial({name:'Agua_lago',color:0x0d1a17,roughness:.06,metalness:0,envMapIntensity:1.2,polygonOffset:true,polygonOffsetFactor:-1});
+ const material=new THREE.MeshStandardMaterial({name:'Agua_lago',color:0x0d1a17,roughness:.06,metalness:0,envMapIntensity:1.2,polygonOffset:true,polygonOffsetFactor:-1,alphaTest:.5,alphaToCoverage:true});
  material.onBeforeCompile=shader=>{
-  shader.uniforms.landTime=shared.time;shader.uniforms.lakeRipples=ripples;
+  shader.uniforms.landTime=shared.time;shader.uniforms.lakeRipples=ripples;shader.uniforms.shoreMap={value:shore.texture};shader.uniforms.shoreBounds={value:shore.bounds};
   shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWaterWorld;').replace('#include <begin_vertex>','#include <begin_vertex>\nvWaterWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
   shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-uniform float landTime;varying vec3 vWaterWorld;
+uniform float landTime;uniform sampler2D shoreMap;uniform vec4 shoreBounds;varying vec3 vWaterWorld;
 float waterWave(vec2 p){return sin(p.x)*sin(p.y*.8+p.x*.3);}${lakeRings}`).replace('#include <color_fragment>',`#include <color_fragment>
+// The water ends on the smooth shoreline, not on the grid cells it was built from.
+float waterShore=texture2D(shoreMap,vec2((vWaterWorld.x-shoreBounds.x)/shoreBounds.z,(-vWaterWorld.z-shoreBounds.y)/shoreBounds.w)).r;
+diffuseColor.a=smoothstep(-.3,.3,waterShore);
+diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.1,.095,.07),(1.0-smoothstep(.0,2.8,waterShore))*.5);
 vec3 ring=lakeRingSlope(vWaterWorld.xz,landTime,max(length(dFdx(vWaterWorld.xz)),length(dFdy(vWaterWorld.xz))));
 diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.5,.55,.52),ring.z*.85);`).replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
 vec2 wp=vWaterWorld.xz*.35;float t=landTime*.9;
@@ -184,7 +188,7 @@ vec2 ripple=vec2(waterWave(wp+vec2(t,.3*t))-waterWave(wp*1.7-vec2(.6*t,t)),water
 normal=normalize(normal+(viewMatrix*vec4(ripple.x,0.0,ripple.y,0.0)).xyz);`);
  };
  material.defines={LAKE_RIPPLES:ripples.value.length};
- material.customProgramCacheKey=()=>'lake-simple-v2-'+ripples.value.length;
+ material.customProgramCacheKey=()=>'lake-simple-v3-'+ripples.value.length;
  const mesh=new THREE.Mesh(geometry,material);mesh.name='Lagos_e_rio';mesh.receiveShadow=true;return mesh;
 }
 
@@ -211,6 +215,13 @@ function shoreField(field,bodies){
  const nearest=Int16Array.from(owner),toDry=chamfer(true),toWet=chamfer(false,nearest);
  const sdf=new Float32Array(w*h),out=new Uint16Array(w*h),toHalf=THREE.DataUtils.toHalfFloat;
  for(let j=0;j<h;j++)for(let k=0;k<w;k++){const i=j*w+k,wet=water[(j+j0)*nx+k+k0]>.5;sdf[i]=clamp(wet?toDry[i]-half:half-toWet[i],-SHORE_RANGE,SHORE_RANGE);out[i]=toHalf(sdf[i]);}
+ // The drawn shoreline uses a blurred copy: the field follows the grid cells and its zero line
+ // would show their steps. Lake contact and the lake beds keep the exact field below.
+ let soft=Float32Array.from(sdf);
+ for(let pass=0;pass<3;pass++){const next=new Float32Array(w*h);
+  for(let j=0;j<h;j++)for(let k=0;k<w;k++){let sum=0,n=0;for(let dj=-1;dj<=1;dj++)for(let dk=-1;dk<=1;dk++){const kk=k+dk,jj=j+dj;if(kk<0||jj<0||kk>=w||jj>=h)continue;sum+=soft[jj*w+kk];n++;}next[j*w+k]=sum/n;}
+  soft=next;}
+ for(let i=0;i<w*h;i++)out[i]=toHalf(soft[i]);
  const texture=new THREE.DataTexture(out,w,h,THREE.RedFormat,THREE.HalfFloatType);
  texture.magFilter=texture.minFilter=THREE.LinearFilter;texture.wrapS=texture.wrapT=THREE.ClampToEdgeWrapping;texture.generateMipmaps=false;texture.needsUpdate=true;
  const bx=x0+k0*sx,by=y0+j0*sy;
@@ -364,8 +375,10 @@ function realisticLakes(field,bodies,shore,ripples,{mobile=false}={}){
  const eye=new THREE.Vector3(),look=new THREE.Vector3(),normal=new THREE.Vector3(0,1,0),plane=new THREE.Plane(),clip=new THREE.Vector4(),q=new THREE.Vector4(),point=new THREE.Vector3();
  const scale=mobile?.35:.5,state={frame:0,rendered:-1,reflections:0,level:null};
  function reflect(renderer,scene,camera){
-  // Rear-view mirror and other off-screen passes use the sky probe only.
-  if(renderer.getRenderTarget()){for(const lake of lakes)lake.weight.value=0;state.rendered=-1;return;}
+  // Rear-view mirror and other off-screen passes use the sky probe only; the film look's
+  // main view (cinematic.js marks it isMainView) counts as the screen.
+  const current=renderer.getRenderTarget();
+  if(current&&!current.isMainView){for(const lake of lakes)lake.weight.value=0;state.rendered=-1;return;}
   if(state.rendered===state.frame)return;state.rendered=state.frame;state.level=null;
   for(const lake of lakes)lake.weight.value=0;
   matrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);frustum.setFromProjectionMatrix(matrix);
@@ -394,7 +407,7 @@ function realisticLakes(field,bodies,shore,ripples,{mobile=false}={}){
   const shadows=renderer.shadowMap.autoUpdate;renderer.shadowMap.autoUpdate=false;root.visible=false;
   renderer.setRenderTarget(target);renderer.state.buffers.depth.setMask(true);if(!renderer.autoClear)renderer.clear();
   renderer.render(scene,virtual);
-  renderer.setRenderTarget(null);renderer.shadowMap.autoUpdate=shadows;root.visible=true;
+  renderer.setRenderTarget(current);renderer.shadowMap.autoUpdate=shadows;root.visible=true;
   state.reflections++;
   for(const lake of lakes)lake.weight.value=1-smooth(.3,1.2,Math.abs(lake.level-level));
  }
@@ -405,15 +418,17 @@ function realisticLakes(field,bodies,shore,ripples,{mobile=false}={}){
   dispose(){target.dispose();for(const lake of lakes){lake.mesh.geometry.dispose();lake.mesh.material.dispose();}}};
 }
 
+// Shoreline of the current circuit's lakes, for the terrain's wet banks (set by createLandscape).
+const terrainShore={shoreMap:{value:null},shoreBounds:{value:new THREE.Vector4(0,0,1,1)},shoreOn:{value:0}};
 export function terrainMaterial(textures,field,{ortho=null,mobile=false}={}){
  // Pushed back in depth: far away, roads and kerbs a few centimetres above it still win.
  const material=new THREE.MeshStandardMaterial({name:'Terreno_paisagem_v1',map:ortho,roughness:.95,metalness:0,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:2});
  material.onBeforeCompile=shader=>{
-  Object.assign(shader.uniforms,{grassMap:{value:textures.grass},wildMap:{value:textures.wild},concreteMap:{value:textures.concrete},grassNormalMap:{value:textures.grassNormal},
+  Object.assign(shader.uniforms,terrainShore,{grassMap:{value:textures.grass},wildMap:{value:textures.wild},concreteMap:{value:textures.concrete},grassNormalMap:{value:textures.grassNormal},
    trackField:{value:field.texture},fieldBounds:{value:new THREE.Vector4(field.x0,field.y0,field.width,field.height)}});
   shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vLandWorld;').replace('#include <begin_vertex>','#include <begin_vertex>\nvLandWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
   shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-uniform sampler2D grassMap,wildMap,concreteMap,grassNormalMap,trackField;uniform vec4 fieldBounds;varying vec3 vLandWorld;
+uniform sampler2D grassMap,wildMap,concreteMap,grassNormalMap,trackField,shoreMap;uniform vec4 fieldBounds,shoreBounds;uniform float shoreOn;varying vec3 vLandWorld;
 float landHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float landNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(landHash(i),landHash(i+vec2(1,0)),f.x),mix(landHash(i+vec2(0,1)),landHash(i+vec2(1,1)),f.x),f.y);}
 `).replace('#include <map_fragment>',`
@@ -439,11 +454,23 @@ treeM*=1.0-waterBed;
 vec3 grass=mix(texture2D(grassMap,w/3.3).rgb,texture2D(grassMap,w/12.7+.31).rgb,.45);
 vec3 wild=mix(texture2D(wildMap,w/4.2).rgb,texture2D(wildMap,w/15.3+.17).rgb,.5);
 vec3 concrete=mix(texture2D(concreteMap,w/3.9).rgb,texture2D(concreteMap,w/13.1+.5).rgb,.4);
-// Mown verge beside the asphalt, with stripes parallel to the track.
+// Mown verge beside the asphalt, with stripes parallel to the track. The cut lays the
+// blades one way per stripe: seen along the cut a stripe is light, against it dark, so
+// the pattern swaps as the view turns, like the verges of a real circuit.
 float groomed=1.0-smoothstep(14.0,30.0,edgeDist);
-float stripe=smoothstep(.2,.8,abs(fract(lateral/6.0)-.5)*2.0);
-vec3 lawn=grass*vec3(.62,.9,.42)*mix(.86,1.1,stripe)*mix(.9,1.06,macro);
-vec3 ground=wild*vec3(.88,1.0,.78)*mix(vec3(1.0),wildTint,.5)*mix(.82,1.1,macro);
+vec2 fieldUV=vec2((vLandWorld.x-fieldBounds.x)/fieldBounds.z,(-vLandWorld.z-fieldBounds.y)/fieldBounds.w);
+vec2 across=vec2(texture2D(trackField,fieldUV+vec2(3.0/fieldBounds.z,0.0)).g-lateral,texture2D(trackField,fieldUV+vec2(0.0,3.0/fieldBounds.w)).g-lateral);
+vec2 cut=normalize(vec2(-across.y,across.x)+1e-5);cut.y=-cut.y;
+float parity=step(.5,fract(lateral/6.0))*2.0-1.0,stripeEdge=smoothstep(.0,.06,abs(fract(lateral/6.0)-.5))*smoothstep(.0,.06,.5-abs(fract(lateral/6.0)-.5));
+vec2 mowView=normalize(vLandWorld.xz-cameraPosition.xz+1e-4);
+float sheen=dot(mowView,cut)*parity*stripeEdge;
+float dryPatch=smoothstep(.55,.85,landNoise(w*.021+7.3)*.7+landNoise(w*.09)*.3);
+vec3 lawn=grass*vec3(.5,.76,.36)*(1.0+.16*sheen)*mix(.9,1.05,macro);
+lawn=mix(lawn,lawn*vec3(1.22,1.02,.7),dryPatch*.55);
+// Worn, dusty strip where cars run wide off the kerbs.
+float worn=(1.0-smoothstep(.6,3.2,edgeDist))*smoothstep(.35,.75,landNoise(w*.28)+landNoise(w*1.3)*.25);
+lawn=mix(lawn,wild*vec3(.82,.68,.5),worn*.7);
+vec3 ground=wild*vec3(.84,.94,.72)*mix(vec3(1.0),wildTint,.5)*mix(.8,1.1,macro);
 ground=mix(ground,wild*vec3(.36,.42,.26),treeM);
 ground=mix(ground,lawn,groomed*(1.0-pavedM)*(1.0-paintM));
 vec3 asphalt=concrete*vec3(.33,.34,.35);
@@ -453,7 +480,11 @@ ground=mix(ground,mix(asphalt*1.15,vec3(.03,.1,.085),.5),paintM);
 ground=mix(ground,concrete*.55,roofM*(1.0-groomed));
 // The aerial photograph reads correctly from afar and hides texture repetition.
 ground=mix(ground,ortho*vec3(.9,.94,.86),smoothstep(220.0,1100.0,viewDist)*.75);
-ground=mix(ground,vec3(.035,.045,.03),waterBed);
+// Lake bed and a damp, darker bank along the smooth shoreline (the cell flags would show steps).
+float shoreD=shoreOn>.5?texture2D(shoreMap,vec2((vLandWorld.x-shoreBounds.x)/shoreBounds.z,(-vLandWorld.z-shoreBounds.y)/shoreBounds.w)).r:-24.0;
+float lakeBedM=shoreOn>.5?smoothstep(-.4,.5,shoreD):waterBed,bankM=smoothstep(-3.2,-.3,shoreD)*(1.0-lakeBedM)*shoreOn;
+ground=mix(ground,ground*vec3(.58,.55,.46),bankM*.75);
+ground=mix(ground,vec3(.035,.045,.03),lakeBedM);
 diffuseColor.rgb=ground;
 `).replace('#include <roughnessmap_fragment>',`float roughnessFactor=mix(.97,.8,max(pavedM,paintM));`)
   .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
@@ -464,7 +495,7 @@ diffuseColor.rgb=ground;
 #endif`);
  };
  if(mobile)material.defines={LAND_SIMPLE:''};
- material.customProgramCacheKey=()=>'terrain-landscape-v1-'+(ortho?'ortho':'cerrado')+(mobile?'-mobile':'');
+ material.customProgramCacheKey=()=>'terrain-landscape-v3-'+(ortho?'ortho':'cerrado')+(mobile?'-mobile':'');
  return material;
 }
 
@@ -472,19 +503,83 @@ diffuseColor.rgb=ground;
 function merge(parts){
  for(const p of parts){if(p.geometry.index)p.geometry=p.geometry.toNonIndexed();p.facet??=.35;}
  let count=0;for(const p of parts)count+=p.geometry.attributes.position.count;
- const position=new Float32Array(count*3),normal=new Float32Array(count*3),color=new Float32Array(count*3),mask=new Float32Array(count);let offset=0;
+ const position=new Float32Array(count*3),normal=new Float32Array(count*3),color=new Float32Array(count*3),mask=new Float32Array(count),uvs=new Float32Array(count*2);let offset=0;
  for(const p of parts){
-  const pos=p.geometry.attributes.position,nor=p.geometry.attributes.normal;
+  const pos=p.geometry.attributes.position,nor=p.geometry.attributes.normal,uv=p.leaf?p.geometry.attributes.uv:null;
   for(let i=0;i<pos.count;i++){
    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),o=offset+i;position.set([x,y,z],o*3);
    let n=[nor.getX(i),nor.getY(i),nor.getZ(i)];
    if(p.center){const d=[x-p.center[0],y-p.center[1],z-p.center[2]],l=Math.hypot(...d)||1;n=n.map((v,k)=>v*p.facet+d[k]/l*(1-p.facet));const l2=Math.hypot(...n);n=n.map(v=>v/l2);}
    normal.set(n,o*3);color.set(p.color(x,y,z),o*3);mask[o]=p.mask;
+   // Leaf cards use the cluster drawn in the atlas; everything else its solid corner.
+   if(uv)uvs.set([uv.getX(i)*LEAF_SPAN,uv.getY(i)*LEAF_SPAN],o*2);else uvs.set(SOLID_UV,o*2);
   }
   offset+=pos.count;
  }
- const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(position,3));g.setAttribute('normal',new THREE.BufferAttribute(normal,3));g.setAttribute('color',new THREE.BufferAttribute(color,3));g.setAttribute('partMask',new THREE.BufferAttribute(mask,1));
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(position,3));g.setAttribute('normal',new THREE.BufferAttribute(normal,3));g.setAttribute('color',new THREE.BufferAttribute(color,3));g.setAttribute('partMask',new THREE.BufferAttribute(mask,1));g.setAttribute('uv',new THREE.BufferAttribute(uvs,2));
  g.computeBoundingSphere();return g;
+}
+// Leaf atlas: one cluster of leaves over most of the square, and an opaque white corner
+// for trunks and branches. Grey-green so each tree's own colour still tints it.
+const LEAF_SPAN=.94,SOLID_UV=[.985,.985];
+let leafAtlas=null;
+function leafTexture(){
+ if(leafAtlas)return leafAtlas;
+ const size=256,data=new Uint8Array(size*size*4),rand=random(4242);
+ for(let y=size-8;y<size;y++)for(let x=size-8;x<size;x++)data.set([255,255,255,255],(y*size+x)*4);
+ const span=size*LEAF_SPAN,c=span/2;
+ // Inner leaves first and darker: the cluster shades itself toward its middle.
+ const leaves=[];
+ for(let i=0;i<190;i++){const r=Math.sqrt(rand())*c*.8,a=rand()*Math.PI*2;leaves.push({x:c+Math.cos(a)*r,y:c+Math.sin(a)*r,r});}
+ leaves.sort((u,v)=>u.r-v.r);
+ for(const leaf of leaves){
+  const angle=rand()*Math.PI*2,len=9+rand()*9,wid=3.2+rand()*2.6,ca=Math.cos(angle),sa=Math.sin(angle);
+  const shade=.52+.4*(leaf.r/c)+rand()*.14,warm=rand()<.5,tint=warm?[1.04,1,.86]:[.9,1,.98];
+  const x0=Math.max(0,Math.floor(leaf.x-len)),x1=Math.min(Math.floor(span)-1,Math.ceil(leaf.x+len)),y0=Math.max(0,Math.floor(leaf.y-len)),y1=Math.min(Math.floor(span)-1,Math.ceil(leaf.y+len));
+  for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
+   const dx=x+.5-leaf.x,dy=y+.5-leaf.y,u=(dx*ca+dy*sa)/len,v=(-dx*sa+dy*ca)/wid;
+   if(Math.abs(u)>1||Math.abs(v)>1-u*u)continue;
+   // Lit half and a faint midrib.
+   const k=Math.min(1,shade*(v>0?1.08:.9)*(Math.abs(v)<.12?.9:1)),i=(y*size+x)*4;
+   data[i]=Math.round(255*Math.min(1,k*tint[0]));data[i+1]=Math.round(255*Math.min(1,k*tint[1]));data[i+2]=Math.round(255*Math.min(1,k*tint[2]));data[i+3]=255;
+  }
+ }
+ const texture=new THREE.DataTexture(data,size,size,THREE.RGBAFormat);
+ texture.colorSpace=THREE.SRGBColorSpace;texture.generateMipmaps=true;texture.minFilter=THREE.LinearMipmapLinearFilter;texture.magFilter=THREE.LinearFilter;texture.anisotropy=4;texture.needsUpdate=true;
+ leafAtlas=texture;return texture;
+}
+// A crown of crossed leaf cards on an ellipsoid shell. Normals point out of the crown
+// (soft, rounded light like a real canopy); inner and lower cards are darker.
+function leafCrown(parts,rand,{center,radii,cards,size}){
+ for(let i=0;i<cards;i++){
+  const u=rand()*2-1,a=rand()*Math.PI*2,shell=.55+.45*Math.cbrt(rand()),h=Math.sqrt(1-u*u);
+  const c=[center[0]+Math.cos(a)*h*radii[0]*shell,center[1]+u*radii[1]*shell,center[2]+Math.sin(a)*h*radii[2]*shell];
+  const s=size*(.8+rand()*.45),depth=shell;
+  for(let k=0;k<2;k++){
+   const g=new THREE.PlaneGeometry(s,s);g.rotateX((rand()-.5)*1.6);g.rotateY(rand()*Math.PI);g.rotateZ((rand()-.5)*.8);g.translate(...c);
+   parts.push({geometry:g,mask:1,leaf:true,center,facet:.18,color:(x,y)=>{const low=smooth(center[1]-radii[1],center[1]+radii[1]*.8,y),v=(.5+.5*low)*(.62+.38*depth);return [v,v,v];}});
+  }
+ }
+}
+function branch(parts,from,to,r0,r1,bark){
+ const d=new THREE.Vector3(...to).sub(new THREE.Vector3(...from)),len=d.length();
+ const g=new THREE.CylinderGeometry(r1,r0,len,5,1,true).translate(0,len/2,0);
+ g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize()));g.translate(...from);
+ parts.push({geometry:g,mask:0,color:()=>bark});
+}
+// Near trees: trunk, a few limbs and a leaf-card crown (1 m tall unit; instances scale them).
+function foliageTreeGeometry(kind,seed,detail=1){
+ const rand=random(seed),parts=[],bark=[.13,.11,.09],far=detail===0;
+ if(kind==='tall'){
+  branch(parts,[0,0,0],[0,.8,0],.028,.012,bark);
+  if(!far)for(let i=0;i<3;i++){const a=rand()*Math.PI*2,y=.5+i*.1;branch(parts,[0,y,0],[Math.cos(a)*.11,y+.12,Math.sin(a)*.11],.009,.004,bark);}
+  leafCrown(parts,rand,{center:[0,.7,0],radii:[.2,.3,.2],cards:far?9:30,size:far?.3:.2});
+ }else{
+  branch(parts,[0,0,0],[.02,.42,0],.05,.03,bark);
+  if(!far)for(let i=0;i<4;i++){const a=i/4*Math.PI*2+rand()*.8;branch(parts,[.02,.36+rand()*.06,0],[Math.cos(a)*.22,.6+rand()*.12,Math.sin(a)*.22],.022,.01,bark);}
+  leafCrown(parts,rand,{center:[0,.64,0],radii:[.44,.3,.44],cards:far?12:40,size:far?.42:.3});
+ }
+ return merge(parts);
 }
 // Displacement depends only on the original position, so shared corners stay welded.
 function lumpy(geometry,seed,amount){const p=geometry.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),h=Math.sin(x*12.99+y*78.23+z*37.71+seed)*43758.5453,k=1+(h-Math.floor(h)-.5)*amount;p.setXYZ(i,x*k,y*k,z*k);}return geometry;}
@@ -509,7 +604,16 @@ function treeGeometry(kind,seed,detail=1){
  }
  return merge(parts);
 }
+// Unit houses. partMask: 0 plastered wall, 1 roof (instance colour), 2 fixed colour, 3 wall of a
+// laje house (bare brick, block or plaster, picked in the shader).
 function houseGeometry(flat){
+ if(flat==='laje'){
+  const parts=[{geometry:new THREE.BoxGeometry(1,1.35,1).translate(0,.325,0),mask:3,color:()=>[1,1,1]},
+   {geometry:new THREE.BoxGeometry(1.04,.05,1.04).translate(0,1.02,0),mask:1,color:()=>[1,1,1]},
+   {geometry:new THREE.CylinderGeometry(.07,.07,.13,10).translate(.22,1.11,-.2),mask:2,color:()=>[.08,.2,.42]},
+   {geometry:new THREE.BoxGeometry(1.02,.08,.03).translate(0,1.07,.5),mask:3,color:()=>[1,1,1]}];
+  return merge(parts);
+ }
  const walls=new THREE.BoxGeometry(1,1.35,1).translate(0,.325,0),parts=[{geometry:walls,mask:0,color:()=>[1,1,1]}];
  if(flat)parts.push({geometry:new THREE.BoxGeometry(1.02,.06,1.02).translate(0,1.03,0),mask:1,color:()=>[1,1,1]});
  else{
@@ -521,9 +625,24 @@ function houseGeometry(flat){
  }
  return merge(parts);
 }
-function sceneryMaterial(kind){
+function sceneryMaterial(kind,{foliage=false}={}){
  const material=new THREE.MeshStandardMaterial({name:{tree:'Arvores_instanciadas',house:'Casas_instanciadas',crowd:'Torcida_instanciada'}[kind],vertexColors:true,roughness:kind==='tree'?.88:.82,metalness:0});
+ if(foliage)Object.assign(material,{map:leafTexture(),alphaTest:.45,alphaToCoverage:true,side:THREE.DoubleSide});
  material.onBeforeCompile=shader=>{
+  if(foliage){
+   // Keep the leaves' coverage in the smaller mipmaps (they would thin out with distance),
+   // and give both faces of a card the crown's outward normal.
+   shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
+vec4 leafTexel=texture2D(map,vMapUv);
+float leafLod=max(0.0,log2(max(length(dFdx(vMapUv*256.0)),length(dFdy(vMapUv*256.0)))));
+leafTexel.a=min(1.0,leafTexel.a*(1.0+leafLod*.3));
+diffuseColor*=leafTexel;`).replace('normal *= faceDirection;','').replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
+#if NUM_DIR_LIGHTS > 0
+ // Sunlight through the leaves when the sun is behind the crown.
+ float leafBack=pow(max(dot(normalize(-vViewPosition),directionalLights[0].direction),0.0),5.0);
+ reflectedLight.directDiffuse+=diffuseColor.rgb*directionalLights[0].color*leafBack*.4*step(vMapUv.x,.95);
+#endif`);
+  }
   shader.uniforms.landTime=shared.time;
   shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
 attribute float partMask;uniform float landTime;varying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;`).replace('#include <color_vertex>',`
@@ -539,7 +658,16 @@ vColor=vec4(1.0);
  #ifdef HOUSES
   float seed=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453);
   vec3 wall=seed<.3?vec3(.62,.6,.55):seed<.5?vec3(.66,.55,.36):seed<.65?vec3(.55,.36,.27):seed<.8?vec3(.38,.46,.5):vec3(.48,.47,.44);
-  vColor.rgb*=mix(wall,instanceColor.rgb,partMask);
+  // Laje houses: mostly bare orange brick, some grey block, some painted.
+  vec3 brick=seed<.55?vec3(.4,.19,.1)*(.85+.3*fract(seed*17.0)):seed<.75?vec3(.36,.36,.34):wall;
+  vColor.rgb*=partMask>2.5?brick:partMask>1.5?vec3(1.0):mix(wall,instanceColor.rgb,partMask);
+ #elif defined(CROWD)
+  // partMask: 0 fixed colour, 1 shirt (instance colour), 2 skin, 3 trousers, 4 hair or cap.
+  float who=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453),who2=fract(who*91.7),who3=fract(who*37.3);
+  vec3 skinTone=mix(vec3(.6,.4,.28),vec3(.16,.09,.055),who2*who2*.85+who2*.15);
+  vec3 trousers=who3<.45?vec3(.05,.08,.15):who3<.7?vec3(.03,.03,.035):who3<.85?vec3(.28,.24,.16):vec3(.36,.36,.38);
+  vec3 hairOrCap=who<.22?instanceColor.rgb*.8:who<.3?vec3(.7,.7,.68):who<.36?vec3(.03,.03,.035):who3<.2?vec3(.25,.18,.1):vec3(.03,.025,.02);
+  vColor.rgb*=partMask<.5?vec3(1.0):partMask<1.5?instanceColor.rgb:partMask<2.5?skinTone:partMask<3.5?trousers:hairOrCap;
  #else
   vColor.rgb*=mix(vec3(1.0),instanceColor.rgb,partMask);
  #endif
@@ -555,15 +683,27 @@ vColor=vec4(1.0);
 #endif`);
   if(kind!=='house')return;
   shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;').replace('#include <color_fragment>',`#include <color_fragment>
-if(vPart<.5&&abs(vPartNormal.y)<.5){
+float houseWindow=0.0;
+if((vPart<.5||vPart>2.5)&&abs(vPartNormal.y)<.5){
  float along=abs(vPartNormal.x)>.5?vPartLocal.z*vPartScale.z:vPartLocal.x*vPartScale.x,up=vPartLocal.y*vPartScale.y;
  float cellA=fract(along/3.1),cellU=fract(up/2.9);
- float window=step(.3,cellA)*step(cellA,.7)*step(.4,cellU)*step(cellU,.8)*step(.5,up)*step(up,vPartScale.y-.2);
- diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.045,.055,.065),window*.9);
-}`);
+ houseWindow=step(.3,cellA)*step(cellA,.7)*step(.4,cellU)*step(cellU,.8)*step(.5,up)*step(up,vPartScale.y-.2);
+ // Frame round the glass.
+ float frame=step(.27,cellA)*step(cellA,.73)*step(.37,cellU)*step(cellU,.83)*(1.0-houseWindow);
+ // Rain streaks under the sills, grime rising from the pavement, a band at each floor slab.
+ float streak=(1.0-houseWindow)*step(.34,cellA)*step(cellA,.66)*(1.0-smoothstep(0.0,.4,cellU))*.12;
+ float grime=1.0-.28*(1.0-smoothstep(0.0,1.4,up));
+ float slab=vPartScale.y>7.0?(1.0-smoothstep(0.0,.02,abs(cellU-.06)))*.18:0.0;
+ float course=vPart>2.5?(1.0-smoothstep(0.0,.12,fract(up/.2)))*.15:0.0;
+ diffuseColor.rgb*=grime*(1.0-streak-course)+slab;
+ diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.78,.77,.74),frame*.8);
+ diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.02,.025,.03),houseWindow*.92);
+}`).replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
+// Glass is smooth: it mirrors the sky and the neighbours instead of looking painted on.
+roughnessFactor=mix(roughnessFactor,.06,houseWindow);`);
  };
  material.defines={tree:{TREES:''},house:{HOUSES:''},crowd:{CROWD:''}}[kind];
- material.customProgramCacheKey=()=>'scenery-'+kind+'-v1';
+ material.customProgramCacheKey=()=>'scenery-'+kind+(foliage?'-foliage':'')+'-v5';
  return material;
 }
 function chunked(name,geometry,material,items,compose,{size=380,shadows=true}={}){
@@ -593,9 +733,9 @@ function treeColor(rand,dry=0){
 export function createLandscape({data,field,ortho=null,mobile=false,style='urban'}){
  const root=new THREE.Group();root.name='Paisagem';
  const rand=random(data.samples.length*7919+17),stats={trees:0,houses:0,water:0};
- const trees=[],tall=[],houses=[],flats=[];
+ const trees=[],tall=[],houses=[],flats=[],lajes=[];
  const {x0,y0,width,height}=field;
- let bodies=[],simpleWater=null,lakes=null,shore=null;
+ let bodies=[],simpleWater=null,lakes=null,shore=null;terrainShore.shoreOn.value=0;terrainShore.shoreMap.value=null;
  const ripples=Array.from({length:mobile?12:24},()=>new THREE.Vector4(0,0,-100,0)),rippleUniform={value:ripples};let rippleCursor=0;
  // Trunks and walls stay out of the water: clear of the shore, and above the level beside a lake.
  const dry=(x,y,clearance)=>{
@@ -606,7 +746,8 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
   bodies=findWater(field,ortho,data);field.upload();stats.water=bodies.length;
   if(bodies.length){
    shore=shoreField(field,bodies);stats.lakeBed=digLakeBeds(data.terrain,data.terrain.z,shore);
-   simpleWater=waterMesh(field,bodies,rippleUniform);root.add(simpleWater);
+   terrainShore.shoreMap.value=shore.texture;terrainShore.shoreBounds.value.copy(shore.bounds);terrainShore.shoreOn.value=1;
+   simpleWater=waterMesh(field,bodies,rippleUniform,shore);root.add(simpleWater);
   }
   const spacing=mobile?8.5:6;
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
@@ -630,7 +771,7 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
    const turn=.5*Math.atan2(2*xy,xx-yy),tallBuilding=rand()<.04,floors=tallBuilding?3+Math.floor(rand()*5):rand()<.62?1:2;
    const w=6+rand()*3.5,d=8+rand()*5,corner=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([a,b])=>terrainHeight(data,px+a*w*.5,py+b*d*.5));
    const item={x:px,y:py,z:Math.min(...corner)-.15,w,d,h:floors*3+.4+rand()*.6,turn:-turn,color:tallBuilding?[.42,.43,.44]:[.42+rand()*.16,.11+rand()*.06,.04+rand()*.03]};
-   (tallBuilding?flats:houses).push(item);
+   if(!tallBuilding&&rand()<.4){item.color=[.47,.46,.44];lajes.push(item);}else (tallBuilding?flats:houses).push(item);
   }
  }else if(style==='cerrado'){
   // Sparse, low cerrado trees away from the oval and the service area.
@@ -641,11 +782,11 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
    const h=3.2+rand()*4.2;trees.push({x:px,y:py,z:terrainHeight(data,px,py)-.2,height:h,width:h*(1+rand()*.4),turn:rand()*Math.PI*2,color:treeColor(rand,.8)});
   }
  }
- const treeMaterial=sceneryMaterial('tree');
+ const treeMaterial=sceneryMaterial('tree',{foliage:!mobile}),build=mobile?treeGeometry:foliageTreeGeometry;
  // Trees are chunked in 200 m blocks; each block picks near or distant crowns every frame.
  const lodBlocks=[];
  for(const [list,kind,seed,name] of [[trees,'round',11,'Arvores'],[tall,'tall',23,'Arvores_altas']]){
-  if(!list.length)continue;const near=treeGeometry(kind,seed,1),far=treeGeometry(kind,seed,0);
+  if(!list.length)continue;const near=build(kind,seed,1),far=build(kind,seed,0);
   const group=chunked(name,near,treeMaterial,list,composeTree,{size:200});root.add(group);
   for(const mesh of group.children){mesh.geometry=far;lodBlocks.push({mesh,near,far,center:mesh.boundingSphere.center.clone(),radius:mesh.boundingSphere.radius});}
  }
@@ -653,12 +794,23 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
  const houseMaterial=sceneryMaterial('house'),composeHouse=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);};
  if(houses.length)root.add(chunked('Casas',houseGeometry(false),houseMaterial,houses,composeHouse,{size:450}));
  if(flats.length)root.add(chunked('Predios',houseGeometry(true),houseMaterial,flats,composeHouse,{size:900}));
+ if(lajes.length)root.add(chunked('Casas_laje',houseGeometry('laje'),houseMaterial,lajes,composeHouse,{size:450}));
  const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado'});root.add(horizon.root);
- Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
+ Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
  let realistic=false;
  return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}lakes?.dispose();shore?.texture.dispose();},update(dt,camera){
   shared.time.value+=dt;lakes?.update();if(!camera)return;
   for(const block of lodBlocks){const geometry=camera.position.distanceTo(block.center)-block.radius<lodDistance?block.near:block.far;if(block.mesh.geometry!==geometry)block.mesh.geometry=geometry;}
+ },
+ // Trees give way to later trackside structures (marshal posts, TV towers): points {x,y,r} in track metres.
+ clearAround(points){
+  let removed=0;const matrix=new THREE.Matrix4(),position=new THREE.Vector3(),zero=new THREE.Matrix4().makeScale(0,0,0);
+  for(const {mesh} of lodBlocks){let changed=false;
+   for(let i=0;i<mesh.count;i++){mesh.getMatrixAt(i,matrix);position.setFromMatrixPosition(matrix);if(matrix.elements[0]===0&&matrix.elements[5]===0)continue;
+    const width=Math.hypot(matrix.elements[0],matrix.elements[2]);
+    if(points.some(q=>Math.hypot(position.x-q.x,-position.z-q.y)<q.r+width*.45)){mesh.setMatrixAt(i,zero);changed=true;removed++;}}
+   if(changed){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();}}
+  stats.cleared=(stats.cleared??0)+removed;return removed;
  },
  // The physics ground was dug when the lakes were found; the visible terrain grid gets the same basin.
  digLakeBeds:heights=>shore?digLakeBeds(data.terrain,heights,shore):0,
@@ -748,14 +900,29 @@ export function createCrowd(steps,{mobile=false}={}){
   const turn=Math.atan2(-uz,ux);
   for(let t=-row.l/2+.4;t<row.l/2-.3;t+=mobile?.9:.62){
    if(rand()<.22)continue;
-   const pick=rand(),shirt=pick<.3?[.62,.52,.04]:pick<.5?[.04,.3,.08]:pick<.62?[.5,.5,.48]:pick<.72?[.05,.1,.35]:pick<.8?[.5,.04,.03]:[.12+rand()*.4,.12+rand()*.3,.12+rand()*.3];
+   // Race-day shirts: mostly white, black, grey and navy, many Brazil yellow and green, a few team colours.
+   const pick=rand(),shirt=pick<.2?[.72,.72,.7]:pick<.33?[.035,.035,.04]:pick<.41?[.3,.3,.3]:pick<.51?[.04,.07,.2]:pick<.65?[.66,.52,.05]:pick<.73?[.03,.22,.07]:pick<.8?[.45,.04,.03]:pick<.85?[.2,.38,.6]:pick<.88?[.62,.24,.04]:[.08+rand()*.3,.08+rand()*.25,.08+rand()*.25];
    items.push({x:cx+ux*(t+(rand()-.5)*.12),y:-(cz+uz*(t+(rand()-.5)*.12)),z:y,turn,color:shirt,scale:.9+rand()*.2});
   }
  }
- const skin=[[.5,.32,.2],[.3,.17,.1],[.62,.42,.3],[.2,.11,.07]],parts=[];
- parts.push({geometry:new THREE.BoxGeometry(.4,.55,.26).translate(0,.52,0),mask:1,color:()=>[1,1,1]});
- parts.push({geometry:new THREE.BoxGeometry(.3,.26,.34).translate(0,.2,.1),mask:0,color:()=>[.08,.08,.1]});
- parts.push({geometry:new THREE.IcosahedronGeometry(.12,0).translate(0,.93,0),mask:0,color:()=>skin[0]});
+ const parts=[],white=()=>[1,1,1],limb=(r,from,to,mask,sides)=>{
+  const a=new THREE.Vector3(...from),b=new THREE.Vector3(...to),d=b.clone().sub(a),len=d.length();
+  const g=new THREE.CylinderGeometry(r,r*.9,len,sides,1,true);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize()));g.translate(...a.add(b).multiplyScalar(.5).toArray());
+  parts.push({geometry:g,mask,color:white});
+ };
+ // A seated fan facing +z: torso, arms resting on the thighs, legs down to the step below.
+ const sides=mobile?4:6;
+ parts.push({geometry:new THREE.CylinderGeometry(.165,.14,.5,sides+2).scale(1,1,.62).translate(0,.53,0),mask:1,color:white});
+ for(const x of [-1,1]){
+  // T-shirt sleeves, bare forearms.
+  limb(.055,[x*.2,.76,0],[x*.21,.47,.1],1,sides);limb(.04,[x*.21,.47,.1],[x*.12,.35,.34],2,sides);
+  limb(.075,[x*.09,.3,.02],[x*.1,.31,.36],3,sides);limb(.06,[x*.1,.3,.38],[x*.1,-.08,.42],3,sides);
+  parts.push({geometry:new THREE.BoxGeometry(.1,.08,.24).translate(x*.1,-.13,.47),mask:0,color:()=>[.05,.05,.055]});
+ }
+ parts.push({geometry:new THREE.CylinderGeometry(.05,.055,.1,6,1,true).translate(0,.81,0),mask:2,color:white});
+ parts.push({geometry:new THREE.SphereGeometry(.105,mobile?6:8,mobile?4:6).scale(.92,1.12,1).translate(0,.95,.01),mask:2,color:white});
+ parts.push({geometry:new THREE.SphereGeometry(.112,mobile?6:8,3,0,Math.PI*2,0,Math.PI*.42).scale(.94,1.1,1.02).translate(0,.97,-.01),mask:4,color:white});
  const geometry=merge(parts),material=sceneryMaterial('crowd');
  const compose=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.scale,item.scale,item.scale));color.setRGB(...item.color);};
  const root=chunked('Torcida',geometry,material,items,compose,{size:2000,shadows:false});
@@ -781,7 +948,11 @@ export function structureMaterial(material,textures,cache=new Map()){
 vec3 blendN=pow(abs(normalize(vStructNormal)),vec3(4.0));blendN/=blendN.x+blendN.y+blendN.z;
 vec3 wall=texture2D(concreteMap,vStructWorld.zy/3.2).rgb*blendN.x+texture2D(concreteMap,vStructWorld.xz/3.2).rgb*blendN.y+texture2D(concreteMap,vStructWorld.xy/3.2).rgb*blendN.z;
 #if STRUCTURE_KIND==1
- diffuseColor.rgb*=wall*1.9;
+ // Cast concrete, not gravel: soften the aggregate toward its average and add broad weathering.
+ vec3 wallAvg=texture2D(concreteMap,vStructWorld.xz/3.2,9.0).rgb;
+ wall=wallAvg+(wall-wallAvg)*.42;
+ float weather=texture2D(concreteMap,vStructWorld.xz/41.0+vec2(vStructWorld.y*.021,0.0)).g/max(wallAvg.g,.01);
+ diffuseColor.rgb*=wall*1.9*mix(.86,1.08,clamp(weather-.5,0.0,1.0))*(1.0-.12*blendN.y);
 #elif STRUCTURE_KIND==2
  // Roller doors: horizontal ribs.
  float rib=smoothstep(.35,.5,abs(fract(vStructWorld.y*5.0)-.5));
@@ -791,7 +962,7 @@ vec3 wall=texture2D(concreteMap,vStructWorld.zy/3.2).rgb*blendN.x+texture2D(conc
 #endif`);
   };
   upgraded.defines={STRUCTURE_KIND:kind==='concrete'?1:kind==='metal'?2:3};
-  upgraded.customProgramCacheKey=()=>'structure-'+kind+'-v1';
+  upgraded.customProgramCacheKey=()=>'structure-'+kind+'-v2';
  }
  cache.set(key,upgraded);return upgraded;
 }

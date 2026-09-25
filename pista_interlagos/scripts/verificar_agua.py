@@ -3,7 +3,7 @@ planar reflections at the nearest lake, rear-view mirror pass, toggling off, the
 the lake (bed under the water, splash, rings, spray, drag), and Curvelo (no lakes).
 
 The camera is placed on the shore by overriding it just before each screen render."""
-from browser_config import GAME_URL, browser_executable, browser_args, wait_js, open_menu, race_options, enter_track, wait_race_start
+from browser_config import GAME_URL, browser_executable, browser_args, wait_js, open_menu, enter_track, wait_race_start
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 import json, os
@@ -47,12 +47,11 @@ with sync_playwright() as p:
         assert json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))['realisticWater'] is True
         open_menu(page, URL)
         assert page.evaluate("document.querySelector('#realisticWater').checked"), 'the choice must survive a reload'
-        race_options(page, immersive=False)
         enter_track(page)
         info = page.evaluate('interlagos.waterInfo()')
         assert info['realistic'] and not info['simpleVisible'] and info['bodies'] >= 2, info
         page.evaluate("""async()=>{const THREE=await import('three');
-         THREE.Scene.prototype.onBeforeRender=function(r,s,c,target){const v=window.waterView;if(target||!v)return;c.position.set(...v.eye);c.lookAt(...v.at);c.updateMatrixWorld();};
+         THREE.Scene.prototype.onBeforeRender=function(r,s,c,target){const v=window.waterView;if((target&&!target.isMainView)||!v||c.isOrthographicCamera)return;c.position.set(...v.eye);c.lookAt(...v.at);c.updateMatrixWorld();};
          interlagos.car.step=()=>{};}""")
         lakes = sorted(info['lakes'], key=lambda lake: -lake['area'])
         for k, lake in enumerate(lakes[:2]):
@@ -96,7 +95,7 @@ with sync_playwright() as p:
         open_menu(page, URL)
         enter_track(page)
         wait_race_start(page)
-        page.evaluate("""async()=>{const THREE=await import('three');THREE.Scene.prototype.onBeforeRender=function(r,s,c,t){if(!t)window.waterScene=s;};}""")
+        page.evaluate("""async()=>{const THREE=await import('three');THREE.Scene.prototype.onBeforeRender=function(r,s,c,t){if((!t||t.isMainView)&&!c.isOrthographicCamera)window.waterScene=s;};}""")
         wait_js(page, 'window.waterScene')
         lake = max(page.evaluate('interlagos.waterInfo().lakes'), key=lambda l: l['area'])
         bed = page.evaluate("""level=>{let mesh=null;waterScene.traverse(o=>{if(o.isMesh&&o.material?.userData?.terrain)mesh=o;});

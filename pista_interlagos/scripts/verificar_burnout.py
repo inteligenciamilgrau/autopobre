@@ -12,7 +12,7 @@ with sync_playwright() as p:
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  page.on('console',lambda m:report['errors'].append(m.text) if m.type=='error' else None)
  try:
-  open_menu(page);race_options(page,immersive=False);enter_track(page);wait_race_start(page)
+  open_menu(page);enter_track(page);wait_race_start(page)
   page.evaluate('interlagos.reposition(600)');page.keyboard.press('Space')
   check('handbrake_without_throttle_no_smoke',page.evaluate('interlagos.smokeInfo().active===0'))
   start=page.evaluate('({x:interlagos.car.x,y:interlagos.car.y})')

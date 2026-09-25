@@ -15,7 +15,7 @@ with sync_playwright() as p:
  def move(x,y):page.evaluate('([x,y])=>document.dispatchEvent(new MouseEvent("mousemove",{movementX:x,movementY:y}))',[x,y]);frame()
  def structure():return page.evaluate('interlagos.structureInfo()')
  try:
-  open_menu(page);race_options(page,immersive=False);enter_track(page)
+  open_menu(page);enter_track(page)
   check('v04_structural_panels_loaded',structure()['parts']==1 and structure()['revision']=='v04_fechamentos')
   # The free race starts behind the car; switch to the interior on track.
   page.click('#cockpitButton');page.keyboard.down('KeyS');frame()

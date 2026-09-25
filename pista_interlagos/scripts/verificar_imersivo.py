@@ -16,8 +16,8 @@ with sync_playwright() as p:
  def shot(name):frame();page.screenshot(path=str(ROOT/'renders'/('imersivo_'+name+'.png')))
  try:
   open_menu(page)
-  check('immersive_selected_without_autostart',not page.evaluate('interlagos.ready') and page.is_checked('#immersiveMode'))
-  enter_track(page)
+  check('story_button_without_autostart',not page.evaluate('interlagos.ready') and page.is_visible('#storyStart'))
+  enter_track(page,story=True)
   # Capture the running instance for controlled incident fixtures, without shipping a debug mutation API.
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')
   check('crowd_phase',info()['phase']=='crowd');shot('torcida')
@@ -27,8 +27,9 @@ with sync_playwright() as p:
   page.click(f'[data-action="joke:{correct}"]');check('laugh_pays_donation',info()['cash']>0);shot('piada')
   # Collect remaining donations with the same state actions to shorten navigation in regression runs.
   page.evaluate('''async()=>{const {FANS,JOKES}=await import('./immersive-state.js');const s=fixtureMode.state;for(let i=0;i<FANS.length;i++){s.talk(i);s.joke(JOKES.findIndex(j=>j.topic===FANS[i].taste));}fixtureMode.action('close');}''')
-  page.click('[data-action="prepare"]');page.wait_for_selector('#immLitres');shot('preparacao');page.click('[data-action="buy"]');check('fuel_bought',info()['fuel']==6)
-  page.evaluate('''()=>{const m=fixtureMode;m.action('ignite');for(let i=0;i<400&&m.state.phase==='starting';i++)m.step({throttle:m.state.pressure<.45?1:0,brake:0,left:0,right:0,handbrake:0,reverse:0},1/120);}''');check('engine_started',info()['phase']=='grid');shot('largada')
+  # The walk up to the team stand is covered by verificar_inscricao.py; here the team's panel opens directly.
+  page.evaluate("fixtureMode.action('desk')");page.wait_for_selector('#immLitres');shot('preparacao');page.click('[data-action="buy"]');check('fuel_bought',info()['fuel']==6)
+  page.evaluate('''()=>{const m=fixtureMode;m.action('ign');m.state.starter=true;for(let i=0;i<400&&m.state.phase==='starting';i++)m.step({throttle:m.state.pressure<.45?1:0,brake:0,left:0,right:0,handbrake:0,reverse:0},1/120);}''');check('engine_started',info()['phase']=='grid');shot('largada')
   page.evaluate('''()=>{for(let i=0;i<400&&fixtureMode.state.phase==='grid';i++)fixtureMode.step({throttle:0,brake:0,left:0,right:0,handbrake:0,reverse:0},1/120);}''');check('fourteen_rivals',info()['phase']=='race' and len(info()['rivals'])==14);shot('corrida')
   page.evaluate('''()=>{const m=fixtureMode;m.state.tankWear=.99;m.car.vx=20;m.state.raceStep({speed:20,throttle:1,offTrack:7},.1);m.stop();}''');check('tank_dropped_and_leaking',info()['tankDetached']);shot('tanque')
   page.click('#cockpitButton');page.evaluate('fixtureMode.state.hitDebris()');check('windscreen_cracks',info()['glass']>0);shot('vidro')

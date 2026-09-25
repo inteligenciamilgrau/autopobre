@@ -17,4 +17,8 @@ As músicas respeitam **Configurações → Áudio → Volume global / Música**
 
 Os arquivos do jogo podem ser otimizados para 128 kbps estéreo. Os originais preservados ficam em `audios_originais/`, na raiz do projeto, fora do Git e da publicação.
 
-Não é necessário editar JavaScript nem criar `tracks.json` manualmente. Esta documentação não entra na publicação.
+## Efeitos gravados
+
+`car_trying_to_start.mp3` é o motor de partida girando (o carro tentando pegar), tocado em loop no modo história enquanto o PART (partida) está apertado; ele desacelera conforme a bateria arria. Faz parte da publicação (`ASSETS` em `scripts/publicacao.py`). Sem ele, o jogo usa o som sintetizado.
+
+Não é necessário editar JavaScript nem criar `tracks.json` manualmente para as músicas. Esta documentação não entra na publicação.

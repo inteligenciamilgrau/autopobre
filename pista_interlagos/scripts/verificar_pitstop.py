@@ -81,7 +81,7 @@ with sync_playwright() as p:
   page.click('[data-repair="freios"][data-kind="patch"]');page.evaluate('advance(1200)');assert .5<page.evaluate('pit.condition.quality.freios')<1
   # Immersive cash/profile accounting is independent of the free-race team budget.
   page.evaluate("pit.mode.onMainMenu()")
-  page.click('#settingsButton');page.locator('#immersiveMode').set_checked(True);page.click('#settingsBack');page.click('#start')
+  page.click('#storyStart')
   page.evaluate("pit.mode.state.phase='race';pit.mode.state.cash=120;pit.mode.state.profile.fund=200;pit.mode.state.fuel=4;pit.mode.raceProgress=0;pit.mode.previousS=20;pit.mode.sync();park();pit.departing=false;pit.condition.damage('tanque',.8);advance(100)")
   wait_js(page,'pit.opened');page.click('[data-repair="tanque"][data-kind="proper"]');assert page.evaluate('pit.mode.state.cash')<120;assert page.evaluate('pit.mode.state.profile.fund')==200
   page.evaluate('advance(2000)');assert page.evaluate('pit.condition.quality.tanque')==1
