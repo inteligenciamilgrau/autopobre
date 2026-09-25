@@ -2,12 +2,23 @@
 
 A V6 é a [V5](../v05_opala_real/README.md) com as partes do carro separadas e com o que faltava por baixo delas. Portas, capô e tampa do porta-malas abrem nos eixos das dobradiças. Com o capô aberto aparece o motor Chevrolet 250 (o 4100 do Opala) com o cofre inteiro, e com a tampa aberta aparecem o porta-malas e a célula de combustível. O interior é o do jogo, reconstruído a partir das fotos. O contorno da carroceria (teto, linha de cintura, comprimento) é o da V5, e as rodas continuam onde o `physics.js` espera. Mudaram três coisas, levadas para onde as fotos mostram (veja abaixo): o recorte da porta, o vidro lateral traseiro e a frente, cuja borda do capô e o painel do nariz subiram cerca de 6 cm.
 
-| Pintura | Blender editável |
-|---|---|
-| Seiva / Danilo Veículos | [opala99_seiva_danilo.blend](opala99_seiva_danilo.blend) |
-| Assinaturas / OMP | [opala99_assinaturas_omp.blend](opala99_assinaturas_omp.blend) |
+| Pintura | Blender editável | GLB do jogo |
+|---|---|---|
+| Seiva / Danilo Veículos | [opala99_seiva_danilo.blend](opala99_seiva_danilo.blend) | [opala99_seiva_danilo.glb](../../pista_interlagos/teste/assets/opala99_seiva_danilo.glb) |
+| Assinaturas / OMP | [opala99_assinaturas_omp.blend](opala99_assinaturas_omp.blend) | [opala99_assinaturas_omp.glb](../../pista_interlagos/teste/assets/opala99_assinaturas_omp.glb) |
 
-Abra com o **Blender 5.1** ou mais recente (gerados no 5.2.2). Tudo fica embutido em cada `.blend`, sem bibliotecas vinculadas nem add-ons. As duas pinturas compartilham a mesma geometria, gerada pelo mesmo script. O jogo ainda usa os GLBs da V5: a integração da V6 vem depois.
+Abra com o **Blender 5.1** ou mais recente (gerados no 5.2.2). Tudo fica embutido em cada `.blend`, sem bibliotecas vinculadas nem add-ons. As duas pinturas compartilham a mesma geometria, gerada pelo mesmo script. Desde 25/09/2026 o jogo usa os GLBs da V6 (veja [No jogo](#no-jogo)).
+
+## No jogo
+
+O jogo carrega o GLB da V6 sem o interior, porque a câmera interna continua usando o cockpit do `cockpit.js`. O módulo [car-openings.js](../../pista_interlagos/teste/car-openings.js) lê os pivôs com os *extras* `eixo_gltf` e `angulo_gltf_graus` e anima a abertura:
+
+- **Nos boxes (Box 99):** a equipe abre o que está consertando: o capô no serviço de motor, a tampa do porta-malas no conserto do tanque e as tampas dos bocais durante o abastecimento. Cada peça fecha quando o serviço acaba. A porta do motorista abre quando o piloto desce do carro e quando volta a entrar. O painel do box tem os botões "Abrir o capô · ver o motor" e "Abrir o porta-malas" (teclas H e T), que também funcionam com o piloto a pé.
+- **Na pista, com o carro parado:** H abre o capô e T abre o porta-malas. O que foi aberto à mão fecha quando o carro anda (acima de 1,5 m/s), e o R (reposicionar) fecha tudo na hora.
+- **Adversários e o Opala do paddock:** são cópias do carro com todas as dobradiças fechadas. Os adversários deixam de fora `Motor_CONJUNTO`, `Tanque_combustivel_CONJUNTO` e as malhas marcadas `interno` (veja "Exportar para o jogo").
+- **Vidro dos faróis e piscas:** no Blender, a lente dos faróis e o pisca usam transmissão (vidro de verdade). No three.js isso faria a cena inteira ser desenhada duas vezes por quadro, então o jogo troca esses materiais por transparência simples ao carregar o carro. Com isso, a V6 ficou em cerca de 800 *draw calls* no grid de Interlagos, contra cerca de 630 da V5, com o mesmo tempo de quadro.
+
+As checagens são [testar_aberturas.mjs](../../pista_interlagos/scripts/testar_aberturas.mjs) (Node: sentido de abertura de cada peça, lido dos GLBs do jogo, e a equipe do box) e [verificar_aberturas.py](../../pista_interlagos/scripts/verificar_aberturas.py) (navegador: box, porta do piloto, tecla H, troca de pintura e adversários sem motor).
 
 ## Renders
 
@@ -93,12 +104,10 @@ Girar o pivô por esse ângulo abre a peça sem que ela toque na carroceria, e o
 
 Os nomes da [V5](../v05_opala_real/README.md#nomes-usados-pelo-jogo) continuam valendo: os quatro pivôs de roda, `Policarbonato_fume`, `Chapa_fechamento_V04` (peças filhas diretas do root e com material único), `Pintura_preta`, `Faixa_amarela`, `Branco` e os materiais `Adesivo*` (as novas texturas de RR, invent e 99 entraram nesses mesmos materiais). O 99 da traseira continua sendo a malha `Numero_traseiro` em `Branco`, atrás de x = −2,05. As peças móveis reutilizam esses materiais, então a troca de cor dos adversários também pinta portas, capô e tampa. A V6 acrescenta os nomes dos pivôs da tabela acima e as propriedades deles, que vão para o GLB como *extras* dos nós.
 
-**Adversários e cockpit.** Os adversários são clones do carro (`main.js`), e o jogo monta o próprio cockpit em tempo de execução (`cockpit.js`). Por isso, ao carregar a V6:
+**Adversários e cockpit.** Os adversários são clones do carro (`immersive-visuals.js`), e o jogo monta o próprio cockpit em tempo de execução (`cockpit.js`). Por isso:
 
-- para os adversários, o jogo deve descartar os nós `Interior_do_jogo`, `Motor_CONJUNTO` e `Tanque_combustivel_CONJUNTO`, com tudo o que pende deles;
-- a câmera do cockpit continua usando o interior do `cockpit.js`, e não o `Interior_do_jogo` do GLB, que serve para renders e outras ferramentas.
-
-O GLB pode sair sem o interior (veja "Exportar").
+- os adversários descartam os nós `Interior_do_jogo`, `Motor_CONJUNTO` e `Tanque_combustivel_CONJUNTO`, com tudo o que pende deles, e as malhas com o *extra* `interno`;
+- a câmera do cockpit continua usando o interior do `cockpit.js`, e não o `Interior_do_jogo` do `.blend`, que serve para renders e outras ferramentas. O GLB do jogo sai sem ele (veja "Exportar para o jogo").
 
 ## Como a V6 é gerada
 
@@ -169,16 +178,18 @@ blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --
 
 O [renderizar_opala_v06.py](../scripts/renderizar_opala_v06.py) usa Cycles na GPU (OptiX) com *denoise*, em 1280×840, e grava JPG em `renders/`. As cores usam a transformação de vista **Khronos PBR Neutral**, sem *look* (definida só na memória), porque esses renders são comparados com as fotos: a AgX, padrão do Blender, desbotava o amarelo da faixa e dos adesivos para bege, e a Standard mantinha o amarelo mas estourava o chão do estúdio e deixava as setas iluminadas cor de limão. Para isso usa o ffmpeg da pasta de apps, ou o próprio Blender se o ffmpeg não estiver lá. As peças são abertas só na memória, e o `.blend` não muda. As 11 vistas da Seiva levam cerca de 70 s. O arquivo OMP gera as quatro vistas de frente com o sufixo `_assinaturas_omp`. Com `-- --views motor_capo_aberto,traseira --samples 48` dá para renderizar só algumas vistas.
 
-## Exportar sem sobrescrever o jogo
+## Exportar para o jogo
 
-O exportador da V5 grava por padrão em `pista_interlagos/teste/assets/`. Para a V6, sempre informe outro destino:
+O jogo usa o GLB sem o interior. Sem um caminho de saída, o exportador grava direto em `pista_interlagos/teste/assets/opala99_<pintura>.glb`:
 
 ```powershell
-blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\exportar_glb_jogo.py -- C:\caminho\temporario\opala99_seiva_danilo_v06.glb
-blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\exportar_glb_jogo.py -- C:\caminho\temporario\opala99_seiva_danilo_v06.glb --sem-interior
+blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\exportar_glb_jogo.py -- --sem-interior
+blender --background modelo_3d\v06_pecas_separadas\opala99_assinaturas_omp.blend --python-exit-code 2 --python modelo_3d\scripts\exportar_glb_jogo.py -- --sem-interior
 ```
 
-O [exportar_glb_jogo.py](../scripts/exportar_glb_jogo.py) dá às cópias exportadas os nomes exatos dos objetos, sem o sufixo `.001`. Ele confere no GLB os pivôs que têm a propriedade `peca`, com os *extras* (inclusive `eixo_gltf` e `angulo_gltf_graus`) e as malhas. Com `--sem-interior`, deixa de fora `Interior_do_jogo` e tudo o que pende dele. A exportação da V5 continua passando.
+Depois de exportar, troque o sufixo `?v=06-pecas-separadas` em `pista_interlagos/teste/main.js`, para que os navegadores não usem o GLB antigo guardado em cache. Em seguida rode `testar_aberturas.mjs` e, com o servidor local ligado, `verificar_aberturas.py` e `verificar_fechamentos.py`. Para gerar um GLB de teste sem tocar no jogo, informe outro destino (`-- C:\caminho\temporario\teste.glb`, com ou sem `--sem-interior`).
+
+O [exportar_glb_jogo.py](../scripts/exportar_glb_jogo.py) dá às cópias exportadas os nomes exatos dos objetos, sem o sufixo `.001`. Ele confere no GLB os pivôs que têm a propriedade `peca`, com os *extras* (inclusive `eixo_gltf` e `angulo_gltf_graus`) e as malhas. Com `--sem-interior`, deixa de fora `Interior_do_jogo` e tudo o que pende dele. Ele também marca com o *extra* `interno` as malhas que ninguém vê com o carro fechado: tudo das coleções `07_Interior_do_jogo`, `08_Cofre_do_motor`, `09_Motor` e `10_Porta_malas` (menos o radiador, que aparece pela grade), além das dobradiças e das estruturas internas do capô e da tampa. Hoje são 39 malhas. O jogo tira essas malhas dos adversários e não projeta a sombra delas no carro do jogador. A exportação da V5 continua passando, sem nenhuma malha marcada.
 
 ## Organização da cena
 

@@ -5,6 +5,10 @@ import {RIVAL_ROSTER} from './race-roster.js';
 import {createPeople,setPose,POSES,OUTFITS} from './pit-crew.js';
 import {curveloPitFrame,serviceSpot,garageBays,pitPoint} from './pit-lane.js';
 import {footState,stepOnFoot,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
+import {shutOpenings} from './car-openings.js';
+// V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
+// exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
+const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
 const up=new THREE.Vector3(0,1,0);
 // The small white 99 on the Opala's tail is part of its 'Branco' mesh: rivals drop the
 // triangles on the tail panel (x < -2.05 m, car frame) and carry their own number there.
@@ -130,7 +134,7 @@ export class ImmersiveVisuals {
  }
  // The team's own Opala for the paddock: the player's model, livery and cage.
  ownCar(template){
-  if(!template)return this.car(0x151515,'99');const root=template.clone(true),structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
+  if(!template)return this.car(0x151515,'99');const root=template.clone(true),structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));shutOpenings(root);
   root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});root.name='Opala_99_no_box';return root;
  }
  mat(color){return this.materials[color]??=(new THREE.MeshStandardMaterial({color,roughness:.76}));}
@@ -181,6 +185,8 @@ export class ImmersiveVisuals {
   if(!template)return this.car(color,number);
   const root=template.clone(true),materials=new Map(),pivots=[];
   const structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
+  for(const name of HIDDEN_ON_RIVALS)root.getObjectByName(name)?.removeFromParent();shutOpenings(root);
+  const inside=[];root.traverse(o=>{if(o.isMesh&&o.userData.interno)inside.push(o);});inside.forEach(o=>o.removeFromParent());
   root.traverse(o=>{
    if(o.isMesh){
     const mats=Array.isArray(o.material)?o.material:[o.material];

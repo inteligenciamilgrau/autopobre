@@ -17,6 +17,7 @@ import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v
 import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260923-interior-fotos';
+import {CarOpenings,OPENINGS} from './car-openings.js';
 import {CameraReturn,LookBack,turnHead,neckTwist,HEAD_YAW_COCKPIT,HEAD_YAW_HOOD} from './camera-return.js';
 import {createDriver} from './driver.js?v=20260923-controls';
 import {SkidMarks} from './skid-marks.js?v=20260923-capotagem';
@@ -113,6 +114,8 @@ const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
 // Sprung mass: body, cabin, cockpit and driver roll and pitch on the suspension;
 // the wheels are counter-rotated so they stay planted on the ground.
 const carBody=new THREE.Group();carBody.name='Carroceria_suspensao';carRoot.add(carBody);
+// Doors, hood, trunk lid and filler caps of the V06 Opala, on their hinges (car-openings.js).
+const openings=new CarOpenings();
 const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
 function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
 let cockpit,skidMarks,tyreSmoke;
@@ -172,12 +175,17 @@ async function setLivery(value){
  const token=++loadToken;status('Carregando Opala 99…');
  $('skinButton').disabled=true;$('skinButton').textContent='Carregando pintura…';$('livery').disabled=true;
  try{
- const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=05-opala-real`);
+ const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=06-pecas-separadas`);
  if(token!==loadToken)return;
  if(model)carBody.remove(model);model=gltf.scene;wheels=[];
- model.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;
-  for(const m of Array.isArray(o.material)?o.material:[o.material])if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
+ // Meshes inside the shut body (engine bay, trunk, hinges: glTF extra "interno") cast no shadow.
+ model.traverse(o=>{if(o.isMesh){o.castShadow=!o.userData.interno;o.receiveShadow=true;
+  for(const m of Array.isArray(o.material)?o.material:[o.material]){if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
+   // Blender's glass (transmission: the V06 headlamp lenses, turn signals, translucent plastics) would make
+   // three.js draw the whole scene a second time every frame; here they are plain see-through materials.
+   if(m.transmission>0){m.transparent=true;m.opacity=Math.min(m.opacity,1-.65*m.transmission);m.transmission=0;m.depthWrite=false;}}
  }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){const front=o.name.includes('Dianteira');wheels.push({obj:o,front,index:(front?0:2)+(o.position.z>0?1:0),base:o.quaternion.clone(),basePosition:o.position.clone()});}});
+ openings.attach(model);
  // These solid Blender panels close the cabin seen from outside. The detailed
  // cockpit has its own floor, walls and rear cabin, so they hide with the body
  // (their belt-high sheet over the rear seat would cover the interior).
@@ -202,8 +210,12 @@ async function cycleLivery(){
  try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
+// H and T lift the hood and the trunk lid while the car stands still (at the box the pit
+// panel and its crew run them); what was opened by hand shuts as the car moves off.
+function standingOpening(name){return Math.hypot(car.vx,car.vy)<.5&&openings.toggle(name);}
+function updateOpenings(dt){if(Math.hypot(car.vx,car.vy)>1.5)openings.release('manual');openings.update(dt);}
 // nearest (R key): only the player's car goes back on track; rivals, laps and fuel carry on.
-function reset(nearest=false){mobile?.setHandbrake(false);if(nearest)car.recover();else{car.resetGrid();if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
+function reset(nearest=false){mobile?.setHandbrake(false);openings.closeAll(true);if(nearest)car.recover();else{car.resetGrid();if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
 function location(s){const sections=data.meta.sections||names;let name=sections[0][1];for(const [d,n] of sections)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
@@ -489,7 +501,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  carAudio.update(car,driveCommand,skid,paused,mode);
  carAudio.updateScene({...immersive?.audioScene(),speed:Math.hypot(car.vx,car.vy),onRoad:car.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
- updateCar(dt);updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ updateOpenings(paused?0:dt);updateCar(dt);updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,carAudio.state).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  immersive?.update(paused?0:dt,camera);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
  raceResults.update(immersive,paused,$('settings').open);
@@ -538,6 +550,8 @@ document.addEventListener('keydown',e=>{
  if(e.code==='KeyR'&&!immersive.finishing)reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
  if(e.code==='KeyV')cycleLivery();
+ if(e.code==='KeyH')standingOpening(OPENINGS.hood);
+ if(e.code==='KeyT')standingOpening(OPENINGS.trunk);
  if(e.code==='KeyP')menu(!paused);
  if(e.code==='Escape')menu(true);
  if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){automatic=false;status('');}
@@ -636,7 +650,7 @@ async function loadCircuit(){
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
  // Box 99: Curvelo's service lane, or the surveyed garage at Interlagos.
- if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
+ if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,openings,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
  pitstop?.setDamage(preferences.values.damage);
  landscape.setRealisticWater(preferences.values.realisticWater);
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');
@@ -652,6 +666,8 @@ async function loadCircuit(){
   audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),
   skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),waterInfo:()=>landscape.waterInfo(),lakeInfo:()=>lakeContact?.info()??null,waterAt:(x,y)=>landscape.water.at(x,y),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
+  openingsInfo:()=>openings.info(),holdOpening:(name,on=true)=>openings.hold(name,'teste',on),
+  rivalParts:()=>{const rival=immersive.visual.rivals[0],names=[];let meshes=0;rival?.traverse(o=>{names.push(o.name);if(o.isMesh)meshes++;});return {motor:names.includes('Motor_CONJUNTO'),tanque:names.includes('Tanque_combustivel_CONJUNTO'),meshes};},
   driverInfo:()=>driver.info(),
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
   // Interior cameras ride on the sprung body, so report them in its frame.

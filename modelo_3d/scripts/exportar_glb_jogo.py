@@ -18,6 +18,14 @@ left_out=set()
 if '--sem-interior' in flags and 'Interior_do_jogo' in bpy.data.objects:
  o=bpy.data.objects['Interior_do_jogo'];left_out={o,*o.children_recursive}
 
+# V06: meshes nobody sees on a shut car (engine bay, trunk, the game's interior, hinges and the inner frames of
+# hood and lid). Their GLB nodes carry the extra "interno", so the game can leave them out of rival copies and
+# skip their shadows on the player's car. The radiator stays: it shows through the grille.
+INTERNAL_COLLECTIONS={'07_Interior_do_jogo','08_Cofre_do_motor','09_Motor','10_Porta_malas'}
+def internal(o):
+ if o.name.startswith('Radiador'):return False
+ return any(c.name in INTERNAL_COLLECTIONS for c in o.users_collection) or o.name.endswith(('_dobradicas','_estrutura_interna','_porta_malas_estrutura'))
+
 def grouped_export(root,path):
  # Same grouping as corrigir_fechamentos_v04.py: one mesh per parent and material set.
  temporary=bpy.data.collections.new('EXPORT_TEMP_V04');bpy.context.scene.collection.children.link(temporary);clones={}
@@ -25,6 +33,7 @@ def grouped_export(root,path):
   clone=original.copy()
   if original.type=='MESH':clone.data=original.data.copy()
   temporary.objects.link(clone);clones[original]=clone
+ inside={clone:internal(original) for original,clone in clones.items()}
  for original,clone in clones.items():clone.parent=clones.get(original.parent);clone.matrix_world=original.matrix_world.copy()
  # The clones take the exact names (pivot names are the game's API); the originals are renamed during the export.
  renamed={}
@@ -37,8 +46,10 @@ def grouped_export(root,path):
   bpy.ops.object.select_all(action='DESELECT')
   for o in objects:o.select_set(True)
   bpy.context.view_layer.objects.active=objects[0]
+  hidden=all(inside[o] for o in objects)
   if len(objects)>1:bpy.ops.object.join()
   bpy.context.object.name='GLB_'+parent+'_'+'_'.join(mats)
+  if hidden:bpy.context.object['interno']=True
  bpy.ops.object.select_all(action='DESELECT')
  for o in temporary.objects:o.select_set(True)
  bpy.ops.export_scene.gltf(filepath=str(path),export_format='GLB',use_selection=True,export_apply=True,export_extras=True,export_animations=False,export_cameras=False,export_lights=False)
@@ -65,4 +76,7 @@ for name,props in hinges.items():
  assert 'eixo_gltf' not in props or [round(a,6) for a in node['eixo_gltf']]==[round(a,6) for a in props['eixo_gltf']],('eixo_gltf do pivo',name)
  assert props.get('peca') in ('interior',) or any(c.type=='MESH' for c in node.children_recursive),('pivo sem pecas',name)
 if hinges:print('GLB_PIVOTS',len(hinges),', '.join(sorted(hinges)),flush=True)
+hidden=[o for o in imported.children_recursive if o.type=='MESH' and o.get('interno')]
+assert not any(m and m.name in ('Policarbonato_fume','Faixa_amarela') for o in hidden for m in o.data.materials),'peca externa marcada como interna'
+if hidden:print('GLB_INTERNAS',len(hidden),'malhas marcadas "interno"',flush=True)
 print('GLB_EXPORTED',output,'sem interior' if left_out else '',round(output.stat().st_size/2**20,2),'MiB',flush=True)
