@@ -1,0 +1,217 @@
+# Opala 99 — peças separadas (V6)
+
+A V6 é a [V5](../v05_opala_real/README.md) com as partes do carro separadas e com o que faltava por baixo delas. Portas, capô e tampa do porta-malas abrem nos eixos das dobradiças. Com o capô aberto aparece o motor Chevrolet 250 (o 4100 do Opala) com o cofre inteiro, e com a tampa aberta aparecem o porta-malas e a célula de combustível. O interior é o do jogo, reconstruído a partir das fotos. O contorno da carroceria (teto, linha de cintura, comprimento) é o da V5, e as rodas continuam onde o `physics.js` espera. Mudaram três coisas, levadas para onde as fotos mostram (veja abaixo): o recorte da porta, o vidro lateral traseiro e a frente, cuja borda do capô e o painel do nariz subiram cerca de 6 cm.
+
+| Pintura | Blender editável |
+|---|---|
+| Seiva / Danilo Veículos | [opala99_seiva_danilo.blend](opala99_seiva_danilo.blend) |
+| Assinaturas / OMP | [opala99_assinaturas_omp.blend](opala99_assinaturas_omp.blend) |
+
+Abra com o **Blender 5.1** ou mais recente (gerados no 5.2.2). Tudo fica embutido em cada `.blend`, sem bibliotecas vinculadas nem add-ons. As duas pinturas compartilham a mesma geometria, gerada pelo mesmo script. O jogo ainda usa os GLBs da V5: a integração da V6 vem depois.
+
+## Renders
+
+As vistas com foto correspondente foram enquadradas como a foto, para comparar lado a lado.
+
+| Vista | Render | Foto de referência |
+|---|---|---|
+| Fechado, frente | [fechado_frente.jpg](renders/fechado_frente.jpg) | [carro_1](../../carro/carro_1_perspectiva_frente.jpg) |
+| Fechado, lateral do motorista | [fechado_lateral.jpg](renders/fechado_lateral.jpg) | [carro_5](../../carro/carro_5_lateral_completa_longe.jpg) |
+| Traseira | [traseira.jpg](renders/traseira.jpg) | [carro_6](../../carro/carro_6_traseira.jpg), [carro_22](../../carro/carro_22_tanque_caindo.jpg) |
+| Tudo aberto, frente | [aberto_tudo_frente.jpg](renders/aberto_tudo_frente.jpg) | — |
+| Tudo aberto, traseira | [aberto_tudo_tras.jpg](renders/aberto_tudo_tras.jpg) | — |
+| Motor com o capô aberto | [motor_capo_aberto.jpg](renders/motor_capo_aberto.jpg) | [carro_41](../../carro/carro_41_motor.JPG), [carro_42](../../carro/carro_42_motor_v2.JPG) |
+| Porta-malas aberto | [porta_malas_aberto.jpg](renders/porta_malas_aberto.jpg) | [carro_37](../../carro/carro_37_tanque_porta_malas.JPG), [carro_38](../../carro/carro_38_tanque_porta-malas_v2.JPG) |
+| Porta do motorista aberta | [porta_motorista_aberta.jpg](renders/porta_motorista_aberta.jpg) | [carro_30](../../carro/carro_30_interior_pes_do_carona_com_fusiveis.JPG), [carro_33](../../carro/carro_33_interno_cambio.JPG) |
+| Interior pela porta | [interior_pela_porta.jpg](renders/interior_pela_porta.jpg) | fotos do interior (carro_14, 24–36) |
+| Vista explodida | [explodida.jpg](renders/explodida.jpg) | — |
+| Por baixo | [por_baixo.jpg](renders/por_baixo.jpg) | — |
+| Pintura OMP: frente, capô, motor | [fechado_frente](renders/fechado_frente_assinaturas_omp.jpg), [frente_capo](renders/frente_capo_assinaturas_omp.jpg), [aberto_tudo_frente](renders/aberto_tudo_frente_assinaturas_omp.jpg), [motor](renders/motor_capo_aberto_assinaturas_omp.jpg) | [carro_23](../../carro/carro_23_capo_omp_melhor.JPG) |
+
+## O que a V6 trouxe
+
+- **Lateral, porta e vidro traseiro** (fotos carro_5, carro_7 e carro_18): a junta traseira da porta foi para x = −0,28 na cintura, 22 cm à frente da junta pintada da V5, e a porta ficou com 1,21 m na cintura. Em carro_7 a junta passa entre os dois "R" do adesivo RR, e o "IMPORT" fica metade na porta, metade na lateral: é assim também na V6. O vidro lateral traseiro foi refeito entre x ≈ −0,25 (borda dianteira, levemente inclinada) e −0,83 (ponto mais traseiro da curva). Atrás dele há uma chapa pintada (a "vela") que se junta à coluna C da V5, e é nela que fica o adesivo JESUS TÁ ON. Entre a janela da porta e esse vidro há uma coluna chata com seis rebites, e o friso da janela da porta termina logo à frente dela. As tampas dos bocais de combustível (lado do passageiro) acompanharam o vidro. O teto, as calhas e a coluna C não mudaram.
+- **Redes das janelas** (carro_3, carro_5, carro_21): refeitas sobre as linhas da rede da V5 (cintura, topo e plano), sem escalar nada. Vão da coluna chata (x = −0,21) até x = 0,535 na cintura, com a coluna da frente inclinada como o pilar A, e têm 7 tiras verticais e 5 horizontais de 30 mm. Na vista `fechado_lateral` a borda da frente cai no pixel 529. O tecido é preto fosco (base 0,008, especular 0,2).
+- **Adesivos da lateral do motorista:** RR IMPORT, invent e 99 foram redesenhados como textura vetorial, sem o recorte de foto da V5 (que cortava a barra do "T", "IMPOR1"), e postos nas posições e tamanhos medidos em carro_5. RR IMPORT ocupa x = −0,09 a −0,59 (o IMPORT tem 0,50 m); invent vai de x = −0,71 a −1,45; e o 99 vai de x = −1,55 a −2,03, com 0,40 m de altura. O invent ficou 4 cm mais alto que na foto para não passar sobre a borda da caixa de roda. O JESUS TÁ ON também foi redesenhado, porque o recorte da V5 trazia um fundo cinza. Ele tem 0,275 × 0,19 m, o maior que cabe na vela, e ganhou o adesivo redondo branco sobre a ponta da frente (só do lado do motorista, o único fotografado). Em carro_5 o JESUS parece 7 cm mais alto, mas a faixa na lateral traseira também aparece 6 cm mais alta nessa foto (o carro está inclinado): medido a partir da faixa, ele está no lugar.
+- **Nomes nas portas** (carro_20, carro_21): na pintura OMP, os dois painéis de nomes ficaram inteiros dentro das portas, de x = −0,22 a +0,86 e de z = 0,33 a 0,79, com a primeira linha logo abaixo da faixa (1 a 2 cm, como em carro_21; a borda de baixo da faixa desce de z = 0,81 atrás para 0,79 na frente) e a última 12 cm acima da borda de baixo da porta. Na porta do motorista estão todas as linhas, de "MARCELO R. BECHER … NICOLAS MAIA" até "LAIS TE AMO ♥♥♥" e "FÁBIO FELMANN, WILLIAM LAU"; na terceira rodada esse painel era cortado em x = +0,02 e as linhas paravam no meio da palavra. Os nomes ficam por cima de tudo na porta. Com os nomes escritos na porta do motorista, o RR IMPORT da OMP é só a sombra de um adesivo arrancado (em carro_21 só se vê o contorno escuro do "IMP" e do "R" sob os nomes): mesmo desenho, em preto um tom acima da pintura e com o brilho dela. Os logos Seiva da outra pintura já cabiam nas portas e não mudaram. A malha de cada adesivo refeito passa 4 texels além do desenho, para nenhuma letra encostar na borda. Pedaços de adesivo que só tinham a margem transparente deixam de existir depois do recorte das portas.
+- **NIPO e PECOM** (lado do motorista): a ponta de cima do "N" do NIPO passava 5 mm da junta dianteira para a porta, onde a junta se inclina para a frente perto da cintura. O NIPO e o PECOM, que fica logo à frente dele, andaram juntos 36 mm para a frente (39 mm na OMP), e agora todo o desenho fica a mais de 34 mm da junta.
+- **Adesivos com recorte de foto:** o MAN·PEC e o DINIZ PNEUS traziam uma tira da faixa amarela fotografada, que se desencontrava da faixa de verdade em triângulos pretos na ponta do para-lama. Essa tira ficou transparente. O adesivo do capô da Seiva trazia recortes de foto dos pinos dianteiros da V5, com borda serrilhada, e eles saíram (as travas agora são modeladas). Na borda traseira do capô o adesivo é cortado por um plano em x = 1,012, e não mais por fileiras inteiras de faces, que levavam junto a ponta do logo NIPO do capô da Seiva.
+- **Portas:** cada porta é recortada da lateral com folga real de 4 mm. É uma caixa fechada com pele externa, faixa amarela, peitoril, friso, adesivos e retrovisor. Por dentro tem o painel interno de chapa preta brilhante e, sobre ele, o **forro liso** das fotos carro_30 e 33: uma chapa preta plana do degrau da soleira até a cintura, com os cantos de cima arredondados e oito parafusos na borda de cima e nos cantos de baixo, sem furos. A frente da porta e a face de fechamento do para-lama são dois arcos em torno do eixo das dobradiças, 5 mm um do outro. Por isso a borda da porta gira dentro do próprio arco e nunca entra no para-lama. A carroceria tem os batentes, a face da coluna A (onde as dobradiças são parafusadas, sob a borda do para-lama), a face da fechadura com o contrapino, a caixa da soleira e borrachas de vedação.
+- **Dobradiças de verdade:** cada dobradiça tem uma folha na carroceria e outra na peça, com os nós (knuckles) intercalados no mesmo pino, sobre o eixo do pivô. A folha móvel gira em volta do pino e fica a menos de 1 mm da folha fixa em qualquer ângulo. Nas portas, o eixo é vertical e fica em x = 0,952 e y = ±0,840, com as duas dobradiças em z = 0,38 e 0,70. O braço da folha da porta sai do nó para dentro e volta para a porta, e passa por rasgos na face de fechamento do para-lama. No capô, o eixo fica em x = 1,065 e z = 0,85, baixo o bastante para os nós ficarem sob a pele abaulada em y = ±0,56. Tiras curtas saem dos nós, descem logo atrás da travessa traseira da estrutura e terminam numa placa parafusada por baixo dela, e as folhas fixas descem até a prateleira dos aventais. Na tampa, o eixo fica em x = −1,58 e z = 0,95, com os nós em y = ±0,28. Os braços descem à frente da travessa dianteira da estrutura (que foi para x = −1,675) e terminam numa placa por baixo dela, e os suportes fixos descem e dobram até o anteparo atrás do banco. Nenhum braço atravessa a estrutura: na segunda rodada o braço da tampa abria um entalhe em V na travessa. As duas posições de eixo foram escolhidas girando a peça por toda a abertura, em cada posição candidata.
+- **Capô e painel frontal:** o capô abre pela borda traseira, e a ponta curva com o "eletric" fica fixa no carro (`Painel_frontal_superior`), como nas fotos com o capô tirado (carro_41 e 42). Por baixo, o capô tem uma **chapa interna estampada** com grandes furos de alívio, a 14 mm da pele, sobre a estrutura de vigas. Tanto ela quanto a face de baixo da pele são de preto acetinado (`Pintura_preta_interna`), para não espelhar o cofre.
+- **Frente mais alta** (carro_1, carro_4, carro_23): nas fotos de frente, a faixa preta entre a junta do capô e a grade tem quase a altura do farol, o topo da grade fica no nível do topo dos faróis e a borda do capô corre reta de um lado ao outro. A V5 enrolava o capô para baixo a partir de x = 2,0 até z = 0,80 na borda dianteira. Um campo vertical levanta a frente, montado para que os reflexos continuem tão contínuos quanto os da V5 (teste de zebra, `previas/rodada_04/04_zebra_capo_r3_v05_r4.jpg`):
+  - 12 mm em toda a frente, de zero em x = 1,2 até x = 1,9;
+  - de x = 1,9 para a frente, cada seção transversal do capô e do topo dos para-lamas mantém a altura que tem em x = 1,9 (um máximo suave, com 1 cm de transição). Assim a descida da V5 é cancelada seção por seção, e a borda do capô fica em z = 0,860 no centro (era 0,80), com o mesmo abaulamento que o capô tem em x = 1,9;
+  - essa parte some no topo dos para-lamas (inteira até y = 0,60, nada em y = 0,88), sem arrastar os ombros, a faixa e os adesivos laterais;
+  - na face inclinada do nariz, à frente de x = 2,14–2,21, a subida some em linha reta com a altura, do topo da curva até o topo da grade (z = 0,712). A face continua plana em vez de ficar côncava;
+  - nos lados tudo some entre z = 0,62 e 0,50, sobre a caixa de roda.
+
+  Na terceira rodada o campo usava a mesma curva da linha central em toda a largura e desbotava pela altura também no topo dos cantos, o que deixava calombos e reflexos quebrados em x = 1,95–2,2. Capô, topo dos para-lamas, painel do nariz, ombros, faixa e adesivos sobem juntos, como uma superfície só, e as juntas são cortadas depois. Grade, faróis, setas e para-choque não se movem. A **faixa do nariz** tem 0,158 m sobre a grade (0,92 do diâmetro do farol, que é 0,172 m; na V5, 0,129 e 0,75). A folga do motor até o capô é de 25 mm. O "eletric" continua com 1,00 m e letras de cerca de 0,10 m (0,58 do farol). Na lateral alinhada pelos cubos (carro_5), o topo do capô fica a ±2 cm da foto de x = 1,6 a 2,0 e da ponta do nariz (x = 2,2, onde a V5 ficava 5 cm abaixo), e 3 cm acima em x = 2,1, onde a foto já começa a descer. A leitura da foto tem cerca de ±1,5 cm de incerteza.
+- **Grade** (carro_23): a grade de lâminas da V5 saiu. No lugar há quatro painéis de malha expandida prateada (2 × 2), entre uma barra central de 40 mm e uma barra horizontal, dentro de uma moldura preta fina, sobre o fundo preto da V5. O topo da grade voltou para z = 0,702, no nível do topo dos faróis (0,717), e uma tira pintada fecha a face do painel até ela.
+- **Vincos do capô:** o vinco central tem 7 mm, do torpedo até a borda dianteira, e os dois laterais (y = ±0,44) têm 4 mm. A crista de cada um é arredondada em ±2 cm (±1,4 cm nos laterais) e o pé se funde à pele, com linhas de corte extras ao longo da crista para levar a curva; as arestas das cristas não são mais vivas. O reflexo dobra no vinco em gradiente, em vez de se partir numa linha dura, e o adesivo do capô dobra junto (o OMP/nextlane, como em carro_23).
+- **Travas do capô:** as travas dianteiras são as das fotos, com placa retangular embutida de 80×60 mm e centro abaulado em cada canto dianteiro do capô, mais uma plaquinha quadrada com pino no para-lama ao lado. Os pinos traseiros, com placa e argola, continuam como na V5.
+- **Faixa sobre os para-lamas:** à frente de x = 1,40 a faixa ganhou cinco fileiras a mais de vértices, e cada vértice fica 1,8 mm para fora da pele, ao longo da normal dela. Antes ela era uma tira de dois vértices de altura sobre o ombro curvo.
+- **Tampa do porta-malas:** abre pela borda dianteira, junto ao vidro traseiro. Tem chapa interna estampada com quatro furos e face de baixo acetinada. A faixa da carroceria entre a tampa e o vidro traseiro foi rebaixada por baixo, no arco que a borda da tampa descreve ao abrir. As travas Aerocatch (carro_39 e 40) têm placa em gota de verdade: uma ponta redonda larga (72 mm) em volta do copo do pino, ligada por tangentes retas a uma ponta estreita (26 mm) no gatilho, em preto brilhante com aro polido fino. Têm também gatilho translúcido, copo fundo e escuro, quatro parafusos e o quinto furo vazio.
+- **Porta-malas** (fotos carro_37, 38 e 22): é raso, com assoalho a z ≈ 0,41 (a V5 deixava o piso na altura do assoalho do carro, a 0,22–0,30). A **célula de combustível** mede 0,58 × 0,53 × 0,21 m e fica afundada numa abertura desse assoalho, com o topo 6 cm acima dele. Ela vai de y = −0,20 a +0,33 (centro 7 cm para o lado do motorista), e a borda do lado do motorista cai na ponta direita do "99" da traseira, como em carro_37 (conferido com a câmera resolvida da foto). A tampa branca fica na borda traseira, a 45 % da largura a partir da borda do motorista (y ≈ +0,09), e a mangueira dá a volta para o lado do motorista. O fundo do carro sob a célula continua fechado: a célula fica no poço entre ele e o assoalho elevado, e a aresta de baixo e de trás dela é chanfrada sobre a subida do fundo, com 1,3 cm de folga ou mais (o berço também). O berço tem dois trilhos e quatro travessas de tubo escuro e sujo, sob o fundo plano e subindo pelo chanfro, e fica todo à frente de x = −2,03. Os tirantes azul-acinzentados sobem até a borda da abertura, com as abas parafusadas no assoalho. Nada da célula nem do berço aparece por trás, sob o para-choque, nem por baixo: atrás de x = −1,95 nada fica abaixo de z = 0,31, e tudo fica a 74 mm ou mais do `Painel_traseiro` (na segunda rodada o berço descia a z = 0,233 e cruzava o painel). A frente da célula passa sob uma aba horizontal com dois furos virados para cima, presa no anteparo. O assoalho tem um desenho próprio: a pintura preta está gasta em manchas de ferrugem junto às emendas e à abertura, com respingos de tinta branca, frisos e furinhos. O painel traseiro tem a borda de cima enrolada, e a borracha da vedação acompanha os cantos dele. Os fios das lanternas terminam no assoalho, ao lado da célula. Não há caixas de roda no porta-malas: nesta carroceria as caixas das rodas traseiras terminam em x = −1,46, antes do anteparo (x = −1,49).
+- **Cofre e motor** (fotos carro_41 e 42): Chevrolet 250 de seis cilindros em linha com bloco e cabeçote vermelho-escuro sujo (#7A1E14). Tem tampa de válvulas de alumínio aletada com bocal de tampa azul, admissão com carburador e filtro baixo, e coletor tubular de seis tubos cor de bronze fosco empoeirado no lado do motorista. No lado do passageiro ficam distribuidor, cabos de vela vermelhos, bobina, alternador, motor de arranque e filtro de óleo. Câmbio e capa seca são de alumínio fundido cinza sujo. A mangueira superior do radiador é preta brilhante, com 58 mm, e faz um arco da carcaça da termostática até a entrada do radiador no lado do motorista. Há chicotes com presilhas nos dois aventais e no corta-fogo, uma mangueira de aço trançado ao lado das verdes na caixa de respiro, e o servo-freio com o cilindro-mestre em metal nu no corta-fogo do motorista. Os aventais têm as torres das molas com topo abaulado, o apoio do braço superior e, no lado do motorista, um rebaixo retangular com quatro parafusos. Embaixo, ao longo das duas longarinas, correm um feixe de duas mangueiras e um chicote, com fitas e um ramal subindo pelo avental. No avental do passageiro fica a caixa de relés da ventoinha, com fios descendo, e no do motorista um filtro de combustível de canister azul, preso por abraçadeira, com linhas trançadas. As prateleiras dos aventais têm cabeças de parafuso e passa-fios de borracha.
+- **Suspensão dianteira:** braços A superior e inferior, molas helicoidais sobre os braços inferiores com amortecedores dentro, mangas com pontas de eixo até os cubos, braços de direção, barras de direção, barra central, braço Pitman com a caixa de direção na longarina do motorista, e barra estabilizadora à frente do cárter. As paredes internas das caixas de roda e os aventais têm uma abertura sobre a suspensão (x = 1,37 a 1,74, até z = 0,58), com os cantos de cima arredondados (raio de 8 cm), como uma abertura estampada.
+- **Chapas de fechamento:** `Chapa_fechamento_V04` (assoalho, túnel, corta-fogo, paredes, fundo do carro) agora é preta brilhante como nas fotos (base 0,01, rugosidade 0,32, verniz 0,5). Na V5 ela era cinza acetinada. O nome, a regra de material único e o parentesco com o root não mudaram.
+- **Detalhes da carroceria fechada:** as lanternas traseiras são de vermelho mais escuro, com lente facetada, recuadas 10 mm no aro. O 99 da traseira tem os mesmos algarismos pesados e inclinados da lateral, com 1,25 vez o diâmetro de uma lanterna.
+- **Faróis** (carro_23): a lente virou vidro transparente (com um leve fosco no lugar das estrias do farol selado), e atrás dela há um refletor aluminizado com a lâmpada sob um pequeno anteparo; a caixa do farol foi furada para ele. A moldura preta quadrada agora parece um balde que segue o nariz: a frente acompanha o recuo das caixas dos faróis em direção ao para-lama, e em cima uma faixa se dobra para trás até a borda de baixo do painel do nariz e entra sob ela. Isso fecha a fresta que a frente levantada abria sobre as caixas, e nenhum canto fica saltado na frente do para-lama. Os lados e a base também se dobram para trás, até o corpo.
+- **Setas:** o `Seta_ambar` ficou num âmbar mais fundo (linear 0,90/0,22/0,0), com rugosidade 0,35 e um pouco de transmissão, para as faces bem iluminadas continuarem âmbar.
+- **Vidros:** o `Policarbonato_fume` virou um fumê escuro neutro (sRGB 45/48/52), sem o tom verde-azulado da V5; o nome não mudou, e o jogo só ajusta a opacidade.
+- **Faróis auxiliares (só na pintura OMP):** os quatro faróis redondos de carro_23 e carro_15, de 0,11 m e lente branca, sobre suportes que saem do para-choque, na frente da borda de baixo dos faróis e dos cantos da grade. Eles pendem do `Saia_dianteira_PIVO` com o para-choque. As fotos da Seiva em corrida não os mostram.
+- **Transmissão e traseira:** cardã até o diferencial e o eixo traseiro, braços longitudinais (abaixo do assoalho) e amortecedores, visíveis por baixo.
+- **Interior do jogo:** o cockpit do jogo (`cockpit.js` e módulos) foi exportado e trazido para o carro. Traz o banco Sgarbi e o cinto, o volante Sparco com a coluna, o painel Auto Meter, os interruptores Luizão, os pedais Tilton, a alavanca de câmbio alta, a chave geral na placa de carbono, o lado do passageiro (MSD, relés, rádio, fone) e a traseira (bateria, extintor). As caixas da casca, a gaiola, as redes e as espumas do jogo não entram, porque não servem nesta carroceria. O equipamento desceu 9,3 cm em bloco, do piso do jogo (0,31) para o piso da V6 (0,217). Os pontos da caixa de pedais que passavam do corta-fogo foram achatados sobre ele, para não aparecerem no cofre.
+
+## Peças separáveis
+
+Cada peça móvel é filha de um *empty* (pivô) posicionado no eixo real da dobradiça, filho direto de `OPALA_99_ROOT`, sem rotação salva. O pivô traz as propriedades:
+
+- `peca`: o tipo da peça.
+- `eixo_local` (`X`, `Y` ou `Z`) e `angulo_aberto_graus`: a rotação de abertura, com sinal, no referencial do Blender.
+- `eixo_gltf` e `angulo_gltf_graus`: a mesma abertura no referencial do GLB.
+- `descricao`: texto livre.
+
+Girar o pivô por esse ângulo abre a peça sem que ela toque na carroceria, e o verificador confere isso em oito ângulos, de 0 até a abertura total. Ficam fora dessa conferência as peças marcadas com `ignorar_colisao`: as dobradiças (os nós se encaixam no pino de propósito), a fechadura e o contrapino das portas, e os suportes das dobradiças do capô e da tampa. As dobradiças são conferidas à parte: a folha móvel precisa ficar a no máximo 1 mm da fixa em 0, 25, 50, 75 e 100% da abertura.
+
+| Pivô | Eixo (Blender) | Abertura | Eixo e ângulo no GLB | O que pende nele |
+|---|---|---|---|---|
+| `Porta_Motorista_DOBRADICA` | Z | −67° | (0, 1, 0), −67° | pele, faixa, peitoril, friso, adesivos da porta, retrovisor, estrutura com painel e forro, parafusos, dobradiças, fechadura |
+| `Porta_Passageiro_DOBRADICA` | Z | +67° | (0, 1, 0), +67° | idem, do lado do passageiro |
+| `Capo_DOBRADICA` | Y | −52° (frente sobe) | (0, 0, 1), +52° | capô, adesivo do capô, estrutura e chapa interna, placas e argolas dos pinos traseiros, travas dianteiras, tiras das dobradiças |
+| `Tampa_porta_malas_DOBRADICA` | Y | +65° (traseira sobe) | (0, 0, 1), −65° | tampa, adesivo RTJ, estrutura e chapa interna, travas Aerocatch, braços das dobradiças |
+| `Motor_CONJUNTO` | — | 0 (estático) | (0, 0, 0), 0 | motor, câmbio, coletores de escape (para o jogo esconder ou vibrar) |
+| `Tanque_combustivel_CONJUNTO` | — | 0 (estático) | (0, 0, 0), 0 | célula de combustível e berço (para um dano futuro, como na foto carro_22) |
+| `Tampa_bocal_1_DOBRADICA`, `Tampa_bocal_2_DOBRADICA` | Z | +70° | (0, 1, 0), +70° | tampas dos bocais de combustível |
+| `Saia_dianteira_PIVO` | — | 0 (estático) | (0, 0, 0), 0 | saia dianteira e para-choque, e na OMP os faróis auxiliares (dano futuro) |
+| `Interior_do_jogo` | — | 0 (estático) | (0, 0, 0), 0 | interior do jogo, agrupado por material (`deslocamento_z` = −0,093) |
+
+**Referencial do GLB.** O Blender usa Z para cima e o GLB (glTF) usa Y para cima. O exportador converte as coordenadas assim: o x do glTF é o x do Blender (frente do carro), o y do glTF é o z do Blender (para cima) e o z do glTF é o −y do Blender (o lado do motorista vira −z). Essa troca é uma rotação, então o ângulo mantém o sinal em torno do eixo convertido. Só que o eixo Y do Blender vira −Z no glTF. Por isso `eixo_gltf` e `angulo_gltf_graus` dão a abertura em torno do eixo **positivo** do glTF: o capô abre +52° em torno de +Z, a tampa −65° em torno de +Z e as portas giram em torno de +Y com o mesmo ângulo do Blender. No three.js, basta `pivo.quaternion.setFromAxisAngle(new THREE.Vector3(...extras.eixo_gltf), THREE.MathUtils.degToRad(extras.angulo_gltf_graus * fracao))`, a partir do pivô sem rotação. O verificador abre o GLB exportado e confere que, com esses valores, o capô e a tampa sobem e as portas abrem para fora.
+
+## Nomes usados pelo jogo
+
+Os nomes da [V5](../v05_opala_real/README.md#nomes-usados-pelo-jogo) continuam valendo: os quatro pivôs de roda, `Policarbonato_fume`, `Chapa_fechamento_V04` (peças filhas diretas do root e com material único), `Pintura_preta`, `Faixa_amarela`, `Branco` e os materiais `Adesivo*` (as novas texturas de RR, invent e 99 entraram nesses mesmos materiais). O 99 da traseira continua sendo a malha `Numero_traseiro` em `Branco`, atrás de x = −2,05. As peças móveis reutilizam esses materiais, então a troca de cor dos adversários também pinta portas, capô e tampa. A V6 acrescenta os nomes dos pivôs da tabela acima e as propriedades deles, que vão para o GLB como *extras* dos nós.
+
+**Adversários e cockpit.** Os adversários são clones do carro (`main.js`), e o jogo monta o próprio cockpit em tempo de execução (`cockpit.js`). Por isso, ao carregar a V6:
+
+- para os adversários, o jogo deve descartar os nós `Interior_do_jogo`, `Motor_CONJUNTO` e `Tanque_combustivel_CONJUNTO`, com tudo o que pende deles;
+- a câmera do cockpit continua usando o interior do `cockpit.js`, e não o `Interior_do_jogo` do GLB, que serve para renders e outras ferramentas.
+
+O GLB pode sair sem o interior (veja "Exportar").
+
+## Como a V6 é gerada
+
+O script [construir_opala_v06.py](../scripts/construir_opala_v06.py) parte dos `.blend` da V5 (que não são alterados) e grava os desta pasta:
+
+```powershell
+blender --background modelo_3d\v05_opala_real\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\construir_opala_v06.py
+blender --background modelo_3d\v05_opala_real\opala99_assinaturas_omp.blend --python-exit-code 2 --python modelo_3d\scripts\construir_opala_v06.py
+```
+
+Cada execução leva cerca de 17 s (11 s com `OPALA_INTERIOR_GLB`). O trabalho está dividido em módulos, e as medidas usadas ficam no início de cada um:
+
+- [v06_lateral.py](../scripts/v06_lateral.py): vidro lateral traseiro, vela, coluna chata, redes, os adesivos redesenhados e os nomes da porta do passageiro. As texturas vetoriais são desenhadas no próprio Blender, com as fontes Century Gothic, Franklin Gothic Heavy e Segoe UI do Windows.
+- [v06_carroceria.py](../scripts/v06_carroceria.py): portas, dobradiças, batentes, frente levantada, capô, grade, faixa do nariz, "eletric", tampa, travas.
+- [v06_detalhes.py](../scripts/v06_detalhes.py): faces de baixo acetinadas, vincos do capô, lanternas, 99 da traseira, molduras dos faróis, cores das redes e do vidro, faixa sobre os para-lamas, limpeza dos recortes de foto nos adesivos e os faróis auxiliares da OMP.
+- [v06_motor.py](../scripts/v06_motor.py): cofre, motor, suspensão dianteira, transmissão e escapamento.
+- [v06_porta_malas.py](../scripts/v06_porta_malas.py): porta-malas e tanque.
+- [v06_interior.py](../scripts/v06_interior.py): o interior do jogo.
+- [v06_comum.py](../scripts/v06_comum.py): funções comuns.
+
+No fim, os materiais criados pela V6 que ficaram idênticos ou quase idênticos são unificados (24 a menos). Os materiais da V5 não são tocados.
+
+O interior vem do jogo pela ferramenta [exportar_interior_jogo.py](../scripts/exportar_interior_jogo.py). Ela abre um servidor próprio sobre `pista_interlagos/teste`, carrega o `cockpit.js` no Edge sem janela (Playwright) e exporta o cockpit em GLB com o GLTFExporter do three.js, sem alterar nada no jogo. O construtor chama a ferramenta sozinho. Ela precisa de um Python com Playwright, que é procurado em `OPALA_PLAYWRIGHT_PYTHON` ou no venv das verificações do projeto (`%TEMP%\pwv`). Para reaproveitar um GLB já exportado, defina `OPALA_INTERIOR_GLB`. Se uma linha descartada do cockpit mudar de material, o construtor para com erro, e aí é preciso rever a tabela `DROP` de `v06_interior.py`.
+
+## Verificação
+
+```powershell
+blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\verificar_opala_v06.py -- C:\caminho\temporario\teste_v06.glb
+```
+
+O [verificar_opala_v06.py](../scripts/verificar_opala_v06.py) leva cerca de 20 s e faz 88 conferências:
+
+- os pivôs, as propriedades e o que pende de cada um, incluindo as travas dianteiras do capô;
+- as rodas: os 84 objetos das rodas e os pivôs são idênticos aos da V5;
+- a abertura de cada peça em oito ângulos, sem tocar a carroceria;
+- a folga mínima de cada peça fechada (3,9 a 4,0 mm);
+- as dobradiças: a folha móvel a no máximo 1 mm da fixa em 0, 25, 50, 75 e 100% da abertura (hoje 0,7 mm nas portas e 0,0 mm no capô e na tampa), e os braços do capô e da tampa sem atravessar a estrutura interna da peça (0 pares de triângulos);
+- a largura das juntas vista de fora: raios cruzam cada junta a cada 0,25 mm, e nenhum trecho pode passar de 6 mm (hoje: de 3,8 a 5,5 mm, mediana 4,0);
+- a folga do motor até o capô (26 mm);
+- se o interior fura teto, vidros, portas ou laterais;
+- se alguma peça interna aparece pela pele do carro fechado, lançando raios de fora (peças vistas pelas juntas não contam);
+- as **sobreposições estáticas** entre peças de grupos diferentes, com tudo fechado, contra a base aceita em [v06_sobreposicoes_base.py](../scripts/v06_sobreposicoes_base.py) (hoje 61 pares em cada pintura, como suportes presos nos painéis). Um par novo reprova. Depois de uma mudança intencional, confira os pares novos e grave a base de novo com `-- <glb> --gravar-base`;
+- o tanque e o berço a 10 mm ou mais do `Painel_traseiro` (hoje 74 mm), sem sobreposição;
+- que nada da célula, do berço ou do porta-malas seja a primeira coisa atingida por raios vindos de trás (z de 0,15 a 0,45) e de baixo, atrás do eixo traseiro;
+- se o piso da cabine está fechado por baixo;
+- as redes das janelas: de x ≤ −0,17 até x ≥ +0,52, com 7 tiras verticais e 5 horizontais (hoje de −0,210 a +0,535);
+- que nenhuma parte visível de um adesivo lateral fique a menos de 3 cm de uma junta de porta (o RR IMPORT, cortado na junta de propósito, fica de fora);
+- que nenhum adesivo tenha o desenho cortado: nenhum texel opaco (alfa > 0,5) pode ficar na borda da malha dele. A amostra é tirada ao longo de cada aresta de borda, 1,5 texel para dentro da face; onde a borda corre sobre a própria borda da imagem, o desenho termina ali e não conta. Esta verificação pega o corte que a das juntas não vê (os nomes da OMP na porta do motorista, cortados em x = +0,02 na terceira rodada);
+- o limite de faces, as regras de material e as imagens embutidas.
+
+As verificações do tanque, das redes e das juntas reprovam os `.blend` da segunda rodada: 871 raios atingem o berço, a rede tem de −0,212 a +0,191 com 6 + 4 tiras, e os nomes da OMP cruzam a junta. A de corte reprova os da terceira: o painel de nomes da porta do motorista da OMP (33 amostras), o pedaço do NIPO que passava para a porta e a ponta do logo NIPO no capô da Seiva.
+
+No fim ele exporta um GLB de teste pelo exportador do jogo, com as verificações dele, reimporta o arquivo e procura os nós dos pivôs. Também lê os *extras* no GLB e confere o sentido de `eixo_gltf` e `angulo_gltf_graus`. Se algo falhar, termina com código 2.
+
+Números atuais (tamanhos em MiB, 1 MiB = 1 048 576 bytes, com os MB decimais entre parênteses):
+
+- faces: 224 938 na Seiva e 230 198 na OMP, contra 102 mil na V5 e um limite de 260 mil. Dessas, 10 mil são do motor e 62 mil do interior do jogo;
+- GLB da Seiva: 19,2 MiB (20,1 MB) com o interior e 12,3 MiB (12,9 MB) sem ele;
+- GLB da OMP: 19,9 MiB (20,9 MB) com o interior e 13,0 MiB (13,6 MB) sem ele.
+
+O GLB da V5 no jogo tem 7,8 MiB (8,2 MB). Com o interior, a V6 da Seiva tem 208 malhas, 153 materiais e 71 imagens; sem ele, 131 malhas, 77 materiais e 32 imagens (a OMP tem duas malhas e um material a mais). A V5 tem 62 malhas, 46 materiais e 29 imagens.
+
+## Renderizar
+
+```powershell
+blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\renderizar_opala_v06.py
+```
+
+O [renderizar_opala_v06.py](../scripts/renderizar_opala_v06.py) usa Cycles na GPU (OptiX) com *denoise*, em 1280×840, e grava JPG em `renders/`. As cores usam a transformação de vista **Khronos PBR Neutral**, sem *look* (definida só na memória), porque esses renders são comparados com as fotos: a AgX, padrão do Blender, desbotava o amarelo da faixa e dos adesivos para bege, e a Standard mantinha o amarelo mas estourava o chão do estúdio e deixava as setas iluminadas cor de limão. Para isso usa o ffmpeg da pasta de apps, ou o próprio Blender se o ffmpeg não estiver lá. As peças são abertas só na memória, e o `.blend` não muda. As 11 vistas da Seiva levam cerca de 70 s. O arquivo OMP gera as quatro vistas de frente com o sufixo `_assinaturas_omp`. Com `-- --views motor_capo_aberto,traseira --samples 48` dá para renderizar só algumas vistas.
+
+## Exportar sem sobrescrever o jogo
+
+O exportador da V5 grava por padrão em `pista_interlagos/teste/assets/`. Para a V6, sempre informe outro destino:
+
+```powershell
+blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\exportar_glb_jogo.py -- C:\caminho\temporario\opala99_seiva_danilo_v06.glb
+blender --background modelo_3d\v06_pecas_separadas\opala99_seiva_danilo.blend --python-exit-code 2 --python modelo_3d\scripts\exportar_glb_jogo.py -- C:\caminho\temporario\opala99_seiva_danilo_v06.glb --sem-interior
+```
+
+O [exportar_glb_jogo.py](../scripts/exportar_glb_jogo.py) dá às cópias exportadas os nomes exatos dos objetos, sem o sufixo `.001`. Ele confere no GLB os pivôs que têm a propriedade `peca`, com os *extras* (inclusive `eixo_gltf` e `angulo_gltf_graus`) e as malhas. Com `--sem-interior`, deixa de fora `Interior_do_jogo` e tudo o que pende dele. A exportação da V5 continua passando.
+
+## Organização da cena
+
+- `01_Carroceria`: painéis, portas e pivôs das peças móveis, capô, tampa, batentes, vedações, coluna chata e vela.
+- `02_Vidros_Redes_Interior`: vidros, redes e a gaiola da V5 (preta), com a travessa nova do para-brisa.
+- `03_Rodas_Freios`: sem mudança.
+- `04_Farois_Lanternas_Detalhes` e `05_Pintura_Adesivos`: como na V5, com o "eletric", os adesivos e as molduras dos faróis refeitos, a grade nova (`Grade_barras`, `Grade_malha`), os refletores dos faróis (`Refletor_farol`) e, na OMP, os `Farol_auxiliar`.
+- `06_Fechamentos_estruturais_V04`: assoalho, anteparo e painéis internos recortados, mais a `Estrutura_cofre_V06`, que junta o corta-fogo moldado, o túnel e o degrau sobre o eixo traseiro, tudo em `Chapa_fechamento_V04`.
+- `07_Interior_do_jogo`: o interior do jogo e o complemento do painel.
+- `08_Cofre_do_motor`: aventais, suporte do radiador, radiador, acessórios, suspensão dianteira, postes dos pinos, suportes das dobradiças do capô, transmissão, eixo traseiro e escapamento dianteiro.
+- `09_Motor`: o motor dentro de `Motor_CONJUNTO`.
+- `10_Porta_malas`: o porta-malas e o tanque dentro de `Tanque_combustivel_CONJUNTO`.
+- `90_Estudio_Cameras`: sem mudança.
+
+## Fontes
+
+- Lateral, junta da porta, vidro traseiro e adesivos: carro_5 (vista alinhada pelos cubos das rodas), carro_7, carro_15, carro_18 e carro_20. Redes das janelas: carro_3, carro_5 e carro_21. Nomes da porta do passageiro: carro_21.
+- Motor e cofre: carro_41 e carro_42.
+- Frente, altura do nariz, grade, capô e vincos, "eletric", travas do capô e faróis: carro_1, carro_4 e carro_23. Faróis auxiliares da OMP: carro_15 e carro_23.
+- Forro das portas: carro_30 e carro_33; traseira, lanternas e 99: carro_6.
+- Porta-malas e tanque: carro_22, carro_37 e carro_38; travas da tampa: carro_39 e carro_40.
+- Interior: o do jogo, feito a partir das fotos carro_8, carro_14 e carro_24 a 36.
+- Motor Chevrolet 250: distância entre cilindros de 4,40 pol (111,8 mm), bloco de 0,72 m e 236 mm do virabrequim ao plano do cabeçote; admissão e escape no lado do motorista; distribuidor, velas, motor de arranque e filtro de óleo no lado do passageiro.
+
+## O que ainda é aproximado
+
+- **Frente e lateral:** a frente segue as fotos de frente (faixa do nariz de 0,92 do farol, grade no nível dos faróis). Na lateral alinhada pelos cubos (carro_5), o topo do capô fica a ±2 cm da foto, menos em x = 2,1, onde passa uns 3 cm acima (ali a foto já começa a descer para o nariz); a linha do capô mudou menos de 5 mm em relação à terceira rodada. A borda dianteira do capô tem 3 cm de abaulamento de um lado ao outro (0,860 no centro, 0,830 em y = ±0,6), o mesmo que o capô tem em x = 1,9. No teste de zebra os reflexos da frente estão contínuos; perto do canto dianteiro do para-lama eles ainda se curvam mais que na V5. O reflexo do lado direito do capô OMP (o "lane" mais claro) é o chão do estúdio refletido na pele brilhante, e não o adesivo. O adesivo OMP/nextlane do capô continua menor e mais recuado que em carro_23.
+- **Vela, JESUS TÁ ON e adesivo redondo:** a chapa nova atrás do vidro se funde à coluna C da V5, mas a borda antiga dela ainda aparece como um vinco. O JESUS TÁ ON não subiu nem cresceu mais, e o adesivo redondo continua com 7 cm. O espaço não deixa: a vela da V5 vai até z = 1,16 em x = −0,85 e desce até 1,10 em x = −1,1 (é o contorno do teto, que bate com carro_5), o topo do JESUS já está em 1,10–1,13, e à frente o vidro lateral começa em x = −0,83. Subir 7 cm deixaria metade das letras fora do carro, 15 % a mais passaria sobre o vidro, e um adesivo redondo de 12 cm ficaria 5 cm acima da borda da vela. As calhas e o cabeçalho das janelas continuam até o fim do teto, como na V5.
+- **Faixa amarela:** tem 7,2 cm de altura visível na porta e na lateral traseira (a crítica mediu cerca de 5,2 cm num render e pediu 7,4). Não foi mudada, para não mexer nos adesivos em volta.
+- **Juntas:** vistas de fora, as juntas medem de 3,8 a 4,5 mm. A exceção é a junta dianteira da porta do motorista, que chega a 5,5 mm perto de z = 0,76. Ali a pele da porta foi recuada por baixo das camadas salientes do para-lama, para passar por elas ao abrir.
+- **Dobradiças:** são dobradiças de pino simples, sem mecanismo de quatro barras. As da tampa ficam em y = ±0,28, mais para dentro que as reais, porque é onde a tampa abaulada cobre os nós. Abaixar mais o eixo faria a borda dianteira da tampa entrar no vidro traseiro. As aberturas na face do para-lama por onde passam os braços das portas são retangulares.
+- **Suspensão:** a suspensão dianteira é simplificada.
+- **Porta-malas:** não tem caixas de roda (veja acima). Com o fundo fechado sob a célula, pela folga ao lado dela se vê o fundo preto, e não o chão como em carro_38. Uma abertura no fundo ali não foi feita: a folga tem só 2,5 a 5,5 cm, o trilho do berço passa por baixo dela, e por uma abertura se veria o trilho por baixo do carro (a verificação do porta-malas reprovaria).
+- **Interior do jogo:** ainda cruza o túnel, o corta-fogo e o degrau da V6 dentro da cabine (fica escondido), e a gaiola do jogo coincide em parte com a gaiola da V5. Os materiais sem iluminação do jogo (mostradores, ponteiros, telas) viraram Principled só com emissão.
+- **Lanternas:** o vermelho escuro tende ao laranja sob luz forte nos renders, e as facetas da lente são discretas.
+- **Tamanho:** mesmo sem o interior, o GLB da V6 tem cerca de 1,6 vez o da V5, por causa do motor, do cofre, do porta-malas e das dobradiças. Para os adversários, o jogo deve descartar interior, motor e tanque. Juntar os materiais estáticos por grupo, ou exportar um LOD sem motor, cofre e porta-malas, ainda não foi feito.

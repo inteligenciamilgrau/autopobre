@@ -1,5 +1,7 @@
 # Opala 99 — modelos editáveis (V5)
 
+> Já existe a [V6 com as peças separadas](../v06_pecas_separadas/README.md) (portas, capô, porta-malas, motor e o interior do jogo), gerada a partir destes arquivos pelo script `construir_opala_v06.py`. O jogo continua usando os GLBs desta V5 até a integração da V6.
+
 Estes dois arquivos Blender são a fonte do carro do jogo. Cada pintura é um arquivo separado e gera o seu GLB em `pista_interlagos/teste/assets/`.
 
 | Pintura | Blender editável | GLB do jogo |
