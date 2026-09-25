@@ -14,11 +14,12 @@ Abra com o **Blender 5.1** ou mais recente (gerados no 5.2.2). Tudo fica embutid
 O jogo carrega o GLB da V6 sem o interior, porque a câmera interna continua usando o cockpit do `cockpit.js`. O módulo [car-openings.js](../../pista_interlagos/teste/car-openings.js) lê os pivôs com os *extras* `eixo_gltf` e `angulo_gltf_graus` e anima a abertura:
 
 - **Nos boxes (Box 99):** a equipe abre o que está consertando: o capô no serviço de motor, a tampa do porta-malas no conserto do tanque e as tampas dos bocais durante o abastecimento. Cada peça fecha quando o serviço acaba. A porta do motorista abre quando o piloto desce do carro e quando volta a entrar. O painel do box tem os botões "Abrir o capô · ver o motor" e "Abrir o porta-malas" (teclas H e T), que também funcionam com o piloto a pé.
+- **No paddock do modo história (vaquinha):** a pé, perto do Opala parado no Box 99, H abre o capô para ver o motor e T abre o porta-malas com a célula de combustível. Os botões "Abrir o capô · ver o motor" e "Abrir o porta-malas" aparecem no painel quando o piloto chega perto do carro (no computador, Tab solta o mouse para clicar; no celular, basta tocar).
 - **Na pista, com o carro parado:** H abre o capô e T abre o porta-malas. O que foi aberto à mão fecha quando o carro anda (acima de 1,5 m/s), e o R (reposicionar) fecha tudo na hora.
 - **Adversários e o Opala do paddock:** são cópias do carro com todas as dobradiças fechadas. Os adversários deixam de fora `Motor_CONJUNTO`, `Tanque_combustivel_CONJUNTO` e as malhas marcadas `interno` (veja "Exportar para o jogo").
 - **Vidro dos faróis e piscas:** no Blender, a lente dos faróis e o pisca usam transmissão (vidro de verdade). No three.js isso faria a cena inteira ser desenhada duas vezes por quadro, então o jogo troca esses materiais por transparência simples ao carregar o carro. Com isso, a V6 ficou em cerca de 800 *draw calls* no grid de Interlagos, contra cerca de 630 da V5, com o mesmo tempo de quadro.
 
-As checagens são [testar_aberturas.mjs](../../pista_interlagos/scripts/testar_aberturas.mjs) (Node: sentido de abertura de cada peça, lido dos GLBs do jogo, e a equipe do box) e [verificar_aberturas.py](../../pista_interlagos/scripts/verificar_aberturas.py) (navegador: box, porta do piloto, tecla H, troca de pintura e adversários sem motor).
+As checagens são [testar_aberturas.mjs](../../pista_interlagos/scripts/testar_aberturas.mjs) (Node: sentido de abertura de cada peça, lido dos GLBs do jogo, e a equipe do box) e [verificar_aberturas.py](../../pista_interlagos/scripts/verificar_aberturas.py) (navegador: box, porta do piloto, tecla H, troca de pintura, adversários sem motor e o capô e o porta-malas do Opala no paddock do modo história).
 
 ## Renders
 
