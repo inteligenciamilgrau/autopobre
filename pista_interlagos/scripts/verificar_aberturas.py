@@ -1,11 +1,11 @@
 """Opala V06 in the game: doors, hood, trunk lid and filler caps on their hinges (car-openings.js).
 
-At Curvelo's Box 99 the pit panel lifts the hood, the crew opens what it works on (engine: hood,
-fuel cell: trunk lid, refuelling: filler caps), the driver's door swings as the pilot gets out
-and back in, and everything shuts when the stop ends. Outside the box, H lifts the hood with the
-car standing and it shuts as the car moves off. Rivals leave the engine and the fuel cell out.
-In story mode at Interlagos, the pilot on foot lifts the hood and the trunk lid of the Opala parked
-in Box 99 (H/T or the panel buttons) to look at the engine and the fuel cell.
+At Curvelo's Box 99 the crew opens what it works on (engine: hood, fuel cell: trunk lid,
+refuelling: filler caps), the driver's door swings as the pilot gets out and back in, and
+everything shuts when the stop ends. On foot, one action key works GTA style by where the pilot
+stands: E at the nose lifts the hood, at the tail the trunk lid (the context button says which).
+Rivals leave the engine and the fuel cell out. In story mode at Interlagos the same action key,
+by the Opala parked in Box 99, lifts the hood (engine) or the lid (fuel cell), or gets in at the door.
 
 Usage, from the repo root, with the local server running (INTERLAGOS_URL for another port):
   python pista_interlagos/scripts/verificar_aberturas.py
@@ -57,17 +57,7 @@ with sync_playwright() as p:
          const c=interlagos.car,i=c.a.findIndex(q=>q[0]>=20),q=c.a[i];c.reset(i);c.x=q[1]+q[9]*21.65;c.y=q[2]+q[10]*21.65;c.surface=c.sample(c.x,c.y);}""")
         wait_js(page, 'pit.opened')
         wait_js(page, "!document.querySelector('#pitPanel').hidden")
-        check('pit_panel_offers_hood_and_trunk', page.is_visible('#pitHood') and page.is_visible('#pitTrunk') and 'capô' in page.inner_text('#pitHood'))
-        # The panel's button lifts the hood to look at the engine; the camera goes round to the nose.
-        page.click('#pitHood')
-        wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open===1")
-        check('hood_opens_from_panel', 'manual' in opening(HOOD)['reasons'] and 'Fechar' in page.inner_text('#pitHood'))
-        page.evaluate('pit.view={angle:.45,elev:.62,distance:4.6}')
-        page.wait_for_timeout(900)
-        page.screenshot(path=str(ROOT / 'renders/aberturas_capo_aberto_box.png'))
-        page.keyboard.press('h')
-        wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open===0")
-        check('h_key_shuts_hood_in_pit', True)
+        check('pit_panel_has_no_separate_opening_buttons', page.locator('#pitHood').count() == 0)
         # Orders: engine (hood), fuel cell (trunk lid) and refuelling (filler caps) open by themselves.
         page.click('[data-repair="motor"][data-kind="proper"]')
         page.click('[data-repair="tanque"][data-kind="proper"]')
@@ -76,7 +66,6 @@ with sync_playwright() as p:
         wait_js(page, "pit.service.jobs.map(j=>j.id).sort().join()==='motor,tanque'&&pit.service.queue[0]?.id==='fuel'")
         wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open===1&&interlagos.openingsInfo()['{TRUNK}'].open===1")
         check('crew_opens_hood_and_trunk', 'equipe' in opening(HOOD)['reasons'] and 'equipe' in opening(TRUNK)['reasons'] and not opening(CAPS[0])['reasons'])
-        check('panel_says_crew_on_engine', page.is_disabled('#pitHood') and 'equipe no motor' in page.inner_text('#pitHood'))
         page.evaluate('pit.view={angle:2.6,elev:.5,distance:5.5}')
         page.wait_for_timeout(900)
         page.screenshot(path=str(ROOT / 'renders/aberturas_equipe_porta_malas.png'))
@@ -96,8 +85,30 @@ with sync_playwright() as p:
         wait_js(page, f"interlagos.openingsInfo()['{DOOR}'].open>.95")
         wait_js(page, f"interlagos.openingsInfo()['{DOOR}'].open===0", timeout=10000)
         check('door_opens_as_pilot_gets_out_and_shuts', True)
-        # Back to the car on foot; F opens the door again and the stop ends.
-        page.evaluate("""()=>{const t=pit.heroStart();for(let i=0;i<2400;i++){const dx=t.x-pit.hero.position.x,dz=t.z-pit.hero.position.z;if(Math.hypot(dx,dz)<.5)return;pit.coffee.yaw=Math.atan2(-dz,dx);pit.beforeStep({throttle:1,brake:0,left:0,right:0},1/120);}}""")
+        # GTA style, one action key where the pilot stands: at the nose E lifts the hood, at the tail the lid.
+        page.evaluate("""window.standAt=ahead=>{const c=pit.car,h=c.heading;pit.hero.position.x=c.x+Math.cos(h)*ahead;pit.hero.position.z=-c.y-Math.sin(h)*ahead;
+         pit.coffee.yaw=pit.hero.rotation.y=h+(ahead>0?Math.PI:0);pit.walkFollow=null;}""")
+        page.evaluate('standAt(2.8)')
+        wait_js(page, "pit.interaction()==='capo'")
+        wait_js(page, "document.querySelector('#pitInteract').textContent.includes('Abrir o capô')")
+        check('action_button_offers_hood_at_the_nose', page.is_visible('#pitInteract'))
+        page.keyboard.press('e')
+        wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open===1")
+        page.wait_for_timeout(700)
+        page.screenshot(path=str(ROOT / 'renders/aberturas_capo_aberto_box.png'))
+        check('e_opens_hood_on_foot', 'manual' in opening(HOOD)['reasons'] and 'Fechar o capô' in page.inner_text('#pitInteract'))
+        page.keyboard.press('e')
+        wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open===0")
+        check('e_shuts_hood_again', True)
+        page.evaluate('standAt(-2.8)')
+        wait_js(page, "pit.interaction()==='porta_malas'")
+        page.keyboard.press('e')
+        wait_js(page, f"interlagos.openingsInfo()['{TRUNK}'].open===1")
+        page.wait_for_timeout(700)
+        page.screenshot(path=str(ROOT / 'renders/aberturas_porta_malas_box.png'))
+        check('e_opens_trunk_at_the_tail', True)
+        # By the driver's door (lid still open) F gets in: the door swings and the stop shuts everything.
+        page.evaluate('pit.hero.position.copy(pit.heroStart())')
         wait_js(page, "pit.interaction()==='car'")
         page.keyboard.press('f')
         wait_js(page, '!pit.opened')
@@ -105,29 +116,15 @@ with sync_playwright() as p:
         check('door_opens_as_pilot_gets_back_in', True)
         wait_js(page, "Object.values(interlagos.openingsInfo()).every(p=>p.open===0&&!p.reasons.length)", timeout=10000)
         check('all_shut_after_stop', True)
-        # Out of the box, standing: H lifts the hood; driving off shuts it.
-        page.keyboard.press('h')
-        wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open>.5")
-        check('h_opens_hood_standing', True)
-        page.keyboard.down('w')
-        wait_js(page, 'Math.hypot(interlagos.car.vx,interlagos.car.vy)>2', timeout=20000)
-        page.keyboard.up('w')
-        wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open===0", timeout=10000)
-        check('hood_shuts_when_moving', not opening(HOOD)['reasons'])
         # A livery swap loads the other GLB with its own hinges.
         livery = page.evaluate('interlagos.state.livery')
         page.keyboard.press('v')
         wait_js(page, f"interlagos.state.livery!=='{livery}'")
-        page.keyboard.down('s')
-        wait_js(page, 'Math.hypot(interlagos.car.vx,interlagos.car.vy)<.2', timeout=30000)
-        page.keyboard.up('s')
-        page.keyboard.press('h')
-        wait_js(page, f"interlagos.openingsInfo()['{HOOD}'].open>.5")
         check('hinges_after_livery_swap', len(page.evaluate('interlagos.openingsInfo()')) == 6)
         check('no_browser_errors', not errors)
         context.close()
-        # Story mode at Interlagos: on foot in the paddock, H and T (or the panel) lift the hood and
-        # the trunk lid of the Opala parked in Box 99, to look at the engine and the fuel cell.
+        # Story mode at Interlagos: on foot in the paddock the same action key, by the Opala parked in
+        # Box 99, lifts the hood (engine) or the trunk lid (fuel cell), or gets in at the driver's door.
         context = browser.new_context(viewport={'width': 1280, 'height': 820})
         context.add_init_script("localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:true}));")
         page = context.new_page()
@@ -144,37 +141,50 @@ with sync_playwright() as p:
         page.evaluate('interlagos.immersiveInfo()')
         wait_js(page, "fixtureMode.state.phase==='crowd'&&!!fixtureMode.visual.ownOpenings")
         own = lambda name: page.evaluate(f"fixtureMode.visual.ownOpenings.info()['{name}']")
-        # Stand the pilot 3 m ahead of the parked Opala (or behind it), facing it; the camera follows him.
+        # Stand the pilot 3 m ahead of the parked Opala (or behind it) facing it, or by its driver's door.
         page.evaluate("""window.standBy=side=>{const v=fixtureMode.visual,o=v.own,ry=o.rotation.y,f=[Math.cos(ry),-Math.sin(ry)];
-         v.hero.position.x=o.position.x+f[0]*3*side;v.hero.position.z=o.position.z+f[1]*3*side;v.foot.yaw=v.hero.rotation.y=ry+(side>0?Math.PI:0);v.followPosition=null;}""")
+         v.hero.position.x=o.position.x+f[0]*3*side;v.hero.position.z=o.position.z+f[1]*3*side;v.foot.yaw=v.hero.rotation.y=ry+(side>0?Math.PI:0);v.followPosition=null;};
+         window.standDoor=()=>{const v=fixtureMode.visual,o=v.own,ry=o.rotation.y;v.hero.position.x=o.position.x-Math.sin(ry)*1.6;v.hero.position.z=o.position.z-Math.cos(ry)*1.6;};""")
         page.evaluate('standBy(1)')
-        wait_js(page, 'fixtureMode.visual.nearCar()')
-        check('paddock_panel_offers_hood_and_trunk', page.is_visible('[data-action="hood"]') and page.is_visible('[data-action="trunk"]'))
-        check('paddock_hint_names_keys', 'H: capô' in page.inner_text('#immAlert'))
-        page.keyboard.press('h')
+        wait_js(page, "fixtureMode.visual.carAction()==='capo'")
+        wait_js(page, "document.querySelector('#immAlert').textContent.includes('E: abrir o capô')")
+        check('paddock_action_button_offers_hood', 'Abrir o capô' in page.inner_text('[data-action="car"]'))
+        page.keyboard.press('e')
         wait_js(page, f"fixtureMode.visual.ownOpenings.info()['{HOOD}'].open===1")
         page.wait_for_timeout(900)
         page.screenshot(path=str(ROOT / 'renders/aberturas_paddock_motor.png'))
-        check('paddock_h_opens_hood', 'Fechar o capô' in page.inner_text('[data-action="hood"]') and not page.evaluate(f"interlagos.openingsInfo()['{HOOD}'].reasons.length"))
+        check('paddock_e_opens_hood', 'Fechar o capô' in page.inner_text('[data-action="car"]') and not page.evaluate(f"interlagos.openingsInfo()['{HOOD}'].reasons.length"))
         page.evaluate('standBy(-1)')
-        page.keyboard.press('t')
+        wait_js(page, "fixtureMode.visual.carAction()==='porta_malas'")
+        page.keyboard.press('e')
         wait_js(page, f"fixtureMode.visual.ownOpenings.info()['{TRUNK}'].open===1")
         page.wait_for_timeout(900)
         page.screenshot(path=str(ROOT / 'renders/aberturas_paddock_porta_malas.png'))
-        check('paddock_t_opens_trunk', True)
-        # The walk holds the mouse (pointer lock): Tab frees it to click the panel, as for the jokes.
+        check('paddock_e_opens_trunk_at_the_tail', own(HOOD)['open'] == 1)
+        # The walk holds the mouse (pointer lock): Tab frees it to click the panel's action button.
         if page.evaluate('!!document.pointerLockElement'):
             page.keyboard.press('Tab')
             wait_js(page, '!document.pointerLockElement')
-        page.click('[data-action="trunk"]')
-        page.click('[data-action="hood"]')
-        wait_js(page, f"fixtureMode.visual.ownOpenings.info()['{HOOD}'].open===0&&fixtureMode.visual.ownOpenings.info()['{TRUNK}'].open===0")
-        check('paddock_panel_shuts_them', True)
-        # Away from the car the keys do nothing (and never touch the player's hidden race car).
+        page.click('[data-action="car"]')
+        wait_js(page, f"fixtureMode.visual.ownOpenings.info()['{TRUNK}'].open===0")
+        page.evaluate('standBy(1)')
+        wait_js(page, """document.querySelector('[data-action="car"]')?.textContent.includes('Fechar o capô')""")
+        page.click('[data-action="car"]')
+        wait_js(page, f"fixtureMode.visual.ownOpenings.info()['{HOOD}'].open===0")
+        check('paddock_action_button_shuts_them', True)
+        # By the driver's door the action key gets in, as F does; F gets out again.
+        page.evaluate('standDoor()')
+        wait_js(page, "fixtureMode.visual.carAction()==='porta'")
+        page.keyboard.press('e')
+        wait_js(page, 'fixtureMode.inCar')
+        check('paddock_e_by_the_door_gets_in', True)
+        page.keyboard.press('f')
+        wait_js(page, '!fixtureMode.inCar')
+        # Away from the car the action key has nothing of the car to do.
         page.evaluate("fixtureMode.visual.hero.position.x+=12")
-        page.keyboard.press('h')
+        page.keyboard.press('e')
         page.wait_for_timeout(400)
-        check('paddock_keys_need_the_car', own(HOOD)['open'] == 0 and not page.evaluate(f"interlagos.openingsInfo()['{HOOD}'].reasons.length"))
+        check('paddock_action_needs_the_car', own(HOOD)['open'] == 0 and own(TRUNK)['open'] == 0 and not page.evaluate('fixtureMode.inCar'))
         check('no_browser_errors_paddock', not errors)
     finally:
         print(json.dumps({'checks': checks, 'errors': errors[:10]}, indent=1, ensure_ascii=False), flush=True)

@@ -3,7 +3,7 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import * as THREE from '../teste/node_modules/three/build/three.module.js';
-import {CarOpenings,OPENINGS,shutOpenings} from '../teste/car-openings.js';
+import {CarOpenings,OPENINGS,shutOpenings,carSpot} from '../teste/car-openings.js';
 import {PitStop} from '../teste/pitstop.js';
 const ASSETS=new URL('../teste/assets/',import.meta.url);
 // The GLB's JSON chunk: node names, translations and extras (no textures needed here).
@@ -67,4 +67,18 @@ for(const livery of ['seiva_danilo','assinaturas_omp']){
  assert.equal(pit.toggleOpening('hood'),true);assert(o.held(OPENINGS.hood,'manual'));
  pit.opened=false;assert.equal(pit.toggleOpening('trunk'),false,'no keys once the stop ended');
  o.release('manual');pit.syncOpenings();assert(Object.values(o.info()).every(p=>!p.reasons.length),'all shut after the stop');}
+
+// One action key, GTA style: where the pilot on foot stands says what it does (car frame: +x ahead,
+// driver's side -z). The pit works it out from the car's heading.
+{const spot=(x,z)=>carSpot({x,z});
+ assert.equal(spot(2.8,0),'capo');assert.equal(spot(2.2,-1.1),'capo');assert.equal(spot(-2.8,.4),'porta_malas');assert.equal(spot(.2,-1.6),'porta');
+ for(const [x,z] of [[0,1.6],[5,0],[-4,0],[0,-3],[1.6,-1.6],[0,0]])assert.equal(spot(x,z),null,`nothing at ${x},${z}`);
+ const car=carFrom(glbNodes('opala99_seiva_danilo.glb')),o=new CarOpenings().attach(car),pit=Object.create(PitStop.prototype),hero=new THREE.Vector3();
+ Object.assign(pit,{opened:true,openings:o,coffee:{},hero:{position:hero},service:{jobs:[]},cafeSeat:new THREE.Vector3(99,0,99),render(){},
+  car:{x:10,y:-4,heading:Math.PI/2,surface:{z:0}}});
+ // Heading 90 degrees: the nose points to -z in the scene (data +y); the driver's side is -x.
+ hero.set(10,0,4-2.8);assert.equal(pit.interaction(),'capo');pit.interact();assert(o.held(OPENINGS.hood,'manual'),'E at the nose lifts the hood');
+ hero.set(10,0,4+2.8);assert.equal(pit.interaction(),'porta_malas');pit.interact();assert(o.held(OPENINGS.trunk,'manual'));pit.interact();assert(!o.held(OPENINGS.trunk,'manual'),'E again shuts it');
+ hero.set(10-1.6,0,4);assert.equal(pit.interaction(),'car','by the driver door: get in');
+ assert.equal(pit.openingLabel('capo'),'Fechar o capô');pit.service.jobs=[{id:'motor'}];assert.match(pit.openingLabel('capo'),/equipe/);}
 console.log('aberturas ok');

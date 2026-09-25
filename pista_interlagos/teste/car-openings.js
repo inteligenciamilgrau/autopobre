@@ -2,7 +2,7 @@ import * as THREE from 'three';
 // Hinged parts of the Opala 99 V06 (modelo_3d/v06_pecas_separadas). Each hinge empty in the
 // GLB carries its opening in the GLB frame as glTF extras: eixo_gltf (axis) and
 // angulo_gltf_graus. Turning the empty from rest by that angle opens the part. Reasons hold
-// a part open (the crew on the engine, the driver getting out, the H key); it closes when
+// a part open (the crew on the engine, the driver getting out, the action key); it closes when
 // none is left. A car without hinges (the V05 GLB) simply has no parts.
 export const OPENINGS=Object.freeze({hood:'Capo_DOBRADICA',trunk:'Tampa_porta_malas_DOBRADICA',
  driverDoor:'Porta_Motorista_DOBRADICA',passengerDoor:'Porta_Passageiro_DOBRADICA',
@@ -41,6 +41,17 @@ export class CarOpenings {
  pose(p){p.obj.quaternion.copy(p.rest).multiply(turn.setFromAxisAngle(p.axis,p.angle*ease(p.open)));}
  info(){return Object.fromEntries([...this.parts].map(([name,p])=>[name,{kind:p.kind,open:Math.round(p.open*1000)/1000,reasons:[...p.reasons]}]));}
 }
+// The action key by the car, GTA style: ahead of the nose it lifts the hood, behind the tail the
+// trunk lid, beside the driver's door it gets in. local: the pilot on foot in the car's frame
+// (GLB frame: +x forward, driver's side -z). Returns 'capo', 'porta_malas', 'porta' or null.
+export function carSpot(local){
+ const x=local.x,z=local.z;
+ if(Math.abs(z)<1.3&&x>1.85&&x<3.8)return 'capo';
+ if(Math.abs(z)<1.3&&x<-1.85&&x>-3.6)return 'porta_malas';
+ if(z<-.75&&z>-2.4&&x>-1&&x<1.4)return 'porta';
+ return null;
+}
+export const SPOT_OPENING=Object.freeze({capo:OPENINGS.hood,porta_malas:OPENINGS.trunk});
 // Copies for other cars (rivals, the Opala parked in the paddock) keep every hinge shut: the
 // exporter saves the hinge empties without rotation, so rest is the identity.
 export function shutOpenings(root){root.traverse(o=>{if(hinged(o))o.quaternion.identity();});}

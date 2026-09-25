@@ -5,7 +5,7 @@ import {RIVAL_ROSTER} from './race-roster.js';
 import {createPeople,setPose,POSES,OUTFITS} from './pit-crew.js';
 import {curveloPitFrame,serviceSpot,garageBays,pitPoint} from './pit-lane.js';
 import {footState,stepOnFoot,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
-import {shutOpenings,CarOpenings,OPENINGS} from './car-openings.js';
+import {shutOpenings,CarOpenings,carSpot,SPOT_OPENING} from './car-openings.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
 const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
@@ -242,10 +242,11 @@ export class ImmersiveVisuals {
  // The team's Opala in Box 99: close enough to get in (F), and where it stands (data
  // coordinates and heading) for the real car to take its place.
  nearCar(){return !!this.own&&this.hero.position.distanceTo(this.own.position)<3.4;}
- // Hood and trunk lid of the Opala in Box 99, lifted on foot beside it (H/T or the panel) to
- // look at the engine and the fuel cell (car-openings.js).
- toggleOwnOpening(which){return !!this.ownOpenings&&!this.inCar&&this.nearCar()&&this.ownOpenings.toggle(OPENINGS[which]);}
- ownOpen(which){return !!this.ownOpenings?.held(OPENINGS[which],'manual');}
+ // What the action key does by the Opala in Box 99, from where the pilot stands (car-openings.js):
+ // 'capo' ahead of the nose, 'porta_malas' behind the tail (engine, fuel cell), 'porta' to get in.
+ carAction(){if(!this.own||this.inCar)return null;this.own.updateMatrixWorld();return carSpot(this.own.worldToLocal(this.hero.getWorldPosition(new THREE.Vector3())));}
+ toggleOwnOpening(spot){return !!this.ownOpenings&&!!SPOT_OPENING[spot]&&this.carAction()===spot&&this.ownOpenings.toggle(SPOT_OPENING[spot]);}
+ ownOpen(spot){return !!this.ownOpenings?.held(SPOT_OPENING[spot],'manual');}
  ownPose(){if(!this.own)return null;const p=this.own.getWorldPosition(new THREE.Vector3());return {x:p.x,y:-p.z,heading:this.own.rotation.y};}
  // Out of the car by the driver's door (the other side if a wall is in the way).
  leaveCar(ground){

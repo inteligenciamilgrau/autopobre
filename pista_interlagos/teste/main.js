@@ -17,7 +17,7 @@ import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v
 import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260923-interior-fotos';
-import {CarOpenings,OPENINGS} from './car-openings.js';
+import {CarOpenings} from './car-openings.js';
 import {CameraReturn,LookBack,turnHead,neckTwist,HEAD_YAW_COCKPIT,HEAD_YAW_HOOD} from './camera-return.js';
 import {createDriver} from './driver.js?v=20260923-controls';
 import {SkidMarks} from './skid-marks.js?v=20260923-capotagem';
@@ -210,9 +210,8 @@ async function cycleLivery(){
  try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
-// H and T lift the hood and the trunk lid while the car stands still (at the box the pit
-// panel and its crew run them); what was opened by hand shuts as the car moves off.
-function standingOpening(name){return Math.hypot(car.vx,car.vy)<.5&&openings.toggle(name);}
+// At the box the crew and the pilot on foot (action key) open the hinged parts; what was opened by
+// hand shuts as the car moves off.
 function updateOpenings(dt){if(Math.hypot(car.vx,car.vy)>1.5)openings.release('manual');openings.update(dt);}
 // nearest (R key): only the player's car goes back on track; rivals, laps and fuel carry on.
 function reset(nearest=false){mobile?.setHandbrake(false);openings.closeAll(true);if(nearest)car.recover();else{car.resetGrid();if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
@@ -550,8 +549,6 @@ document.addEventListener('keydown',e=>{
  if(e.code==='KeyR'&&!immersive.finishing)reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
  if(e.code==='KeyV')cycleLivery();
- if(e.code==='KeyH')standingOpening(OPENINGS.hood);
- if(e.code==='KeyT')standingOpening(OPENINGS.trunk);
  if(e.code==='KeyP')menu(!paused);
  if(e.code==='Escape')menu(true);
  if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){automatic=false;status('');}
