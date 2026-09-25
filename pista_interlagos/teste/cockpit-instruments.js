@@ -68,7 +68,7 @@ export function buildPod(kit,position,tilt){
 const SWITCH_ON=Object.freeze({IGN:true,BC1:true,DH:true,LAN:true,LIMP:false,FAROL:false});
 export function buildSwitchBank(kit,position,tilt,hanger){
  const {mesh,box,bar,m,panel,chrome}=kit;
- const bank=panel(position,undefined,tilt);bank.name='Painel_botoes_Luizao';
+ const bank=panel(position,kit.root,tilt);bank.name='Painel_botoes_Luizao';
  const acrylic=new THREE.MeshPhysicalMaterial({color:0x0e1011,roughness:.12,clearcoat:1,clearcoatRoughness:.04,envMapIntensity:1.2});
  box([0,0,0],[.22,.062,.005],acrylic,bank);
  const face=mesh(new THREE.PlaneGeometry(.22,.062),new THREE.MeshPhysicalMaterial({map:switchPanelTexture(),roughness:.14,clearcoat:1,clearcoatRoughness:.04,envMapIntensity:1.2,polygonOffset:true,polygonOffsetFactor:-2}),[0,0,.0026],bank);face.castShadow=false;

@@ -134,10 +134,23 @@ export class ImmersiveVisuals {
  }
  // The team's own Opala for the paddock: the player's model, livery and cage.
  ownCar(template){
-  if(!template)return this.car(0x151515,'99');const root=template.clone(true),structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));shutOpenings(root);
+  if(!template)return this.car(0x151515,'99');const root=template.clone(true),structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));shutOpenings(root);root.add(this.lightInterior());
   root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});root.name='Opala_99_no_box';return root;
  }
  mat(color){return this.materials[color]??=(new THREE.MeshStandardMaterial({color,roughness:.76}));}
+ // The car GLB carries no interior (the player's cockpit is built at runtime, cockpit.js): the
+ // other Opalas get a light one that shows through their windows, at the cockpit's own places:
+ // seat, head restraint, steering wheel and column, dash top up to the windscreen. One material.
+ lightInterior(){
+  const g=new THREE.Group(),dark=this.mat(0x17191b),add=(geometry,p,r=[0,0,0])=>{const o=new THREE.Mesh(geometry,dark);o.position.set(...p);o.rotation.set(...r);o.castShadow=o.receiveShadow=true;g.add(o);};
+  add(new THREE.BoxGeometry(.42,.08,.44),[-.17,.38,-.34]);
+  add(new THREE.BoxGeometry(.08,.62,.46),[-.37,.72,-.34],[0,0,.16]);
+  add(new THREE.BoxGeometry(.08,.22,.26),[-.44,1.13,-.34],[0,0,.16]);
+  add(new THREE.TorusGeometry(.175,.016,8,24).rotateY(Math.PI/2),[.22,.88,-.34],[0,0,-.38]);
+  add(new THREE.CylinderGeometry(.022,.022,.4,8).rotateZ(Math.PI/2),[.41,.806,-.34],[0,0,-.38]);
+  add(new THREE.BoxGeometry(.37,.034,1.40),[.755,.89,0]);
+  g.name='Interior_leve';return g;
+ }
  box(parent,p,size,color){const o=new THREE.Mesh(new THREE.BoxGeometry(...size),this.mat(color));o.position.set(...p);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;}
  labelTexture(text,w,h,fg,bg){
   const c=document.createElement('canvas');c.width=1024;c.height=Math.max(128,Math.round(1024*h/w));const ctx=c.getContext('2d');ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`bold ${Math.round(c.height*.55)}px Arial`;ctx.fillText(text,512,c.height/2,970);
@@ -185,7 +198,7 @@ export class ImmersiveVisuals {
   if(!template)return this.car(color,number);
   const root=template.clone(true),materials=new Map(),pivots=[];
   const structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
-  for(const name of HIDDEN_ON_RIVALS)root.getObjectByName(name)?.removeFromParent();shutOpenings(root);
+  for(const name of HIDDEN_ON_RIVALS)root.getObjectByName(name)?.removeFromParent();shutOpenings(root);root.add(this.lightInterior());
   const inside=[];root.traverse(o=>{if(o.isMesh&&o.userData.interno)inside.push(o);});inside.forEach(o=>o.removeFromParent());
   root.traverse(o=>{
    if(o.isMesh){

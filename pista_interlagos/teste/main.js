@@ -62,6 +62,8 @@ $('carDamage').checked=preferences.values.damage;
 $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked});pitstop?.setDamage(preferences.values.damage);};
 $('realisticWater').checked=preferences.values.realisticWater;
 $('realisticWater').onchange=()=>{preferences.update({realisticWater:$('realisticWater').checked});landscape?.setRealisticWater(preferences.values.realisticWater);};
+$('classicInterior').checked=preferences.values.classicInterior;
+$('classicInterior').onchange=()=>{preferences.update({classicInterior:$('classicInterior').checked});if(ready)cabinVisibility();};
 $('tour').disabled=preferences.values.immersive;
 function chooseImmersive(value){
  $('immersiveMode').checked=value;$('tour').disabled=value;
@@ -116,6 +118,15 @@ const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
 const carBody=new THREE.Group();carBody.name='Carroceria_suspensao';carRoot.add(carBody);
 // Doors, hood, trunk lid and filler caps of the V06 Opala, on their hinges (car-openings.js).
 const openings=new CarOpenings();
+// Which interior shows (cockpit.js setView). The game's controls sit in the V06 body, as in its
+// Blender scene: its structure is the cabin's floor and walls, and from outside the seat and
+// controls show through the windows. The classic setting keeps the old box interior in the
+// cockpit view instead. The driver drops with the controls he holds.
+function cabinVisibility(){
+ const inside=mode==='cockpit'&&!gridPreview(),classic=preferences.values.classicInterior;
+ if(cockpit){cockpit.root.visible=inside||!!model;cockpit.setView({inside,classic});if(driver)driver.root.position.y=cockpit.drop();}
+ if(model){model.visible=!inside||!classic;carStructure.visible=!(inside&&classic);}
+}
 const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
 function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
 let cockpit,skidMarks,tyreSmoke;
@@ -194,7 +205,7 @@ async function setLivery(value){
  model.updateMatrixWorld(true);const structuralParts=[];
  model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
  for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
- carBody.add(model,carStructure);model.visible=carStructure.visible=mode!=='cockpit';activeLivery=value;status('');
+ carBody.add(model,carStructure);cabinVisibility();activeLivery=value;status('');
  preferences.update({livery:value});if(ready)carAudio.effect('paint');
  }finally{
   if(token===loadToken){
@@ -230,7 +241,7 @@ function drawMap(){
 }
 const roughRotation=new THREE.Quaternion(),roughEuler=new THREE.Euler(),chaseForward=new THREE.Vector3(1,0,0),chaseTarget=new THREE.Vector3(1,0,0);let roughRide=0;
 function updateCar(dt){
- cockpit.root.visible=mode==='cockpit'&&!gridPreview();if(model)model.visible=carStructure.visible=!cockpit.root.visible;
+ cabinVisibility();
  const p=car.surface,speed=Math.hypot(car.vx,car.vy),roughTarget=p.onRoad||!car.wheelsDown?0:clamp(speed/22,0,1);
  roughRide=dt>=1?0:roughRide+(roughTarget-roughRide)*(1-Math.exp(-dt*9));
  // Distance-based suspension motion stops at rest and fades on returning to asphalt.
@@ -286,7 +297,7 @@ function setCameraMode(value){
  mode=value;orbitFrom=null;followInitialized=false;orbit.enabled=value==='orbit';$('camera').value=value;
  preferences.update({camera:value});
  orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();
- if(cockpit)cockpit.root.visible=value==='cockpit';if(model)model.visible=carStructure.visible=value!=='cockpit';
+ cabinVisibility();
  document.body.classList.toggle('cockpit-mode',value==='cockpit');
  $('cockpitButton').classList.toggle('active',value==='cockpit');$('cockpitButton').setAttribute('aria-pressed',String(value==='cockpit'));
  if(!keepView)camera.fov=value==='cockpit'?74:58;camera.near=value==='cockpit'?.025:.1;camera.updateProjectionMatrix();
@@ -510,7 +521,8 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  // Render the reflection from this frame's car pose before displaying the cockpit.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
  if(mode==='cockpit'&&!gridPreview()){
-  cockpit.root.visible=false;driver.root.visible=false;
+  // The mirror sees the road behind, not the body round it (the classic view hides it anyway).
+  const bodyShown=!!model?.visible;cockpit.root.visible=false;driver.root.visible=false;if(model)model.visible=false;
   cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carBody.matrixWorld);
   look.set(-30,1.14,0).applyMatrix4(carBody.matrixWorld);
   cockpit.rearCamera.up.set(0,1,0).transformDirection(carBody.matrixWorld);cockpit.rearCamera.lookAt(look);
@@ -519,7 +531,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
   renderer.setRenderTarget(cockpit.mirrorTarget);renderer.render(scene,cockpit.rearCamera);renderer.setRenderTarget(null);
   tyreSmoke.material.uniforms.viewport.value=renderer.domElement.height;
   mirrorFrame=renderedFrame;
-  renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;
+  renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;if(model)model.visible=bodyShown;
  }
  renderer.render(scene,camera);
 }
@@ -678,7 +690,7 @@ async function loadCircuit(){
    if(view){
     const eye=view.eye??cockpit.eye.toArray(),number=value=>typeof value==='number'&&Number.isFinite(value);
     if(!Array.isArray(eye)||eye.length!==3||!eye.every(number)||![view.yaw??0,view.pitch??0,view.roll??0,view.fov??74].every(number))throw new Error('setCockpitView: eye [x,y,z], yaw, pitch e fov numéricos');
-    cockpitView={eye:[...eye],yaw:view.yaw??0,pitch:view.pitch??0,roll:view.roll??0,fov:clamp(view.fov??74,5,150),hideDriver:!!view.hideDriver};photoEye.fromArray(eye);
+    cockpitView={eye:[...eye],yaw:view.yaw??0,pitch:view.pitch??0,roll:view.roll??0,fov:clamp(view.fov??74,5,150),hideDriver:!!view.hideDriver};photoEye.fromArray(eye);if(view.eye)photoEye.y+=cockpit.drop(); // poses follow the cabin
    }else cockpitView=null;
    // The driver's group also carries the wheel, levers and pedals he works: only his body is hidden.
    const hide=!!cockpitView?.hideDriver;if(hide!==photoHidDriver){const controls=new Set([cockpit.wheel,...cockpit.controls.parts]);for(const part of driver.root.children)if(!controls.has(part))part.visible=!hide;photoHidDriver=hide;}

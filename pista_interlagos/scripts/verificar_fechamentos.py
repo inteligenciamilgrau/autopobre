@@ -19,17 +19,25 @@ with sync_playwright() as p:
   check('v04_structural_panels_loaded',structure()['parts']==1 and structure()['revision']=='v04_fechamentos')
   # The free race starts behind the car; switch to the interior on track.
   page.click('#cockpitButton');page.keyboard.down('KeyS');frame()
-  # The detailed interior has its own floor and rear cabin: the V04 panels hide with the body.
-  check('interior_replaces_panels_in_cockpit',not structure()['visible'] and page.evaluate('!interlagos.cockpitInfo().externalVisible'))
+  # Inside, the game's controls sit in the V06 body, lowered onto its floor: the body and its
+  # structure (floor, walls) show, the old box interior and its cabin shell do not.
+  inside_v06="(()=>{const c=interlagos.cockpitInfo();return c.externalVisible&&!c.view.classic&&!c.view.cabin&&c.view.drop<0;})()"
+  check('v06_body_round_the_controls',structure()['visible'] and page.evaluate(inside_v06))
   page.screenshot(path=str(ROOT/'renders/fechamento_interna_frente.png'))
   page.locator('#view').click(position={'x':800,'y':430});wait_js(page,'interlagos.viewControls().pointerLocked');move(0,300)
   check('look_down_active',page.evaluate('interlagos.viewControls().pitch<-.5'))
   page.screenshot(path=str(ROOT/'renders/fechamento_interna_pes.png'))
   move(500,0);page.screenshot(path=str(ROOT/'renders/fechamento_interna_passageiro.png'))
   page.keyboard.press('KeyV');wait_js(page,"interlagos.state.livery==='seiva_danilo'");frame()
-  check('second_skin_keeps_interior_and_driver',not structure()['visible'] and structure()['parts']==1 and page.evaluate('interlagos.driverInfo().helmet.balaclava'))
+  check('second_skin_keeps_interior_and_driver',structure()['visible'] and structure()['parts']==1 and page.evaluate(inside_v06) and page.evaluate('interlagos.driverInfo().helmet.balaclava'))
   check('mirror_still_current',page.evaluate('interlagos.cockpitInfo().mirrorFrame===interlagos.cockpitInfo().renderedFrame'))
   page.screenshot(path=str(ROOT/'renders/fechamento_interna_seiva.png'))
+  # The classic setting brings back the old box interior (its shell, at its own height) instead of the body.
+  classic=lambda on:page.evaluate("on=>{const c=document.querySelector('#classicInterior');c.checked=on;c.dispatchEvent(new Event('change'));}",on)
+  classic(True);frame()
+  check('classic_interior_replaces_body',not structure()['visible'] and page.evaluate('(()=>{const c=interlagos.cockpitInfo();return !c.externalVisible&&c.view.classic&&c.view.cabin&&c.view.drop===0;})()'))
+  page.screenshot(path=str(ROOT/'renders/fechamento_interna_classica.png'))
+  classic(False);frame()
   page.keyboard.up('KeyS');page.keyboard.press('KeyP');race_options(page,camera='orbit');enter_track(page);page.keyboard.down('KeyS')
   page.locator('#view').click(position={'x':800,'y':430});wait_js(page,'interlagos.viewControls().pointerLocked');move(650,-550)
   page.screenshot(path=str(ROOT/'renders/fechamento_externa_baixa.png'))

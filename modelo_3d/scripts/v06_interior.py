@@ -1,8 +1,10 @@
 """V06 interior: the game's cockpit (pista_interlagos/teste/cockpit*.js, rebuilt from photos carro_8, 14, 24-36) brought
-into the car. exportar_interior_jogo.py exports it to a GLB (each mesh named after the source line that built it);
-here its crude shell boxes, its own cage, nets and padding are dropped (they do not fit this body), and the equipment
-is moved as ONE rigid group down onto the V06 cabin floor. Two groups keep their own placement: the dash top meets
-the windscreen base, and the Luizao switch bank hangs from a new windscreen cross tube on the V05 cage."""
+into the car. exportar_interior_jogo.py exports it to a GLB (each mesh named after the source line that built it) exactly
+as the game shows it inside this body (cockpit.js setView): lowered onto the V06 cabin floor, the dash top at the
+windscreen base, the Luizao switch bank and the mirror under the windscreen cage tube, the relay board and the battery
+brought inboard, and without the game's classic box interior and cabin shell (this body's structure takes their place).
+So the game's cockpit view and this scene show the same interior. Here it is sorted by material, the V05 cage gets the
+windscreen tube the bank hangs from, and what reaches past the V06 firewall is laid flat on it."""
 import bpy,os,subprocess,sys,tempfile
 import numpy as np
 from pathlib import Path
@@ -10,33 +12,9 @@ from mathutils import Vector,Matrix
 from v06_comum import *
 
 R=Path(__file__).resolve().parents[2]
-GAME_FLOOR,V06_FLOOR=.31,.217            # top of the game's floor box (cockpit.js) and of the V06 cabin floor
-DZ=V06_FLOOR-GAME_FLOOR
+V06_FLOOR,GAME_DROP=.217,-.093           # V06 cabin floor; how far the game lowers its cockpit into this body (cockpit.js)
+BANK_TUBE_BOTTOM=1.166                   # underside of the windscreen tube: cockpit.js hangs the switch bank there
 CROSS_TUBE_X=.29                         # windscreen cross tube of the game cage (switch bank hanger)
-# Game parts dropped, by source line, with the material each must have (a changed game fails here, loudly).
-DROP={
- 'cockpit_L64':'Int_paint','cockpit_L74':'Int_bitumen','cockpit_L75':'Int_paintSatin','cockpit_L76':'Int_hood',
- 'cockpit_L77':'Int_paint','cockpit_L78':'Int_body','cockpit_L80':'Int_shell','cockpit_L87':'Int_paint','cockpit_L88':'Int_body',
- 'cockpit_L90':'Int_cage','cockpit_L91':'Int_cage','cockpit_L92':'Int_cage','cockpit_L93':'Int_cage','cockpit_L94':'Int_cage',
- 'cockpit_L97':'Int_webbing','cockpit_L98':'Int_webbing','cockpit_L99':'Int_silver',
- 'cockpit_L101':'Int_cage','cockpit_L102':'Int_cage','cockpit_L104':'Int_cage',
- 'cockpit_L106':'Int_foam','cockpit_L107':'Int_foam','cockpit_L108':'Int_foam','cockpit_L109':'Int_foam',
- 'cockpit_L111':'Int_standard','cockpit_L114':'Int_basic',
- 'cockpit-equipment_L78':'Int_cage','cockpit-equipment_L101':'Int_basic','cockpit-equipment_L126':'Int_aluminium',
- **{f'cockpit-rear_L{n}':m for n,m in ((25,'Int_paint'),(27,'Int_paint'),(28,'Int_paint'),(29,'Int_paint'),(30,'Int_paint'),
-  (32,'Int_standard'),(38,'Int_paint'),(39,'Int_paint'),(41,'Int_paint'),(42,'Int_body'),(44,'Int_paintSatin'),(46,'Int_paint'),
-  (48,'Int_paintBoth'),(51,'Int_tint'),(54,'Int_standard'),(61,'Int_physical'),(64,'Int_basic'),(67,'Int_hood'),(68,'Int_standard'),
-  (72,'Int_cage'),(73,'Int_cage'),(75,'Int_cage'),(76,'Int_cage'))}}
-# Equipment that collides with this body where the game's shell was different: dropped, or moved as a small rigid
-# sub-group (the relay board and the battery come 4 cm inboard, clear of the V05 cage leg and rear arch cover).
-DROP_FIT={'cockpit-equipment_L114':'reservatorios no pe do piloto: cruzam a gaiola V05',
- 'cockpit-equipment_L116':'fio do radio: termina dentro da soleira','cockpit-equipment_L122':'linha trancada: cruza a barra de porta V05',
- 'cockpit-equipment_L77':'linha de freio na soleira: atravessa o arco principal e o painel traseiro',
- 'cockpit-rear_L86':'caixa ao lado da bateria: dentro da caixa de roda traseira','cockpit-rear_L88':'cabo da bateria: corre dentro da soleira'}
-NUDGE={**{f'cockpit-equipment_L{n}':(0,.045,0) for n in range(23,43)},**{f'cockpit-rear_L{n}':(0,.035,0) for n in range(78,90)},
- 'cockpit_L267':(0,0,-.02),'Espelho_retrovisor_interno':(0,0,-.02)}
-DASH={'cockpit_L82','cockpit_L83','cockpit_L84'}                      # dash top, rolled edge and rivets: fit the body
-BANK=tuple(f'cockpit-instruments_L{n}' for n in range(73,95))         # Luizao switch bank and its hanger
 CRUDE_V05=('Banco_apoio_cabeca','Banco_concha_assento','Banco_concha_encosto','Cinto_ombro','Coluna_direcao','Volante',
  'Raio_volante','Alavanca_cambio','Manopla','Painel_instrumentos')
 
@@ -49,11 +27,12 @@ def glb_path():
  subprocess.run([py,str(R/'modelo_3d/scripts/exportar_interior_jogo.py'),str(out)],check=True,cwd=str(R))
  return out
 
-def base(name):return name.split('.')[0]
-
 def build(mats):
  O=bpy.data.objects
  for o in [o for o in root().children_recursive if o.name.startswith(CRUDE_V05)]:remove(o)
+ # The game's rear cabin is open up to the roof (cage X, battery, extinguisher: carro_34, 36); the V04 sheet over
+ # the rear seat would hide it, from the cockpit view (the game shows this structure there) and through the windows.
+ if 'Tampao_atras_banco_V04' in O:remove(O['Tampao_atras_banco_V04'])
  straighten_hoop()
  glb=glb_path();before=set(O);bpy.ops.import_scene.gltf(filepath=str(glb))
  new=[o for o in O if o not in before];meshes=[o for o in new if o.type=='MESH']
@@ -69,32 +48,16 @@ def build(mats):
  for o in meshes:
   for i,m in enumerate(o.data.materials):
    if m and m.name.startswith('Espelho.') and 'Espelho' in bpy.data.materials:o.data.materials[i]=bpy.data.materials['Espelho']
- dropped=[];kept=[];dash=[];bank=[]
- for o in meshes:
-  n=base(o.name);mat=o.data.materials[0].name if o.data.materials else ''
-  if n in DROP:
-   assert mat.startswith(DROP[n]),f'interior do jogo mudou: {n} tem {mat}, esperado {DROP[n]}';dropped.append(o)
-  elif n in DROP_FIT:dropped.append(o)
-  elif n in DASH:dash.append(o)
-  elif n.startswith(BANK):bank.append(o)
-  else:kept.append(o)
- for o in dropped:remove(o)
- # One rigid move for the equipment: the game floor (0.31) onto the V06 cabin floor.
- for o in kept:o.matrix_world=Matrix.Translation((0,0,DZ))@o.matrix_world
- for o in kept:
-  if base(o.name) in NUDGE:o.matrix_world=Matrix.Translation(NUDGE[base(o.name)])@o.matrix_world
- # The switch bank hangs from a new windscreen cross tube between the V05 cage roof rails.
+ # The switch bank arrives hanging where cockpit.js puts it: under this windscreen tube, which must be there.
  tube_z,tube_y=cross_tube(mats)
- hanger_top=max(world_verts(o)[:,2].max() for o in bank)
- for o in bank:o.matrix_world=Matrix.Translation((0,0,tube_z-.021-hanger_top))@o.matrix_world
- dash_filler(dash)
- for m in {m for o in kept+dash+bank for m in o.data.materials if m}:principled_only(m)
- if os.environ.get('OPALA_V06_DEBUG'):report(kept+dash+bank,detailed=True)
+ assert abs(tube_z-.021-BANK_TUBE_BOTTOM)<.005,f'tubo do para-brisa em {tube_z-.021:.3f}; cockpit.js pendura o painel em {BANK_TUBE_BOTTOM}'
+ for m in {m for o in meshes for m in o.data.materials if m}:principled_only(m)
+ if os.environ.get('OPALA_V06_DEBUG'):report(meshes,detailed=True)
  anchor=pivot('Interior_do_jogo',(0,0,V06_FLOOR),'interior','',0.,
-  f'Interior do jogo (cockpit.js) montado no carro: equipamento descido {-DZ:.3f} m em bloco ate o piso V06.',collection='07_Interior_do_jogo')
- anchor['deslocamento_z']=DZ
+  f'Interior do jogo (cockpit.js) montado no carro como o jogo o mostra: equipamento descido {-GAME_DROP:.3f} m ate o piso V06.',collection='07_Interior_do_jogo')
+ anchor['deslocamento_z']=GAME_DROP
  groups={}
- for o in kept+dash+bank:
+ for o in meshes:
   move_to(o,'07_Interior_do_jogo');groups.setdefault(o.data.materials[0].name if o.data.materials else '-',[]).append(o)
  joined=[]
  for mn,objs in groups.items():
@@ -161,17 +124,6 @@ def cross_tube(mats):
  P=Part('Gaiola_travessa_parabrisa','02_Vidros_Redes_Interior',None,smooth=40)
  P.cyl(black,(CROSS_TUBE_X,-y,z),(CROSS_TUBE_X,y,z),.021,16);P.build()
  return z,y
-
-def dash_filler(dash):
- """The game dash top ends 10 cm short of this windscreen base: a leather-grain strip closes the gap."""
- mat=next((o.data.materials[0] for o in dash if o.data.materials and o.data.materials[0].name.startswith('Int_dash')),None)
- if mat is None:return
- T=bvh(bpy.data.objects['Borracha_parabrisa']);ys=np.linspace(-.69,.69,24);V=[]
- for y in ys:
-  h=T.ray_cast(Vector((.6,y,.905)),Vector((1,0,-.02)).normalized());xg=(h[0].x-.004) if h[0] is not None else .925
-  V+=[(.826,y,.904),(xg,y,.897)]
- o=new_mesh('Painel_complemento_V06',V,grid_faces(len(ys),2),mat,'07_Interior_do_jogo',outward=(0,0,1))
- dash.append(o)
 
 def report(objs,detailed=False):
  """Overlap of the interior with the shell it must not pierce (roof, glass, doors, sides, window frames). The detailed

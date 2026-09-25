@@ -12,7 +12,9 @@ export function normalizePreferences(value){
   // Car damage and wear (power, brakes, grip) is an opt-in realism setting.
   damage:typeof source.damage==='boolean'?source.damage:false,
   // Lakes with reflections and wind ripples cost an extra scene render per frame: opt-in.
-  realisticWater:typeof source.realisticWater==='boolean'?source.realisticWater:false
+  realisticWater:typeof source.realisticWater==='boolean'?source.realisticWater:false,
+  // The cockpit view shows the V06 body round the controls; true keeps the old box interior.
+  classicInterior:typeof source.classicInterior==='boolean'?source.classicInterior:false
  };
 }
 function browserStorage(){try{return globalThis.localStorage;}catch{return null;}}

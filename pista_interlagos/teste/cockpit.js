@@ -38,7 +38,7 @@ export function createCockpit(renderer){
  const box=(p,s,material=m.plastic,parent=root)=>mesh(boxUV(new THREE.BoxGeometry(...s)),material,p,parent);
  function bar(a,b,r=.023,material=m.cage,parent=root){const av=new THREE.Vector3(...a),bv=new THREE.Vector3(...b),length=av.distanceTo(bv),o=mesh(tubeUV(new THREE.CylinderGeometry(r,r,length,12),r,length),material,av.clone().add(bv).multiplyScalar(.5).toArray(),parent);o.quaternion.setFromUnitVectors(new THREE.Vector3(0,1,0),bv.sub(av).normalize());return o;}
  // Foam roll-cage padding over part of a tube, as fitted near the helmet.
- const padding=(a,b,from,to,r=.043)=>{const av=new THREE.Vector3(...a),bv=new THREE.Vector3(...b);return bar(av.clone().lerp(bv,from).toArray(),av.clone().lerp(bv,to).toArray(),r,m.foam);};
+ const padding=(a,b,from,to,r=.043,parent=root)=>{const av=new THREE.Vector3(...a),bv=new THREE.Vector3(...b);return bar(av.clone().lerp(bv,from).toArray(),av.clone().lerp(bv,to).toArray(),r,m.foam,parent);};
  // A part facing the driver: local +X runs toward the passenger, +Z toward the seat;
  // tilt leans its top toward the seat (positive) or the windscreen (negative).
  function panel(p,parent=root,tilt=0){const g=new THREE.Group();g.position.set(...p);g.rotation.order='YXZ';g.rotation.set(tilt,-Math.PI/2,0);parent.add(g);return g;}
@@ -57,61 +57,76 @@ export function createCockpit(renderer){
   const s=new THREE.Shape();s.moveTo(-.07,0);s.lineTo(-.07,height-.055);s.absellipse(.06,height-.055,.13,.055,Math.PI,0,true);s.lineTo(.19,0);s.closePath();
   return new THREE.ExtrudeGeometry(s,{depth:length,bevelEnabled:false,curveSegments:10}).rotateY(-Math.PI/2);
  }
- const kit={root,m,mesh,box,bar,panel,decal,cushion,tunnel,silver,chrome,steel,red,yellow,bezel,paintBoth,paintSatin};
+ // Two interiors share these controls (setView). The classic one keeps its box shell whole in
+ // `classic`: roof, side walls, hood block, the game's own cage, nets and windows. The other
+ // sits inside the V06 body (the car GLB): the body's roof, doors, cage and nets take their
+ // place and `fillers` close its gaps. `cabin` (floor, firewall, tunnel, rear pan and walls) shows
+ // from inside either way; seen from outside the body's own structure closes the cabin, and
+ // the seat, controls and equipment show through the windows.
+ const classic=new THREE.Group(),cabin=new THREE.Group(),fillers=new THREE.Group();
+ classic.name='Casca_classica';cabin.name='Cabine_piso_paredes';fillers.name='Complementos_V06';root.add(classic,cabin,fillers);
+ const kit={root,classic,cabin,m,mesh,box,bar,panel,decal,cushion,tunnel,silver,chrome,steel,red,yellow,bezel,paintBoth,paintSatin};
 
  // --- Body shell: bare steel painted gloss black (carro_30, 33-36); the driver's
  // footwell has an aluminium sheet with worn black grip strips (carro_24).
- box([.19,.29,0],[1.65,.04,1.49],m.paint);
+ box([.19,.29,0],[1.65,.04,1.49],m.paint,cabin);
  const sheet=m.aluminium.clone();sheet.color.setHex(0xffffff);sheet.roughness=.45;
- box([.47,.3115,-.40],[.56,.003,.40],sheet);
+ box([.47,.3115,-.40],[.56,.003,.40],sheet,cabin);
  const tape=mesh(new THREE.PlaneGeometry(.54,.40),new THREE.MeshStandardMaterial({map:canvasTexture(512,384,(ctx,w,h)=>{
   ctx.strokeStyle='#101112';ctx.lineCap='round';
   for(let i=0;i<5;i++){const y0=40+i*77,rear=i%2?[20,250]:[60,300],front=i%2?[290,490]:[330,470];
    for(const [x0,x1] of [rear,front]){ctx.lineWidth=40+Math.random()*10;ctx.beginPath();ctx.moveTo(x0,y0+Math.random()*6);
     ctx.bezierCurveTo(x0+(x1-x0)*.33,y0-7+Math.random()*14,x0+(x1-x0)*.66,y0-7+Math.random()*14,x1,y0-(x1-x0)*.03);ctx.stroke();}
    ctx.globalCompositeOperation='destination-out';for(let k=0;k<30;k++){ctx.beginPath();ctx.arc(Math.random()*w,y0+(Math.random()-.5)*44,1+Math.random()*4,0,Math.PI*2);ctx.fill();}ctx.globalCompositeOperation='source-over';}
- }),transparent:true,alphaTest:.1,roughness:.95,polygonOffset:true,polygonOffsetFactor:-2}),[.47,.3132,-.40]);tape.rotation.set(-Math.PI/2,0,0);
- box([.80,.57,0],[.06,.57,1.49],m.bitumen);
- mesh(tunnel(.16,.92),paintSatin,[.72,.31,0]);
- box([1.18,.825,0],[.77,.025,1.44],m.hood); // hood beyond the windscreen
- box([-.13,1.415,0],[1.08,.055,1.34],m.paint);
- for(const x of [-.5,-.18,.14])box([x,1.381,0],[.035,.014,1.30],m.body); // roof ribs
+ }),transparent:true,alphaTest:.1,roughness:.95,polygonOffset:true,polygonOffsetFactor:-2}),[.47,.3132,-.40],cabin);tape.rotation.set(-Math.PI/2,0,0);
+ box([.80,.57,0],[.06,.57,1.49],m.bitumen,cabin);
+ mesh(tunnel(.16,.92),paintSatin,[.72,.31,0],cabin);
+ box([1.18,.825,0],[.77,.025,1.44],m.hood,classic); // hood beyond the windscreen
+ box([-.13,1.415,0],[1.08,.055,1.34],m.paint,classic);
+ for(const x of [-.5,-.18,.14])box([x,1.381,0],[.035,.014,1.30],m.body,classic); // roof ribs
  // Single wiper resting at the foot of the windscreen, seen through the glass.
- bar([.86,.915,-.30],[.845,.93,.16],.006,m.shell);bar([.875,.905,-.05],[.85,.922,-.02],.004,m.shell);
- // --- Original Opala dash top over an emptied lower dash; cage dash bar beneath.
- box([.70,.888,0],[.26,.034,1.40],m.dash);
- bar([.575,.886,-.69],[.575,.886,.69],.02,m.dash); // rolled rear edge of the dash top
- for(let i=0;i<14;i++)mesh(new THREE.SphereGeometry(.004,8,6),silver,[.556,.888,-.62+i*.095]);
+ bar([.86,.915,-.30],[.845,.93,.16],.006,m.shell,classic);bar([.875,.905,-.05],[.85,.922,-.02],.004,m.shell,classic);
+ // --- Original Opala dash top over an emptied lower dash; cage dash bar beneath. The dash top
+ // meets the windscreen base, so it keeps its height when setView drops the rest.
+ const dashTop=new THREE.Group();dashTop.name='Painel_topo';root.add(dashTop);
+ box([.70,.888,0],[.26,.034,1.40],m.dash,dashTop);
+ bar([.575,.886,-.69],[.575,.886,.69],.02,m.dash,dashTop); // rolled rear edge of the dash top
+ for(let i=0;i<14;i++)mesh(new THREE.SphereGeometry(.004,8,6),silver,[.556,.888,-.62+i*.095],dashTop);
  bar([.60,.80,-.70],[.60,.80,.70],.0225); // dash bar
+ // Inside the V06 body its windscreen base is 10 cm ahead of this dash top: a strip closes it,
+ // stopping short of the windscreen rubber.
+ box([.872,.896,0],[.094,.012,1.40],m.dash,fillers);
+ // And the parcel shelf: from its rear bulkhead top up to just under the rear window rubber.
+ box([-1.485,.919,0],[.081,.01,1.50],m.paint,fillers).rotation.z=Math.atan2(.054,-.06);
  for(const side of [-1,1]){
-  box([.10,.59,side*.745],[1.54,.57,.025],m.paint);
-  box([.10,.878,side*.736],[1.54,.018,.03],m.body); // door top rail
+  box([.10,.59,side*.745],[1.54,.57,.025],m.paint,classic);
+  box([.10,.878,side*.736],[1.54,.018,.03],m.body,classic); // door top rail
   // Roll cage: A-pillar, roof rail, door bars and the main hoop behind the seat.
-  bar([.63,.31,side*.70],[.62,.96,side*.70],.029);
-  bar([.62,.96,side*.70],[.28,1.36,side*.59],.032);
-  bar([.28,1.36,side*.59],[-.63,1.36,side*.59],.029);
-  bar([.58,.60,side*.70],[-.62,.88,side*.70],.024);
-  bar([-.63,.31,side*.63],[-.63,1.36,side*.59],.032);
+  bar([.63,.31,side*.70],[.62,.96,side*.70],.029,m.cage,classic);
+  bar([.62,.96,side*.70],[.28,1.36,side*.59],.032,m.cage,classic);
+  bar([.28,1.36,side*.59],[-.63,1.36,side*.59],.029,m.cage,classic);
+  bar([.58,.60,side*.70],[-.62,.88,side*.70],.024,m.cage,classic);
+  bar([-.63,.31,side*.63],[-.63,1.36,side*.59],.032,m.cage,classic);
   // Window net as on the real car (carro_3): 5 horizontal and 7 vertical 30 mm straps,
   // riveted where they meet the border straps.
-  for(let i=0;i<5;i++)box([-.02,.905+i*.095,side*.735],[.87,.03,.008],m.webbing);
-  for(let i=0;i<7;i++)box([-.45+i*.143,1.095,side*.738],[.03,.41,.008],m.webbing);
-  for(let i=0;i<7;i++)for(const y of [.905,1.285])mesh(new THREE.SphereGeometry(.004,8,6),silver,[-.45+i*.143,y,side*.733]);
+  for(let i=0;i<5;i++)box([-.02,.905+i*.095,side*.735],[.87,.03,.008],m.webbing,classic);
+  for(let i=0;i<7;i++)box([-.45+i*.143,1.095,side*.738],[.03,.41,.008],m.webbing,classic);
+  for(let i=0;i<7;i++)for(const y of [.905,1.285])mesh(new THREE.SphereGeometry(.004,8,6),silver,[-.45+i*.143,y,side*.733],classic);
  }
- bar([.29,1.36,-.60],[.29,1.36,.60],.029);
- bar([-.63,1.36,-.59],[-.63,1.36,.59],.032);
+ bar([.29,1.36,-.60],[.29,1.36,.60],.029,m.cage,classic);
+ bar([-.63,1.36,-.59],[-.63,1.36,.59],.032,m.cage,classic);
  bar([-.63,.96,-.62],[-.63,.96,.62],.026); // harness bar
- for(const side of [-1,1])bar([-.63,1.36,side*.59],[-.63,.96,-side*.62],.026); // X brace above the harness bar
+ for(const side of [-1,1])bar([-.63,1.36,side*.59],[-.63,.96,-side*.62],.026,m.cage,classic); // X brace above the harness bar
  // Padding where the helmet could touch: driver's roof rail, A-pillar and door bar.
- padding([.28,1.36,-.59],[-.63,1.36,-.59],.25,.95);
- padding([.62,.96,-.70],[.28,1.36,-.59],.45,1);
- padding([.58,.60,-.70],[-.62,.88,-.70],.35,.75,.038);
- padding([-.63,.31,-.63],[-.63,1.36,-.59],.62,.95);
+ padding([.28,1.36,-.59],[-.63,1.36,-.59],.25,.95,undefined,classic);
+ padding([.62,.96,-.70],[.28,1.36,-.59],.45,1,undefined,classic);
+ padding([.58,.60,-.70],[-.62,.88,-.70],.35,.75,.038,classic);
+ padding([-.63,.31,-.63],[-.63,1.36,-.59],.62,.95,undefined,classic);
  // Opaque sun strip, leaving the road aperture open.
- const banner=box([.36,1.296,0],[.003,.073,1.17],new THREE.MeshStandardMaterial({color:0x958c77,roughness:1}));banner.rotation.z=-.32;
+ const banner=box([.36,1.296,0],[.003,.073,1.17],new THREE.MeshStandardMaterial({color:0x958c77,roughness:1}),classic);banner.rotation.z=-.32;
  const bannerLogo=new THREE.TextureLoader().load('./assets/texturas/cockpit_faixa_invent.png');bannerLogo.colorSpace=THREE.SRGBColorSpace;
  const bannerPlane=new THREE.PlaneGeometry(.51,.079);const buv=bannerPlane.attributes.uv;for(let i=0;i<buv.count;i++)buv.setX(i,1-buv.getX(i));
- mesh(bannerPlane,new THREE.MeshBasicMaterial({map:bannerLogo,transparent:true,opacity:.85,depthWrite:false}),[0,0,0],panel([.335,1.288,.005]));
+ mesh(bannerPlane,new THREE.MeshBasicMaterial({map:bannerLogo,transparent:true,opacity:.85,depthWrite:false}),[0,0,0],panel([.335,1.288,.005],classic));
 
  // --- Sgarbi bucket seat (carro_8, 24, 28, 36): air-mesh centres, back and head
  // wings, black bolsters with white piping, fibreglass sides.
@@ -159,7 +174,10 @@ export function createCockpit(renderer){
  // --- Auto Meter plate over the column (carro_25-27), the Luizão switch bank on the
  // windscreen tube (carro_31) and the dash-top readout.
  const {needles,shiftLight}=buildPod(kit,[.47,.912,-.335],-.22);
- buildSwitchBank(kit,[.285,1.275,-.40],.30,new THREE.Vector3(.29,1.345,-.40));
+ // The bank and its brackets hang from the cage's windscreen tube; under the V06 body's lower
+ // roof setView moves them to the roof lining, just ahead of that body's own windscreen tube.
+ const bankRig=new THREE.Group();bankRig.name='Painel_botoes_suporte';root.add(bankRig);
+ buildSwitchBank({...kit,root:bankRig},[.285,1.275,-.40],.30,new THREE.Vector3(.29,1.345,-.40));
  const display=buildSpeedDisplay(kit,[.54,.9325,-.09],-.2);
  // --- Sparco suede wheel (carro_24, 32): black anodised dished spokes, six-bolt hub
  // with an open centre, yellow centring stripe and the radio button strapped on.
@@ -283,7 +301,26 @@ export function createCockpit(renderer){
   }
   for(const [material,list] of byMaterial){mesh(mergeGeometries(list),material,[0,0,0],parent);for(const g of list)g.dispose();}
  }
- mergeStatic(root);mergeStatic(seat);
+ const board=root.getObjectByName('Painel_reles'),battery=root.getObjectByName('Bateria');
+ mergeStatic(root);mergeStatic(seat);mergeStatic(classic);mergeStatic(cabin);mergeStatic(fillers);mergeStatic(dashTop);mergeStatic(battery);
+ const eye=new THREE.Vector3(-.39,1.08,.015),EYE_Y=eye.y,MIRROR_Y=mirror.position.y,BOARD_Z=board.position.z;
+ // inside: the camera is in the cabin (the cockpit view); classic: the old box interior. Anywhere
+ // else the controls sit in the V06 body as in its Blender scene (v06_interior.py): dropped onto its
+ // cabin floor, whose structure replaces `cabin`; the dash top stays at its windscreen base, and
+ // the switch bank and the mirror hang under its windscreen cage tube, as in carro_14 and carro_31
+ // (bank brackets on the tube's underside at 1.166 m, mirror centred at 1.13 m). The relay board and
+ // the battery come inboard, clear of the V06 cage leg and rear arch; what crosses that cage or its
+ // sills belongs to `classic`.
+ const V06={drop:-.093,bank:1.166-1.345,mirror:1.13-MIRROR_Y,board:-.045,battery:-.035};
+ function setView({inside=true,classic:old=false}={}){
+  const v06=!(inside&&old),drop=v06?V06.drop:0;
+  classic.visible=cabin.visible=!v06;fillers.visible=v06;
+  root.position.y=drop;dashTop.position.y=fillers.position.y=-drop;
+  bankRig.position.y=v06?V06.bank-drop:0;mirror.position.y=MIRROR_Y+(v06?V06.mirror-drop:0);
+  board.position.z=BOARD_Z+(v06?V06.board:0);battery.position.z=v06?V06.battery:0;
+  eye.y=EYE_Y+drop;
+ }
+ setView();
  function update(car,dt,powertrain){
   const speed=Math.hypot(car.vx,car.vy)*3.6,gear=Math.min(5,1+Math.floor(speed/42));
   const rpm=powertrain?.rpm??(speed<2?1100:Math.min(7800,1800+(speed%42)/42*5700));
@@ -298,7 +335,8 @@ export function createCockpit(renderer){
   const phoneArrived=phone.update(root.visible?dt:0);
   return {speed,rpm,gear,steering:wheelTurn.rotation.z,phoneArrived};
  }
- return {root,wheel,wheelTurn,controls,eye:new THREE.Vector3(-.39,1.08,.015),update,mirrorTarget,rearCamera,resetPhone:()=>phone.reset(),
+ // drop: how far setView lowered the cabin; the driver (driver.js) and photo poses follow it.
+ return {root,wheel,wheelTurn,controls,eye,update,setView,drop:()=>root.position.y,mirrorTarget,rearCamera,resetPhone:()=>phone.reset(),
   info:()=>({reference:INTERIOR_REFERENCES,steering:wheelTurn.rotation.z,speed:display.speed,mirror:[768,128],visible:root.visible,phone:phone.info(),controls:controls.info(),
-   materials:reflective.size,cabinReflections:!!m.envMap,seat:seat.children.length})};
+   materials:reflective.size,cabinReflections:!!m.envMap,seat:seat.children.length,view:{classic:classic.visible,cabin:cabin.visible,fillers:fillers.visible,drop:root.position.y,eye:eye.toArray(),mirrorY:mirror.position.y}})};
 }

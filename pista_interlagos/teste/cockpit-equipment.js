@@ -19,7 +19,7 @@ export function buildPassengerSide(kit){
  const msd=panel([.735,.57,.40]);msd.rotation.z=-.14;box([0,0,-.03],[.165,.089,.06],new THREE.MeshStandardMaterial({color:0xb3141c,metalness:.5,roughness:.4}),msd);
  mesh(new THREE.PlaneGeometry(.165,.089),new THREE.MeshStandardMaterial({map:msdLabel(),metalness:.3,roughness:.45}),[0,0,.0006],msd).castShadow=false;
  // Relay and fuse board.
- const board=panel([.766,.60,.53]);
+ const board=panel([.766,.60,.53]);board.name='Painel_reles';
  mesh(new THREE.PlaneGeometry(.21,.30),new THREE.MeshStandardMaterial({map:relayPanelTexture(),roughness:.5}),[0,0,.002],board);
  box([0,0,0],[.21,.30,.004],m.shell,board);
  const relay=new THREE.MeshPhysicalMaterial({color:0xf2c4a4,roughness:.1,transparent:true,opacity:.3,clearcoat:1,depthWrite:false});
@@ -74,8 +74,9 @@ export function buildPassengerSide(kit){
  const seal=new THREE.Group();seal.position.set(.16,.70,.672);kit.root.add(seal);
  box([0,0,0],[.028,.022,.016],new THREE.MeshStandardMaterial({color:0xd0202a,roughness:.5}),seal);
  mesh(new THREE.TorusGeometry(.03,.0015,6,20).rotateY(Math.PI/2),m.whitePiping,[0,.01,.028],seal);
- mesh(tube([[.745,.47,.705],[.70,.40,.695],[.62,.393,.69],[-.62,.393,.69],[-.95,.36,.70]],.0035),m.copper,[0,0,0]);
- for(const side of [-1,1])bar([.62,.36,side*.69],[-.62,.36,side*.69],.028); // sill tubes of the cage
+ // Parts crossing the V06 cage or sills belong to the classic interior only (kit.classic).
+ mesh(tube([[.745,.47,.705],[.70,.40,.695],[.62,.393,.69],[-.62,.393,.69],[-.95,.36,.70]],.0035),m.copper,[0,0,0],kit.classic);
+ for(const side of [-1,1])bar([.62,.36,side*.69],[-.62,.36,side*.69],.028,m.cage,kit.classic); // sill tubes of the cage
  // Black two-slot holder at the front of the carbon plate (carro_35).
  for(const z of [.36,.39,.42])box([.47,.335,z],[.05,.045,.012],m.shell);
  box([.47,.318,.39],[.05,.012,.075],m.shell);
@@ -98,7 +99,7 @@ export function buildKeyPanel(kit){
 
 // "EDU / STEVAN 99" on the passenger half of the windscreen (photos 14, 15).
 export function buildWindscreenNumber(kit){
- const o=kit.mesh(new THREE.PlaneGeometry(.66,.495),new THREE.MeshBasicMaterial({map:windscreenNumber(),transparent:true,depthWrite:false,toneMapped:false,opacity:.9}),[.645,1.08,.40]);
+ const o=kit.mesh(new THREE.PlaneGeometry(.66,.495),new THREE.MeshBasicMaterial({map:windscreenNumber(),transparent:true,depthWrite:false,toneMapped:false,opacity:.9}),[.645,1.08,.40],kit.classic);
  // Inner face of the raked glass: normal back and down toward the cabin.
  o.rotation.order='YXZ';o.rotation.set(.85,-Math.PI/2,0);o.castShadow=false;o.renderOrder=2;
  return o;
@@ -111,17 +112,17 @@ export function buildDriverFootwell(kit){
  box([.765,.735,-.36],[.09,.06,.30],m.plastic);
  for(const z of [-.46,-.35])mesh(new THREE.CylinderGeometry(.017,.017,.11,16).rotateZ(Math.PI/2),kit.silver,[.79,.745,z]);
  const beige=new THREE.MeshStandardMaterial({color:0xe6d6a8,roughness:.5});
- for(const z of [-.57,-.63]){mesh(new THREE.CylinderGeometry(.022,.022,.04,20),beige,[.68,.83,z]);mesh(new THREE.CylinderGeometry(.024,.024,.036,20),m.shell,[.68,.858,z]);}
+ for(const z of [-.57,-.63]){mesh(new THREE.CylinderGeometry(.022,.022,.04,20),beige,[.68,.83,z],kit.classic);mesh(new THREE.CylinderGeometry(.024,.024,.036,20),m.shell,[.68,.858,z],kit.classic);}
  mesh(coil([.58,.78,-.53],[.57,.58,-.55],{turns:18,radius:.006,wire:.0015}),m.shell,[0,0,0]);
- mesh(tube([[.57,.58,-.55],[.60,.45,-.66],[.62,.33,-.70]],.0015),m.shell,[0,0,0]);
+ mesh(tube([[.57,.58,-.55],[.60,.45,-.66],[.62,.33,-.70]],.0015),m.shell,[0,0,0],kit.classic);
  // Corrugated conduit down to the left footwell, a black box and a braided line.
  const conduit=tube([[.66,.80,-.40],[.60,.70,-.47],[.56,.52,-.56],[.55,.34,-.62]],.017),cp=conduit.attributes.position,cn=conduit.attributes.normal;
  for(let i=0;i<cp.count;i++){const k=1+.12*Math.sin(Math.floor(i/9)*1.9);cp.setXYZ(i,cp.getX(i)+cn.getX(i)*.002*k,cp.getY(i)+cn.getY(i)*.002*k,cp.getZ(i)+cn.getZ(i)*.002*k);}
  mesh(conduit,m.rubber,[0,0,0]);
  box([.64,.81,-.49],[.06,.05,.07],m.shell);
- mesh(tube([[.74,.72,-.50],[.66,.58,-.62],[.62,.48,-.70],[.68,.44,-.71],[.72,.58,-.70]],.004),kit.silver,[0,0,0]);
+ mesh(tube([[.74,.72,-.50],[.66,.58,-.62],[.62,.48,-.70],[.68,.44,-.71],[.72,.58,-.70]],.004),kit.silver,[0,0,0],kit.classic);
  mesh(tube([[.52,.60,-.52],[.58,.45,-.58],[.60,.33,-.60]],.0025),m.plastic,[0,0,0]);
  for(const [a,b,c] of [[[.56,.77,-.45],[.48,.55,-.47],[.52,.33,-.50]],[[.58,.78,-.28],[.50,.62,-.30],[.46,.34,-.29]],[[.55,.76,-.15],[.47,.55,-.12],[.40,.33,-.10]]])mesh(tube([a,b,c],.003),m.plastic,[0,0,0]);
  // Aluminium kick panel beside the foot rest.
- box([.60,.50,-.728],[.34,.40,.008],m.aluminium);
+ box([.60,.50,-.728],[.34,.40,.008],m.aluminium,kit.classic);
 }

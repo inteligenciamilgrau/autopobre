@@ -7,6 +7,9 @@ A private static server maps /teste/ to pista_interlagos/teste/ and serves the e
 server is not used (it whitelists files and blocks in-page evaluation). cockpit.js is patched in memory only:
 - its per-material merge (mergeStatic) is skipped, so every part stays a node the V06 build can sort;
 - materials get names ('Int_<key>') and each mesh is named after the source line that built it.
+The cockpit is exported as the game shows it inside the V06 body (cockpit.js setView, its default): lowered onto
+the V06 cabin floor, dash top at the windscreen base, switch bank and mirror under the windscreen cage tube, and
+without the classic box interior and the game's own cabin floor and walls (the V06 structure takes their place).
 Frame: three.js car body (+X forward, +Y up, -Z driver side); the Blender glTF importer turns it into +X, +Z up,
 +Y driver side, the car frame of the .blend.
 """
@@ -22,7 +25,7 @@ def patched(name,text):
  def sub(old,new):
   nonlocal text;assert old in text,(name,old);text=text.replace(old,new,1)
  if name=='cockpit.js':
-  sub('mergeStatic(root);mergeStatic(seat);','')
+  sub('function mergeStatic(parent){','function mergeStatic(parent){return;')
   sub('const m=createInteriorMaterials(renderer);',
    "const m=createInteriorMaterials(renderer);for(const [k,v] of Object.entries(m))if(v&&v.isMaterial)v.name='Int_'+k;")
   sub('const kit={','for(const [k,v] of Object.entries({silver,chrome,steel,red,yellow,bezel,paintBoth,paintSatin}))v.name=\'Int_\'+k;const kit={')
@@ -51,6 +54,8 @@ try{
  const {createCockpit}=await import('./cockpit.js');
  const renderer=new THREE.WebGLRenderer({canvas:document.getElementById('c')});
  const cockpit=createCockpit(renderer),root=cockpit.root;root.visible=true;
+ // Only the V06 placement goes out: the classic box interior and the game's cabin shell stay in the game.
+ for(const name of ['Casca_classica','Cabine_piso_paredes'])root.getObjectByName(name).removeFromParent();
  root.traverse(o=>{o.visible=true;});
  // Wait for every image the materials use (scanned maps, the banner PNG); canvases are already drawn.
  const textures=new Set();
