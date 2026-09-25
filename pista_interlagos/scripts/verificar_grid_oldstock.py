@@ -25,6 +25,9 @@ with sync_playwright() as p:
   assert len(info['rivals'])==14 and len(set(info['numbers']))==14 and '99' not in info['numbers']
   assert all(s>info['L']-78 and s<info['L']-4 for s in info['positions'])
   assert info['billboards']==16 and info['kleberLogo']
+  # Car 70's Old Stock ads sit on its doors (V06 doors: x -0.29..0.89 m, car frame), one per side, bent onto the body.
+  doors=page.evaluate("async()=>{const THREE=await import('three');const k=fixtureMode.visual.rivals.find(o=>o.userData.entry.number==='70');const out=[];k.traverse(o=>{if(o.name==='OldStock_no_Opala70'){o.geometry.computeBoundingBox();const c=o.geometry.boundingBox.getCenter(new THREE.Vector3());out.push([c.x,c.y,c.z,!!o.parent?.name?.startsWith('Rival_detalhe')]);}});return out;}")
+  assert len(doors)==2 and all(-.29<x<.89 and .3<y<.65 and abs(z)>.8 and detail for x,y,z,detail in doors) and doors[0][2]*doors[1][2]<0,doors
   assert '15' in page.inner_text('#racePosition')
   frame=page.evaluate('interlagos.cockpitInfo().renderedFrame');wait_js(page,f'interlagos.cockpitInfo().renderedFrame>{frame+1}')
   page.screenshot(path=str(ROOT/f'renders/oldstock_grid_{mobile}.png'))

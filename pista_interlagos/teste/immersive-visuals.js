@@ -15,6 +15,19 @@ const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior
 // hood, roof and trunk lid decals and the window stickers. The other cars carry none of it, only their own number.
 const LIVERY_99=/^(Adesivo|Decal_|Pilotos_99_parabrisa|Invent_parabrisa|Jesus_|Logo_frontal|Stickers_vigia_|Branco$)/;
 const up=new THREE.Vector3(0,1,0);
+// A sticker grid bent onto a car body: from center (car-local), w along right and h along up,
+// each vertex cast inward onto the body meshes (world space; the clone keeps the model's own
+// transform) and kept 6 mm off the paint, stored car-local.
+const stickerRay=new THREE.Raycaster();
+function bendOnBody(detail,body,center,right,up,w,h){
+ const normal=right.clone().cross(up),inward=normal.clone().negate(),nx=12,ny=6,pos=[],uv=[],index=[],scale=detail.matrixWorld.getMaxScaleOnAxis();
+ for(let j=0;j<=ny;j++)for(let i=0;i<=nx;i++){
+  const p=center.clone().addScaledVector(right,(i/nx-.5)*w).addScaledVector(up,(j/ny-.5)*h);stickerRay.set(detail.localToWorld(p.clone().addScaledVector(normal,1.5)),inward.clone().transformDirection(detail.matrixWorld));stickerRay.far=1.8*scale;
+  const hit=stickerRay.intersectObjects(body,false)[0];if(hit)p.copy(detail.worldToLocal(hit.point.clone())).addScaledVector(normal,.006);pos.push(p.x,p.y,p.z);uv.push(i/nx,j/ny);
+  if(i&&j){const a=(j-1)*(nx+1)+i-1,c=j*(nx+1)+i-1;index.push(a,a+1,c+1,a,c+1,c);}
+ }
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(index);g.computeVertexNormals();return g;
+}
 const leanRotation=new THREE.Quaternion(),leanEuler=new THREE.Euler(),poseForward=new THREE.Vector3(),poseUp=new THREE.Vector3(),poseSide=new THREE.Vector3(),poseMatrix=new THREE.Matrix4();
 export function trackPoint(data,s,offset=0){
  const a=data.samples,L=data.meta.reconstructed_xy_m;s=((s%L)+L)%L;
@@ -133,19 +146,17 @@ export class ImmersiveVisuals {
  numberPlates(template,detail){
   this.plateShapes??=new WeakMap();let list=this.plateShapes.get(template);if(list)return list;
   const body=[];detail.parent.updateMatrixWorld(true);detail.traverse(o=>{if(o.isMesh&&o.visible)body.push(o);});
-  // Cast in world space (the clone keeps the model's own transform), stored car-local.
-  const ray=new THREE.Raycaster(),V=(x,y,z)=>new THREE.Vector3(x,y,z),scale=detail.matrixWorld.getMaxScaleOnAxis();
-  const bend=(center,right,up,w,h)=>{
-   const normal=right.clone().cross(up),inward=normal.clone().negate(),nx=12,ny=6,pos=[],uv=[],index=[];
-   for(let j=0;j<=ny;j++)for(let i=0;i<=nx;i++){
-    const p=center.clone().addScaledVector(right,(i/nx-.5)*w).addScaledVector(up,(j/ny-.5)*h);ray.set(detail.localToWorld(p.clone().addScaledVector(normal,1.5)),inward.clone().transformDirection(detail.matrixWorld));ray.far=1.8*scale;
-    const hit=ray.intersectObjects(body,false)[0];if(hit)p.copy(detail.worldToLocal(hit.point.clone())).addScaledVector(normal,.006);pos.push(p.x,p.y,p.z);uv.push(i/nx,j/ny);
-    if(i&&j){const a=(j-1)*(nx+1)+i-1,c=j*(nx+1)+i-1;index.push(a,a+1,c+1,a,c+1,c);}
-   }
-   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(index);g.computeVertexNormals();return g;
-  };
+  const V=(x,y,z)=>new THREE.Vector3(x,y,z),bend=(...args)=>bendOnBody(detail,body,...args);
   list=[bend(V(-1.835,.667,-.86),V(-1,0,0),V(0,1,0),.57,.45),bend(V(-1.906,.67,.86),V(1,0,0),V(0,1,0),.57,.45),bend(V(-.19,1.3,0),V(-1,0,0),V(0,0,1),.94,.74),bend(V(-2.18,.69,-.29),V(0,0,1),V(0,1,0),.2,.156)];
   this.plateShapes.set(template,list);return list;
+ }
+ // A sponsor sticker on both doors of a rival (car 70's Old Stock ads): on the door skin below the
+ // window (the V06 doors run from x -0.29 to 0.89 m, car frame), bent onto the body, with the
+ // detailed model (hidden with it in the distance).
+ doorStickers(obj,material,{x=.3,y=.47,w=.52,h=.35}={}){
+  const detail=obj.userData.detail;if(!detail)return [];
+  const body=[];detail.parent.updateMatrixWorld(true);detail.traverse(o=>{if(o.isMesh&&o.visible&&!o.name.startsWith('Numero_'))body.push(o);});
+  return [-1,1].map(side=>{const sticker=new THREE.Mesh(bendOnBody(detail,body,new THREE.Vector3(x,y,side*.9),new THREE.Vector3(side,0,0),new THREE.Vector3(0,1,0),w,h),material);sticker.renderOrder=2;detail.add(sticker);return sticker;});
  }
  // The team's own Opala for the paddock: the player's model, livery and cage.
  ownCar(template){

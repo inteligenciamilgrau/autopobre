@@ -390,8 +390,8 @@ document.addEventListener('pointerlockchange',()=>{
  cameraReturn.manual(performance.now());cameraHint();
  if(pointerLocked)status('');
  // Escape releases the lock without a keydown: that opens the menu. The pause (P) releasing it,
- // or the window going to another app, only pauses with the track on screen.
- if(wasLocked&&!pointerLocked&&!held&&!pitstop?.opened&&!immersive?.blockingUI()){if(document.hasFocus()&&!document.hidden)menu(true);else hold(true);}
+ // or the window going to another app, only pauses with the track on screen (the recon lap goes on).
+ if(wasLocked&&!pointerLocked&&!held&&!pitstop?.opened&&!immersive?.blockingUI()){if(document.hasFocus()&&!document.hidden)menu(true);else if(!automatic)hold(true);}
 });
 document.addEventListener('pointerlockerror',lockFailed);
 document.addEventListener('mousemove',e=>{
@@ -516,7 +516,7 @@ function hud(){
  const fuel=immersive?.active?immersive.state.fuel:immersive?.freeFuel??12,staged=immersive?.active&&['crowd','podium'].includes(immersive.state.phase);$('fuelGauge').classList.toggle('hidden',!!staged);$('fuelGauge').classList.toggle('reserve',fuel<1);$('fuelVolume').textContent=fuel.toFixed(1)+' L';$('fuelBar').value=fuel;$('fuelStatus').textContent=fuel<=0?(immersive?.active?'TANQUE VAZIO':'VAZIO · R PARA REABASTECER'):fuel<1?'RESERVA':immersive?.active&&immersive.state.tankDetached?'VAZAMENTO':'COMBUSTÍVEL';const p=car.surface,watch=watchedRival(),shown=watch?.car??car,speed=Math.hypot(shown.vx,shown.vy)*3.6;
  $('speed').textContent=Math.round(speed);$('gear').textContent=watch?watch.car.gear:carAudio.state.gear;$('rev').style.width=`${(watch?watch.car.rpm:carAudio.state.rpm)/7400*100}%`;
  // Recon lap: the Piloto button (N) names the driver the cameras watch; speed and gear are that car's.
- const touring=automatic&&!immersive.active;$('watchButton').hidden=!touring;if(touring)$('watchButton').textContent=watch?`Piloto: #${watch.entry.number} ${watch.entry.shortName} (N)`:'Piloto: você (N)';
+ const touring=automatic&&!immersive.active;$('watchButton').hidden=$('tourBadge').hidden=$('touchTourBadge').hidden=!touring;if(touring)$('watchButton').textContent=watch?`Piloto: #${watch.entry.number} ${watch.entry.shortName} (N)`:'Piloto: você (N)';
  $('grade').textContent=`${(p.grade*100).toFixed(1).replace('.',',')}%`;$('bank').textContent=`${(p.bank*100).toFixed(1).replace('.',',')}%`;$('alt').textContent=circuit.altitude===null?'—':`${(p.z+circuit.altitude).toFixed(1)} m`;
  $('lap').textContent=`${Math.min(car.laps+1,immersive.active?immersive.storyLaps:immersive.freeTotalLaps)} / ${immersive.active?immersive.storyLaps:immersive.freeTotalLaps}`;$('racePosition').textContent=`${immersive.active?immersive.state.result?.position??immersive.state.position:immersive.freePosition}º / ${GRID_SIZE}`;$('timer').textContent=fmt(car.clock-car.lapStart);$('best').textContent=fmt(car.best);const rejected=car.lastLapValid===false&&car.clock-car.lapStart<10;$('valid').textContent=rejected?(car.lastInvalidReason==='pit'?'Volta não contou · excesso de velocidade nos boxes':'Volta não contou · trecho cortado ou incompleto'):car.lapValid?'Volta válida':car.invalidReason==='pit'?`Volta inválida · ${Math.round(car.pitPenalty?.kmh??0)} km/h nos boxes (máx. 60)`:'Volta inválida · trecho cortado';$('valid').hidden=car.lapValid&&!rejected;$('valid').style.color=car.lapValid&&!rejected?'#e2fb57':'#ffb789';
  $('surface').textContent=automatic?(watch?`RECONHECIMENTO · #${watch.entry.number} ${watch.entry.shortName.toUpperCase()}`:'RECONHECIMENTO AUTOMÁTICO'):p.pit&&data.pit?(car.limiter?'PIT LANE · MÁX. 60 km/h':'PIT LANE'):p.onRoad?'ASFALTO · SESSÃO LIVRE':'FORA DA PISTA · ADERÊNCIA REDUZIDA';$('location').textContent=p.pit&&data.pit?'Pit lane · boxes':location(p.s);drawMap();
@@ -588,6 +588,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;menu(true);}
  // The sound is heard from the rival the recon lap watches (N), otherwise from the player's car.
  const heard=watchedRival()?.car??car;
+ if(automatic&&!paused&&(mobile?.throttle||mobile?.brake||mobile?.steering))takeWheel();
  if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
@@ -650,6 +651,9 @@ $('settingsResume').onclick=resumeRace;
 // P, or the window losing focus (another app, a screenshot tool), freezes the race and keeps it
 // on screen under a small badge; Escape opens the menu.
 let held=false;
+// Taking the wheel ends the recon lap: the cameras come back to the player's car.
+function takeWheel(){automatic=false;if(watched){watched=0;followInitialized=false;tvCamera?.reset();}}
+// The recon lap (automatic) is never paused by the window losing focus: it may be a demonstration.
 function hold(on){
  if(!ready||on===held||on&&paused)return;
  held=on;paused=on;carAudio.setPaused(on);if(!on)carAudio.unlock();
@@ -657,7 +661,7 @@ function hold(on){
  keys.clear();mobile?.clear();cameraReturn.reset(performance.now());$('pauseBadge').hidden=!on;
 }
 $('pauseBadge').onclick=()=>hold(false);
-function menu(show){held=false;$('pauseBadge').hidden=true;if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();mobile?.clear();status(show?'':automatic?'Reconhecimento automático · W para assumir o volante':'');}
+function menu(show){held=false;$('pauseBadge').hidden=true;if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());$('menu').classList.toggle('hidden',!show);keys.clear();mobile?.clear();status('');}
 const openSettings=setupSettings(()=>menu(true),returnToMainMenu);
 const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({onRestart:()=>beginRace(true),onSettings:openSettings,onRecords:mode=>lapRecords.open(mode),onMainMenu:returnToMainMenu,
  // Closing the sheet opens the podium: that click also gives the mouse to its free camera.
@@ -683,10 +687,9 @@ document.addEventListener('keydown',e=>{
  // P pauses on the track (from the menu it resumes, as before); Escape opens the menu.
  if(e.code==='KeyP'){if(held||!paused)hold(!held);else menu(false);}
  if(e.code==='Escape')menu(true);
- // Taking the wheel ends the recon lap: the cameras come back to the player's car.
- if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){automatic=false;status('');if(watched){watched=0;followInitialized=false;tvCamera?.reset();}}
-});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(false);keys.clear();mobile?.clear();hold(true);});
-document.addEventListener('visibilitychange',()=>{carAudio.setFocused(!document.hidden&&document.hasFocus());if(document.hidden)hold(true);});
+ if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))takeWheel();
+});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(automatic);keys.clear();mobile?.clear();if(!automatic)hold(true);});
+document.addEventListener('visibilitychange',()=>{carAudio.setFocused(!document.hidden&&(automatic||document.hasFocus()));if(document.hidden&&!automatic)hold(true);});
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer?.setSize(innerWidth,innerHeight,false);mobile?.clear();if(touchDevice&&innerHeight>innerWidth&&ready)menu(true);});
 $('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit');};
 $('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit');};
@@ -801,8 +804,9 @@ async function loadCircuit(){
  pitstop?.setDamage(preferences.values.damage);
  landscape.setRealisticWater(preferences.values.realisticWater);
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');
- const oldStockMaterial=new THREE.MeshBasicMaterial({map:branding.oldStock,polygonOffset:true,polygonOffsetFactor:-2});
- for(const side of [-1,1]){const decal=new THREE.Mesh(new THREE.PlaneGeometry(.64,.43),oldStockMaterial);decal.position.set(.95,.75,side*.941);decal.rotation.y=side<0?Math.PI:0;decal.name='OldStock_no_Opala70';kleber.add(decal);}
+ // Car 70's Old Stock ads sit on its doors, bent onto the body.
+ const oldStockMaterial=new THREE.MeshStandardMaterial({map:branding.oldStock,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+ for(const decal of immersive.visual.doorStickers(kleber,oldStockMaterial))decal.name='OldStock_no_Opala70';
  const roster=$('gridRoster');roster.replaceChildren();for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':` · Ritmo ${entry.level}/100`}`;roster.append(row);}
  // Compile the new programs while the loading label is still shown, instead of
  // freezing the first race frame (D3D shader compilation is slow on Windows).
