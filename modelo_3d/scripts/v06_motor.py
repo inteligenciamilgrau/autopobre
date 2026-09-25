@@ -165,8 +165,9 @@ def bay_structure(k):
  for y in ys:
   zt=ray_z(Th,2.182,y,down=False);V+=[(2.18,y,.748),(2.18,y,(zt or .79)-.002)]
  B.mesh(pin,V,grid_faces(len(ys),2),outward=(-1,0,0))
- # splash shields low in the bay: the ground under the car no longer shows beside the engine
- for s in (-1,1):B.box(k['aco_escuro'],(1.48,s*.41,.14),(1.26,.27,.006),.003,1)
+ # splash shields low in the bay: the ground under the car no longer shows beside the engine. They stop behind
+ # the front suspension crossbar (x 1.85): further forward they stuck out under the nose like two flaps.
+ for s in (-1,1):B.box(k['aco_escuro'],(1.345,s*.41,.14),(.99,.27,.006),.003,1)
  B.box(k['aco_escuro'],(1.91,0,.20),(.38,.60,.006),.003,1)
  B.build()
 

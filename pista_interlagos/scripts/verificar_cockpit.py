@@ -20,7 +20,7 @@ with sync_playwright() as p:
   # The controls sit in the V06 body (the car stays visible round them), lowered onto its floor.
   check('internal_selected',info['visible'] and info['externalVisible'] and not info['view']['classic'] and info['view']['drop']<0)
   EYE=info['view']['eye']
-  check('eye_inside_cabin',math.dist(info['eyeLocal'],EYE)<1e-6 and abs(EYE[1]-(1.08-.093))<1e-6)
+  check('eye_inside_cabin',math.dist(info['eyeLocal'],EYE)<1e-6 and abs(EYE[0]+.15)<1e-6 and abs(EYE[1]-1.02)<1e-6)  # V06: 24 cm forward, 12 cm over the dash
   # Scanned interior maps (carbon, leather, suede, aluminium, tread plate, rubber) and the cabin reflections.
   loaded=wait_js(page,"performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length>=13&&performance.getEntriesByType('resource').filter(e=>e.name.includes('/texturas/interior/')).length")
   check('interior_textures_loaded',loaded>=13)

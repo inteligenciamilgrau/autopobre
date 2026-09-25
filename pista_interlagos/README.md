@@ -23,8 +23,8 @@ As mãos acompanham o volante compartilhado; cotovelos, ombros e joelhos são ar
 Execute **INICIAR_TESTE.cmd** nesta pasta. O servidor abre o navegador e atende apenas em `127.0.0.1:8799`. Mantenha a janela do servidor aberta durante o teste; feche-a para encerrar. Não precisa instalar extensões nem acessar serviços externos para jogar. A biblioteca Three.js e as duas pinturas estão incluídas.
 
 - **W / ↑**: acelerar; **S / ↓**: frear; **A/D / ←/→**: direção.
-- **Q**: ré; **Espaço**: freio de mão, freia e reduz a aderência traseira.
-- **W + Espaço**, parado no asfalto: segura o carro e faz as rodas traseiras patinarem, com fumaça, som e borracha no chão. Solte **Espaço** mantendo **W** para sair cantando pneu.
+- **Q**: ré; **Espaço**: puxa o freio de mão, que freia e reduz a aderência traseira. Ele fica puxado até um novo toque em Espaço (ou em **R**, que reposiciona o carro). Enquanto isso, o painel mostra FREIO DE MÃO PUXADO. O botão de toque funciona do mesmo jeito.
+- **W + Espaço**, parado no asfalto: segura o carro e faz as rodas traseiras patinarem, com fumaça, som e borracha no chão. Toque em **Espaço** de novo, mantendo **W**, para soltar o freio e sair cantando pneu.
 - **W + Espaço + A/D**: faz zerinho para a esquerda/direita. A combinação tem assistência de manobra em baixa velocidade; **S** segura a rotação do carro. Soltar o acelerador deixa a fumaça se dissipar.
 - **C**: alternar perseguição, capô, **interna**, câmera aérea e **órbita 360°**.
 - **Interna**: botão direto na pista ou opção do menu. O volante acompanha A/D, o visor indica a velocidade e o retrovisor mostra a pista atrás. A câmera fica presa ao interior do carro e acompanha as inclinações da pista.

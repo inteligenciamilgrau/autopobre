@@ -318,20 +318,38 @@ export function createCockpit(renderer){
  // cabin floor, whose structure replaces `cabin`; the dash top stays at its windscreen base. As in
  // the onboard photo carro_14, the mirror spans the top of the windscreen (centre 1.185 m) with the
  // switch bank right beside it (3.5 cm inboard of the classic spot), hanging from the underside of
- // the V06 windscreen tube where it arches up with the roof (1.229 m there: v06_interior.py). The
- // camera comes 14 cm forward, where the mirror spans about 50 degrees of the view as in carro_14. The
- // relay board and the battery come inboard, clear of the V06 cage leg and rear arch; what crosses that
- // cage or its sills belongs to `classic`.
- const V06={drop:-.093,bank:1.229-1.345,bankIn:.035,mirror:1.185-MIRROR_Y,board:-.045,battery:-.035,eyeForward:.14};
+ // the V06 windscreen tube where it arches up with the roof (1.229 m there: v06_interior.py). The real
+ // windscreen is shorter than the classic box's opening, so the camera comes 24 cm forward and 3 cm up
+ // (1.02 m, 12 cm over the dash top), near the onboard GoPro of carro_14: the glass fills about as much of
+ // the view as the old opening did, with the road from about 9 m ahead. The relay board and the battery
+ // come inboard, clear of the V06 cage leg and rear arch; what crosses that cage or its sills belongs to `classic`.
+ const V06={drop:-.093,bank:1.229-1.345,bankIn:.035,mirror:1.185-MIRROR_Y,board:-.045,battery:-.035,eyeForward:.24,eyeLift:.033};
+ let cameraInside=true,lastView={};
  function setView({inside=true,classic:old=false}={}){
-  const v06=!(inside&&old),drop=v06?V06.drop:0;
+  const v06=!(inside&&old),drop=v06?V06.drop:0;cameraInside=inside;lastView={inside,classic:old};
   classic.visible=cabin.visible=!v06;fillers.visible=v06;
   root.position.y=drop;dashTop.position.y=fillers.position.y=-drop;
   bankRig.position.set(0,v06?V06.bank-drop:0,v06?V06.bankIn:0);mirror.position.y=MIRROR_Y+(v06?V06.mirror-drop:0);
   board.position.z=BOARD_Z+(v06?V06.board:0);battery.position.z=v06?V06.battery:0;
-  eye.set(EYE_X+(v06?V06.eyeForward:0),EYE_Y+drop,eye.z);
+  eye.set(EYE_X+(v06?V06.eyeForward:0),EYE_Y+drop+(v06?V06.eyeLift:0),eye.z);
  }
  setView();
+ // A still copy of the controls as they sit in the V06 body seen from outside, for another Opala (the
+ // story-mode paddock car): the wheel, lever and pedals ride with the driver (driver.js), so copies of
+ // them come along, and the mirror gets a plain chrome face instead of this car's live view. Offered on
+ // root.userData so the car's other users find it with the root.
+ const stillMirror=new THREE.MeshStandardMaterial({color:0xaab4ba,metalness:1,roughness:.06});
+ function outsideCopy(){
+  const was=lastView;setView({inside:false});root.updateMatrix();
+  const copy=new THREE.Group(),inner=root.clone(true);inner.visible=true;copy.add(inner);
+  for(const part of [wheel,...controls.parts]){
+   const holder=part.parent;if(holder===root)continue;
+   const c=part.clone(true);if(holder){holder.updateMatrix();c.applyMatrix4(holder.matrix);c.position.y+=V06.drop-holder.position.y;}copy.add(c);
+  }
+  copy.traverse(o=>{if(o.material?.map===mirrorTarget.texture)o.material=stillMirror;});
+  setView(was);copy.name='Interior_Opala_99_parado';return copy;
+ }
+ root.userData.outsideCopy=outsideCopy;
  function update(car,dt,powertrain){
   const speed=Math.hypot(car.vx,car.vy)*3.6,gear=Math.min(5,1+Math.floor(speed/42));
   const rpm=powertrain?.rpm??(speed<2?1100:Math.min(7800,1800+(speed%42)/42*5700));
@@ -343,7 +361,8 @@ export function createCockpit(renderer){
   needles.fuel.rotation.z=needleAngle('fuel',6.4+Math.sin(rpm*.004)*.25);
   shiftLight.material.emissiveIntensity=rpm>6700?4:0;
   display.draw(Math.min(999,Math.round(speed)));
-  const phoneArrived=phone.update(root.visible?dt:0);
+  // The phone's messages only run on while the driver's view is shown (the controls show from outside too).
+  const phoneArrived=phone.update(root.visible&&cameraInside?dt:0);
   return {speed,rpm,gear,steering:wheelTurn.rotation.z,phoneArrived};
  }
  // drop: how far setView lowered the cabin; the driver (driver.js) and photo poses follow it.

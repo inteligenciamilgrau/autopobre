@@ -134,8 +134,12 @@ export class ImmersiveVisuals {
  }
  // The team's own Opala for the paddock: the player's model, livery and cage.
  ownCar(template){
-  if(!template)return this.car(0x151515,'99');const root=template.clone(true),structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));shutOpenings(root);root.add(this.lightInterior());
-  root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});root.name='Opala_99_no_box';return root;
+  if(!template)return this.car(0x151515,'99');const root=template.clone(true),structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));shutOpenings(root);
+  root.traverse(o=>{if(o.isMesh){o.castShadow=true;o.receiveShadow=true;}});
+  // Parked in the garage and walked round, it carries the player's whole cockpit, still (cockpit.js
+  // outsideCopy), not the light interior of the rivals.
+  const cabin=this.carRoot.getObjectByName('Interior_Opala_99')?.userData.outsideCopy?.();root.add(cabin??this.lightInterior());
+  root.name='Opala_99_no_box';return root;
  }
  mat(color){return this.materials[color]??=(new THREE.MeshStandardMaterial({color,roughness:.76}));}
  // The car GLB carries no interior (the player's cockpit is built at runtime, cockpit.js): the

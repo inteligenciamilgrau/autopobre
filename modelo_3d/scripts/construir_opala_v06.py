@@ -20,6 +20,7 @@ import v06_detalhes as detalhes
 import v06_motor as motor
 import v06_porta_malas as porta_malas
 import v06_interior as interior
+import v06_vigia as vigia
 R=Path(__file__).resolve().parents[2]
 source=Path(bpy.data.filepath);assert source.name.startswith('opala99_'),'open opala99_<livery>.blend before running'
 assert 'OPALA_99_ROOT' in bpy.data.objects and 'Capo' in bpy.data.objects,'run on a V05 blend (it still has the one-piece hood)'
@@ -84,6 +85,7 @@ def main():
  t0=time.time();v05=set(bpy.data.materials.keys());mats=materials()
  structure_finish()
  lateral.build(mats)                  # greenhouse and stickers to the photos, before the doors are cut
+ vigia.build()                        # quarter-glass stickers and fuel fillers (carro_18, 44, 45), before the cap hinges
  carroceria.build_doors(mats)
  carroceria.build_hood(mats);carroceria.hood_pin_posts(mats)
  carroceria.build_lid(mats);carroceria.small_pivots(mats)

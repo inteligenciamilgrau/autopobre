@@ -22,9 +22,12 @@ with sync_playwright() as p:
   page.keyboard.down('KeyS');frame();check('parked_brake_no_marks',info()['segments']==0);wait_race_start(page);page.keyboard.up('KeyS')
   # Known initial speed on the Reta Oposta, then actual keyboard controls drive the effect.
   page.evaluate('()=>{interlagos.reposition(600);const c=interlagos.car;c.vx=Math.cos(c.heading)*18;c.vy=Math.sin(c.heading)*18;}')
-  page.keyboard.down('Space');page.keyboard.down('KeyA')
+  page.keyboard.press('Space');page.keyboard.down('KeyA')
   wait_js(page,own+'>100')
-  page.keyboard.up('KeyA');page.keyboard.up('Space');page.keyboard.down('KeyS')
+  # One press pulls the handbrake and it stays pulled (HUD says so); the next press lets it go.
+  check('space_latches_handbrake',page.evaluate("interlagos.mobileInfo().pressed.includes('Space')") and 'FREIO DE MÃO PUXADO' in page.text_content('#surface'))
+  page.keyboard.up('KeyA');page.keyboard.press('Space');page.keyboard.down('KeyS')
+  check('second_space_releases_handbrake',not page.evaluate("interlagos.mobileInfo().pressed.includes('Space')"))
   wait_js(page,'interlagos.telemetry().speed<1');frame()
   report['after_drift']=info();check('drift_and_braking_visible_geometry',page.evaluate(own)>100)
   check('all_wheels_can_leave_marks',all(w['segments']>0 for w in info()['perWheel']))

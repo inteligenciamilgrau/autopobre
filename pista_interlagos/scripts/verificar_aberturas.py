@@ -140,6 +140,8 @@ with sync_playwright() as p:
         wait_js(page, 'window.interlagos?.ready')
         page.evaluate('interlagos.immersiveInfo()')
         wait_js(page, "fixtureMode.state.phase==='crowd'&&!!fixtureMode.visual.ownOpenings")
+        # Walked round in the garage, the parked Opala shows the player's whole cockpit through its windows.
+        check('paddock_opala_has_full_interior', page.evaluate("(()=>{const o=fixtureMode.visual.own,has=n=>!!o.getObjectByName(n);return has('Painel_Auto_Meter')&&has('Banco_Sgarbi')&&has('Volante_animado')&&has('Painel_botoes_Luizao')&&!has('Interior_leve');})()"))
         own = lambda name: page.evaluate(f"fixtureMode.visual.ownOpenings.info()['{name}']")
         # Stand the pilot 3 m ahead of the parked Opala (or behind it) facing it, or by its driver's door.
         page.evaluate("""window.standBy=side=>{const v=fixtureMode.visual,o=v.own,ry=o.rotation.y,f=[Math.cos(ry),-Math.sin(ry)];

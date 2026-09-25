@@ -26,7 +26,7 @@ SIZE = {'width': 1400, 'height': 788}
 PI = math.pi
 
 # Nome -> pose, com a foto de referência que ela imita. eye = olho em coordenadas locais do
-# cockpit; None = olho padrão do jogo (-.25, 1.08, .015; -.39 no interior clássico). Na carroceria V06 o
+# cockpit; None = olho padrão do jogo ((-.15, 1.113, .015) na V06; (-.39, 1.08, .015) no clássico). Na V06 o
 # cockpit desce 9,3 cm e o olho das poses desce junto. roll (opcional) gira a imagem: positivo
 # inclina o topo da câmera para a esquerda. As referências têm uma selfie no canto superior
 # esquerdo: ignore-a ao comparar. Poses ajustadas pelo enquadramento (mesmas coisas no mesmo

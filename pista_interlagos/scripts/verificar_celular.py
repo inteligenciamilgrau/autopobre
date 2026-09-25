@@ -16,7 +16,7 @@ with sync_playwright() as p:
  try:
   open_menu(page);race_options(page,immersive=False);enter_track(page);page.click('#cockpitButton')
   check('no_message_at_start',info()['count']==0)
-  page.keyboard.down('Space')
+  page.keyboard.press('Space')
   wait_js(page,'interlagos.cockpitInfo().phone.active')
   check('requested_first_message',info()['message']['text']=='Buscar filha na escola');report['first']=info()
   page.screenshot(path=str(ROOT/'renders/celular_interna.png'))
@@ -27,10 +27,10 @@ with sync_playwright() as p:
   page.keyboard.down('KeyA');wait_js(page,'interlagos.car.steer>.4');frame()
   check('phone_keeps_message_while_steering',info()['message']['text']=='Buscar filha na escola')
   check('hands_still_reach_wheel',page.evaluate('interlagos.driverInfo().arms.every(a=>a.reachable)'))
-  page.keyboard.up('KeyA');page.keyboard.up('Space');page.keyboard.press('KeyP')
+  page.keyboard.up('KeyA');page.keyboard.press('Space');page.keyboard.press('KeyP')
   before=info();frame();frame();check('pause_keeps_phone_state',before==info())
   race_options(page,livery='seiva_danilo');check('skin_change_preserves_message',info()==before)
-  page.click('#start');page.keyboard.down('Space');page.screenshot(path=str(ROOT/'renders/celular_seiva.png'));page.keyboard.up('Space')
+  page.click('#start');page.keyboard.press('Space');page.screenshot(path=str(ROOT/'renders/celular_seiva.png'));page.keyboard.press('Space')
   page.click('#cockpitButton');frame();before=info();frame();frame();check('external_view_preserves_schedule',before==info())
   page.evaluate('interlagos.reset()');check('reset_clears_phone',info()['count']==0 and info()['message'] is None)
   check('no_browser_errors',not report['errors']);report['passed']=True

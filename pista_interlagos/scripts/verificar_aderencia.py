@@ -24,9 +24,9 @@ with sync_playwright() as p:
   page.screenshot(path=str(ROOT/'renders/aderencia_curva_lenta.png'))
   page.keyboard.up('KeyA');page.keyboard.down('KeyS');wait_js(page,'interlagos.telemetry().speed<1')
   check('low_speed_braking_clean',page.evaluate(own+'===0&&interlagos.audioInfo().skid===0'))
-  page.keyboard.up('KeyS');setup(60);page.keyboard.down('Space');page.keyboard.down('KeyA')
+  page.keyboard.up('KeyS');setup(60);page.keyboard.press('Space');page.keyboard.down('KeyA')
   wait_js(page,own+'>50&&interlagos.audioInfo().skid>.1')
-  check('intentional_drift_keeps_marks_and_sound',True);page.keyboard.up('Space');page.keyboard.up('KeyA')
+  check('intentional_drift_keeps_marks_and_sound',True);page.keyboard.press('Space');page.keyboard.up('KeyA')
   page.keyboard.press('KeyP');check('no_browser_errors',not report['errors']);report['passed']=True
  finally:
   report.setdefault('passed',False);(ROOT/'dados/validacao_aderencia_browser.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2),flush=True);browser.close()

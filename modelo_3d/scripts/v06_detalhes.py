@@ -1,10 +1,10 @@
 """V06 finishing details seen with everything closed: satin hood and lid undersides, the hood's sharp centre crease and
 two side creases, deeper-red faceted tail lamps, the tail's 99 at its photo size, square headlamp surrounds, black
 window nets and neutral smoke polycarbonate, the stripe re-laid over the front fenders, the stickers' baked stripe and
-pin cut-outs removed, and (OMP livery) the four auxiliary lamps."""
+pin cut-outs removed, the wipers parked at the foot of the windscreen, and (OMP livery) the four auxiliary lamps."""
 import bpy,bmesh,math
 import numpy as np
-from mathutils import Vector
+from mathutils import Vector,Matrix
 from v06_comum import *
 
 def undersides(mats):
@@ -149,6 +149,32 @@ def nets():
  m=bpy.data.materials['Policarbonato_fume'];p=next(n for n in m.node_tree.nodes if n.type=='BSDF_PRINCIPLED')
  c=tuple(srgb(v/255) for v in (45,48,52));p.inputs['Base Color'].default_value=(*c,1);m.diffuse_color=(*c,1)
 
+WIPER_REST_DEG=(5.5,2.5)          # the blade that sweeps over the other's pivot rests above it
+def parked_wipers():
+ """carro_14: at rest the wipers lie along the foot of the windscreen, under the driver's line of sight. V05's were
+ one bent tube each (arm and blade at 21 and 33 degrees up the glass, sinking from 3 to 33 mm under its outer face),
+ so from the cockpit they crossed the view inside the car. Each is rebuilt parked from its own pivot: a cap on the
+ glass, a slim arm and the blade under it, straight along the foot of the flat glass and just off its outer face."""
+ O=bpy.data.objects;G=world_verts(O['Para_brisa']);c=G.mean(0)
+ n=np.linalg.svd(G-c,full_matrices=False)[2][2];n*=np.sign(n[2])      # glass normal, outward and up
+ outer=((G-c)@n).max()                                                 # outer face, from the centre
+ up=np.array((0,0,1.))-n[2]*n;up/=np.linalg.norm(up)                  # up the slope
+ side=np.cross(up,n)                                                  # across the car, in the glass plane
+ wipers=[]
+ for o in [o for o in O if o.type=='MESH' and o.name.startswith('Limpador_parabrisa')]:
+  W=world_verts(o);p=W[np.argmin(W@up)];tip=W[np.argmax(np.linalg.norm(W-p,axis=1))]
+  wipers.append((o.name,o.data.materials[0],o.users_collection[0].name,p-n*((p-c)@n-outer),side*np.sign((tip-p)@side)))
+ for rank,(name,mat,collection,p,e) in enumerate(sorted(wipers,key=lambda w:w[3]@w[4])):
+  r=math.radians(WIPER_REST_DEG[min(rank,1)]);d=e*math.cos(r)+up*math.sin(r)
+  at=lambda s,h:tuple(p+d*s+n*h)                                       # s along the wiper, h off the glass
+  P=Part(name,collection,None,smooth=40)
+  P.cyl(mat,at(0,.001),at(0,.024),.013,16)                               # pivot cap
+  P.sweep(mat,[at(0,.020),at(.04,.019),at(.25,.015),at(.43,.012)],.0045,10)   # arm
+  P.sweep(mat,[at(.05,.0055),at(.44,.0055)],.0035,8)                   # blade
+  for s in (.20,.33):P.cyl(mat,at(s,.006),at(s,.013),.003,6)           # blade holder
+  P.build()
+  print(f'V06 wiper {name}: parked {WIPER_REST_DEG[min(rank,1)]} degrees up the glass',flush=True)
+
 def stripe_front():
  """The yellow stripe over the front fenders was a strip two vertices tall laid over the curved shoulder: the skin
  showed through it in black triangles near the hood's front corners. Ahead of x 1.40 it gets five more rows and every
@@ -205,5 +231,5 @@ def aux_lamps(mats):
  P.build()
 
 def build(mats):
- undersides(mats);hood_creases();tail_lamps();k=tail_number();headlamps(mats);nets();stripe_front();ragged_hood_stickers();sticker_stripe_bands();aux_lamps(mats);turn_signals()
+ undersides(mats);hood_creases();tail_lamps();k=tail_number();headlamps(mats);nets();parked_wipers();stripe_front();ragged_hood_stickers();sticker_stripe_bands();aux_lamps(mats);turn_signals()
  print(f'V06 details: rear 99 x{k:.2f}',flush=True)
