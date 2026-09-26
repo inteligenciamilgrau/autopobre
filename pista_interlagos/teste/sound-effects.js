@@ -24,7 +24,7 @@ export const EFFECT_NAMES=Object.freeze(['pitRepair','pitCoffee','click','paint'
 
 export class SoundEffects {
  constructor(ctx,world,ui,noise){
-  this.ctx=ctx;this.output=world;this.world=new Synth(ctx,world,noise);this.ui=new Synth(ctx,ui,noise,12);this.counts={};this.last={};this.loops={};this.levels={};this.ambientAt=0;this.warningAt=0;this.wasBraking=false;
+  this.ctx=ctx;this.output=world;this.uiOutput=ui;this.world=new Synth(ctx,world,noise);this.ui=new Synth(ctx,ui,noise,12);this.counts={};this.last={};this.loops={};this.levels={};this.ambientAt=0;this.warningAt=0;this.wasBraking=false;
   // Recorded effects: the starter cranking comes from car_trying_to_start.mp3 once it has
   // loaded; until then, or without the file, the synthesized loop stands in.
   this.samples={};this.loadSample('starter','./assets/audio/car_trying_to_start.mp3');
@@ -38,6 +38,15 @@ export class SoundEffects {
  }
  loadSample(name,url){fetch(url).then(r=>{if(!r.ok)throw Error(url);return r.arrayBuffer();}).then(data=>this.ctx.decodeAudioData(data)).then(buffer=>{this.samples[name]={buffer,source:null,level:null};}).catch(()=>{});}
  // A recorded loop that sounds while its gain is above zero (from the top on each start).
+ // One stretch of a recording on the interface bus (the settings' effects preview): false when it
+ // has not loaded. While one plays another does not start; the bus follows the slider live.
+ previewSample(name,duration=1.4){
+  const s=this.samples[name],t=this.ctx.currentTime;if(!s)return false;if(this.previewUntil>t)return true;
+  const source=this.ctx.createBufferSource(),level=this.ctx.createGain(),end=t+Math.min(duration,s.buffer.duration);source.buffer=s.buffer;
+  level.gain.setValueAtTime(0,t);level.gain.linearRampToValueAtTime(.55,t+.03);level.gain.setValueAtTime(.55,end-.18);level.gain.linearRampToValueAtTime(0,end);
+  source.connect(level);level.connect(this.uiOutput);source.onended=()=>{source.disconnect();level.disconnect();};source.start(t);source.stop(end+.02);
+  this.previewUntil=end;this.counts.preview=(this.counts.preview||0)+1;return true;
+ }
  sampleLoop(name,gain,rate=1){
   const s=this.samples[name],t=this.ctx.currentTime;if(!s)return;
   if(gain>0&&!s.source){const source=this.ctx.createBufferSource(),level=this.ctx.createGain();source.buffer=s.buffer;source.loop=true;level.gain.value=0;source.connect(level);level.connect(this.output);source.start();Object.assign(s,{source,level});}

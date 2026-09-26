@@ -165,9 +165,15 @@ function initializeRenderer(){
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
 }
 const carAudio=new CarAudio();
-function audioControls(){ for(const key of ['musicVolume','effectsVolume']){$(key).value=Math.round(carAudio[key]*100);$(key+'Value').textContent=`${Math.round(carAudio[key]*100)}%`;} $('volume').value=Math.round(carAudio.volume*100);$('volumeValue').textContent=`${Math.round(carAudio.volume*100)}%`;$('mute').textContent=carAudio.muted?'Ativar som (M)':'Silenciar (M)';$('mute').setAttribute('aria-pressed',String(carAudio.muted)); }
+// Each channel keeps its level while silenced: the slider stays put, dimmed, and says so.
+const AUDIO_CHANNELS=Object.freeze([['musicVolume','music','música'],['effectsVolume','effects','efeitos']]);
+function audioControls(){ for(const [key,channel,label] of AUDIO_CHANNELS){const muted=!!carAudio[channel+'Muted'];$(key).value=Math.round(carAudio[key]*100);$(key).classList.toggle('channel-muted',muted);$(key+'Value').textContent=`${Math.round(carAudio[key]*100)}%${muted?' · mudo':''}`;$(channel+'Mute').textContent=`${muted?'Ativar':'Silenciar'} ${label}`;$(channel+'Mute').setAttribute('aria-pressed',String(muted));} $('volume').value=Math.round(carAudio.volume*100);$('volumeValue').textContent=`${Math.round(carAudio.volume*100)}%`;$('mute').textContent=carAudio.muted?'Ativar som (M)':'Silenciar (M)';$('mute').setAttribute('aria-pressed',String(carAudio.muted)); }
 audioControls();
-for(const key of ['musicVolume','effectsVolume'])$(key).oninput=e=>{carAudio[key==='musicVolume'?'setMusicVolume':'setEffectsVolume'](Number(e.target.value)/100);carAudio.unlock();if(key==='effectsVolume')carAudio.previewEffects();audioControls();};
+// Moving a silenced channel's slider turns it back on; the effects slider plays its preview.
+for(const [key,channel] of AUDIO_CHANNELS){
+ $(key).oninput=e=>{const music=channel==='music';carAudio[music?'setMusicVolume':'setEffectsVolume'](Number(e.target.value)/100);if(carAudio[channel+'Muted'])carAudio[music?'setMusicMuted':'setEffectsMuted'](false);carAudio.unlock();if(!music)carAudio.previewEffects();audioControls();};
+ $(channel+'Mute').onclick=()=>{const music=channel==='music',muted=!carAudio[channel+'Muted'];carAudio[music?'setMusicMuted':'setEffectsMuted'](muted);carAudio.unlock();if(!music&&!muted)carAudio.previewEffects();audioControls();};
+}
 document.addEventListener('pointerdown',()=>carAudio.unlock(),{once:true});
 document.addEventListener('keydown',()=>carAudio.unlock(),{once:true});
 document.addEventListener('click',e=>{if(e.target.closest('button')&&!e.target.closest('button').disabled)carAudio.uiClick();});

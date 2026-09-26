@@ -13,7 +13,7 @@ Coloque seus arquivos MP3 nesta pasta, com estes nomes em minúsculas:
 
 Recarregue o jogo após copiar ou substituir os arquivos. No teste local, a descoberta é automática. Para o site, inclua os MP3 no commit: o build do Pages copia os arquivos presentes e gera a lista automaticamente.
 
-As músicas respeitam **Configurações → Áudio → Volume global / Música**. Os sons do carro e da pista usam **Efeitos**, com uma prévia ao ajustar o controle. Quando faltar uma faixa, o jogo toca `energia.mp3`; se ela também faltar, usa a composição sintetizada original.
+As músicas respeitam **Configurações → Áudio → Volume global / Música**. Os sons do carro e da pista usam **Efeitos**: ao mexer no controle toca um trecho de `car_trying_to_start.mp3`, cujo volume acompanha o controle enquanto soa. Música e Efeitos têm cada um o botão **Silenciar**, que guarda o nível escolhido (mexer no controle reativa o canal). Quando faltar uma faixa, o jogo toca `energia.mp3`; se ela também faltar, usa a composição sintetizada original.
 
 Os arquivos do jogo podem ser otimizados para 128 kbps estéreo. Os originais preservados ficam em `audios_originais/`, na raiz do projeto, fora do Git e da publicação.
 

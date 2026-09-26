@@ -12,7 +12,7 @@ with sync_playwright() as p:
  page.on('pageerror',lambda e:report['errors'].append(str(e)))
  try:
   open_menu(page);page.click('#settingsButton');page.click('#tab-audio')
-  page.locator('#musicVolume').fill('0');page.locator('#effectsVolume').fill('45');wait_js(page,"(interlagos.audioInfo().effects?.counts.engineCatch??0)>0&&interlagos.audioInfo().rms>.0001");check('effects_slider_has_audible_preview',True)
+  page.locator('#musicVolume').fill('0');page.locator('#effectsVolume').fill('45');wait_js(page,"(interlagos.audioInfo().effects?.counts.preview??0)>0&&interlagos.audioInfo().rms>.0001");check('effects_slider_has_audible_preview',True)
   page.locator('#effectsVolume').fill('0');page.locator('#musicVolume').fill('35')
   wait_js(page,'interlagos.audioInfo().recordings?.available.length>0');available=page.evaluate('interlagos.audioInfo().recordings.available');report['files']=available
   if 'intro.mp3' in available:

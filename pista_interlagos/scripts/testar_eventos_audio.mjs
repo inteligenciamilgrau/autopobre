@@ -16,4 +16,7 @@ for(let i=0;i<200;i++)s.emitSound('click');assert.equal(s.takeSounds().length,64
 let stored='{"volume":0.6,"muted":false}';globalThis.localStorage={getItem:()=>stored,setItem:(_,v)=>stored=v};
 const a=new CarAudio();assert.equal(a.volume,.6);assert.equal(a.musicVolume,.35);assert.equal(a.effectsVolume,1);
 a.setMusicVolume(.23);a.setEffectsVolume(.71);a.setVolume(.48);const b=new CarAudio();assert.equal(b.volume,.48);assert.equal(b.musicVolume,.23);assert.equal(b.effectsVolume,.71);
+// Music and effects mute on their own, keep their levels and are saved.
+b.setMusicMuted(true);b.setEffectsMuted(true);const c=new CarAudio();assert.ok(c.musicMuted&&c.effectsMuted&&!c.muted);assert.equal(c.musicLevel,0);assert.equal(c.effectsLevel,0);assert.equal(c.musicVolume,.23);assert.equal(c.effectsVolume,.71);
+c.setEffectsMuted(false);assert.equal(new CarAudio().effectsLevel,.71);assert.ok(new CarAudio().musicMuted);
 console.log('Audio events passed: accepted actions, no duplicate rewards, outcomes, bounded queue, independent saved mix.');

@@ -8,7 +8,7 @@ export class CarAudio {
  constructor(){
   this.volume=.55;this.musicVolume=.35;this.effectsVolume=1;this.focused=true;this.hasDriven=false;this.openingTime=0;this.muted=false;this.paused=true;this.context=null;this.shifts=0;this.error=null;
   try{const saved=JSON.parse(localStorage.getItem('opala99-audio'));if(saved){this.volume=clamp(Number(saved.volume)||0,0,1);this.muted=!!saved.muted;}}catch{}
-  try{const saved=JSON.parse(localStorage.getItem('opala99-audio'));for(const key of ['musicVolume','effectsVolume'])if(Number.isFinite(saved?.[key]))this[key]=clamp(saved[key],0,1);}catch{}
+  try{const saved=JSON.parse(localStorage.getItem('opala99-audio'));for(const key of ['musicVolume','effectsVolume'])if(Number.isFinite(saved?.[key]))this[key]=clamp(saved[key],0,1);this.musicMuted=saved?.musicMuted===true;this.effectsMuted=saved?.effectsMuted===true;}catch{}
   this.reset();
  }
  reset(){this.state={gear:'N',rpm:950,skid:0,throttle:0};this.shiftUntil=0;this.lastGear=null;this.effects?.stopWorld();}
@@ -51,14 +51,22 @@ export class CarAudio {
  setVolume(value){this.volume=clamp(value,0,1);this.save();this.applyVolume();}
  setMusicVolume(value){this.musicVolume=clamp(value,0,1);this.save();this.applyVolume();}
  setEffectsVolume(value){this.effectsVolume=clamp(value,0,1);this.save();this.applyVolume();}
+ // Music and effects can each be silenced without moving their sliders (the level is kept).
+ get musicLevel(){return this.musicMuted?0:this.musicVolume;}
+ get effectsLevel(){return this.effectsMuted?0:this.effectsVolume;}
+ setMusicMuted(value){this.musicMuted=!!value;this.save();this.applyVolume();}
+ setEffectsMuted(value){this.effectsMuted=!!value;this.save();this.applyVolume();}
  toggleMute(){this.muted=!this.muted;this.save();this.applyVolume();}
- save(){try{localStorage.setItem('opala99-audio',JSON.stringify({volume:this.volume,musicVolume:this.musicVolume,effectsVolume:this.effectsVolume,muted:this.muted}));}catch{}}
- applyVolume(){if(!this.context)return;const t=this.context.currentTime,v=this.muted||!this.focused?0:this.volume;this.master.gain.setTargetAtTime(this.paused?0:v*this.effectsVolume,t,.025);this.uiBus.gain.setTargetAtTime(v*this.effectsVolume,t,.025);this.musicBus.gain.setTargetAtTime(v*this.musicVolume,t,.08);if(!v||!this.musicVolume)this.recordings?.suspend();if(!v){this.effects.stopWorld();this.effects.ui.stop();this.music.update(this.music.theme,false);}}
+ save(){try{localStorage.setItem('opala99-audio',JSON.stringify({volume:this.volume,musicVolume:this.musicVolume,effectsVolume:this.effectsVolume,muted:this.muted,musicMuted:!!this.musicMuted,effectsMuted:!!this.effectsMuted}));}catch{}}
+ applyVolume(){if(!this.context)return;const t=this.context.currentTime,v=this.muted||!this.focused?0:this.volume;this.master.gain.setTargetAtTime(this.paused?0:v*this.effectsLevel,t,.025);this.uiBus.gain.setTargetAtTime(v*this.effectsLevel,t,.025);this.musicBus.gain.setTargetAtTime(v*this.musicLevel,t,.08);if(!v||!this.musicLevel)this.recordings?.suspend();if(!v){this.effects.stopWorld();this.effects.ui.stop();this.music.update(this.music.theme,false);}}
  setPaused(value){if(value&&!this.paused)this.effects?.stopWorld();this.paused=value;this.applyVolume();}
  setFocused(value){this.focused=value;this.applyVolume();}
- effect(name,options={}){if(!this.paused&&!this.muted&&this.focused&&this.volume>0&&this.effectsVolume>0&&this.context?.state==='running')this.effects.play(name,options);}
+ effect(name,options={}){if(!this.paused&&!this.muted&&this.focused&&this.volume>0&&this.effectsLevel>0&&this.context?.state==='running')this.effects.play(name,options);}
  async uiClick(){await this.unlock();if(!this.muted&&this.focused)this.effects?.play('click',{},true);}
- async previewEffects(){await this.unlock();const t=this.context?.currentTime??0;if(this.muted||!this.focused||!this.volume||!this.effectsVolume||t-(this.previewAt??-10)<.35)return;this.previewAt=t;this.effects?.play('engineCatch',{strength:.6},true);}
+ // Heard while the effects slider moves: a stretch of the recorded starter (mid-range, clear on
+ // phone and laptop speakers; the old 55 Hz synth preview was nearly silent there), whose loudness
+ // follows the slider as it plays; the synthesized catch if the recording is missing.
+ async previewEffects(){await this.unlock();const t=this.context?.currentTime??0;if(this.muted||!this.focused||!this.volume||!this.effectsLevel)return;if(this.effects?.previewSample('starter'))return;if(t-(this.previewAt??-10)<.35)return;this.previewAt=t;this.effects?.play('engineCatch',{strength:.6},true);}
  updateScene(scene={},events=[],dt=0){
   if(!this.context)return;
   const enabled=this.focused&&!this.muted&&this.volume>0&&this.context.state==='running';
@@ -67,9 +75,9 @@ export class CarAudio {
   let theme=scene.phase==='free-finish'?(scene.won?'victory':'defeat'):this.paused?(!this.hasDriven&&(this.recordings?.has('opening')?!this.recordings.ended:this.openingTime<18)?'opening':'menu'):
    ['broken','tow','snag','disqualified'].includes(scene.phase)?'defeat':['podium','complete'].includes(scene.phase)?(scene.won?'victory':'defeat'):
    scene.driving||scene.phase==='grid'?'race':scene.phase==='crowd'?'sponsor':'menu';
-  const recorded=this.recordings?.update(theme,enabled&&this.musicVolume>0);
-  this.music.update(theme,enabled&&this.musicVolume>0&&!recorded);
-  this.effects.update(scene,enabled&&!this.paused&&this.effectsVolume>0);
+  const recorded=this.recordings?.update(theme,enabled&&this.musicLevel>0);
+  this.music.update(theme,enabled&&this.musicLevel>0&&!recorded);
+  this.effects.update(scene,enabled&&!this.paused&&this.effectsLevel>0);
   for(const event of events)this.effect(event.name,event.options);
  }
  notifyPhone(){
@@ -129,6 +137,6 @@ export class CarAudio {
  }
  info(){
   let rms=0;if(this.analyser){this.analyser.getFloatTimeDomainData(this.meter);rms=Math.sqrt(this.meter.reduce((s,x)=>s+x*x,0)/this.meter.length);}
-  return {...this.state,volume:this.volume,musicVolume:this.musicVolume,effectsVolume:this.effectsVolume,muted:this.muted,focused:this.focused,paused:this.paused,context:this.context?.state??'locked',shifts:this.shifts,rms,worldGain:this.master?.gain.value??0,music:this.music?.info(),recordings:this.recordings?.info(),effects:this.effects?.info(),error:this.error};
+  return {...this.state,volume:this.volume,musicVolume:this.musicVolume,effectsVolume:this.effectsVolume,muted:this.muted,musicMuted:!!this.musicMuted,effectsMuted:!!this.effectsMuted,focused:this.focused,paused:this.paused,context:this.context?.state??'locked',shifts:this.shifts,rms,worldGain:this.master?.gain.value??0,music:this.music?.info(),recordings:this.recordings?.info(),effects:this.effects?.info(),error:this.error};
  }
 }
