@@ -1,6 +1,7 @@
 import * as THREE from 'three';
 import {clamp} from './physics.js';
 import {sceneryBands} from './track-clearance.js';
+import {LakeWaves,waveVertexCommon,waveVertex,waveFragmentCommon,waveClip} from './lake-waves.js';
 
 // Land cover is read from the 2020 GeoSampa orthophoto already packed in the
 // track GLB: woods become 3D trees, orange roofs become houses, dark smooth
@@ -139,26 +140,48 @@ function findWater(field,ortho,data){
  return bodies;
 }
 
-// Rings where the car meets the water (x, z, start time, strength): a short packet
-// of ~0.6 m crests spreading at 1.3 m/s and fading in a few seconds. Young sources
-// leave churned white water. Returns the surface slope and the foam.
-const lakeRings=`
-uniform vec4 lakeRipples[LAKE_RIPPLES];
-vec3 lakeRingSlope(vec2 p,float time,float footprint){
- vec3 o=vec3(0.0);
- for(int i=0;i<LAKE_RIPPLES;i++){
-  vec4 r=lakeRipples[i];float age=time-r.z;
-  if(r.w<=0.0||age<0.0||age>4.5)continue;
-  vec2 d=p-r.xy;float dist=length(d)+.001,x=dist-(.3+age*1.3);
-  float env=r.w*exp(-x*x*1.8-age*.8)/sqrt(1.0+dist);
-  o.xy+=d/dist*env*.45*cos(x*10.5-age*4.0);
-  o.z+=r.w*exp(-age*1.8)*(1.0-smoothstep(.5,1.4+age*.8,dist));
- }
- o.xy*=1.0-smoothstep(.12,.45,footprint);
- return vec3(o.xy,clamp(o.z,0.0,1.0));
+// Whitewater around the car (lake-waves.js) breaks into lace: bubbles and streaks that
+// fill in as the foam thickens.
+const waveWhitewater=`
+float waveHash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
+float waveNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(waveHash(i),waveHash(i+vec2(1,0)),f.x),mix(waveHash(i+vec2(0,1)),waveHash(i+vec2(1,1)),f.x),f.y);}
+float waveWhite(vec2 p,float foam){
+ float n=waveNoise(p*1.7)*.45+waveNoise(p*4.9+3.7)*.33+waveNoise(p*12.3-1.3)*.22,cover=foam*.72;
+ return smoothstep(1.0-cover,1.12-cover,n)*min(1.0,foam*2.0)*.9;
 }`;
+// Stirred-up bed: brown and opaque.
+const WAVE_MUD='vec3(.13,.1,.06)';
 
-function waterMesh(field,bodies,ripples,shore){
+// Plain lake water; `patch` makes the mesh that follows the car, lifted by the waves.
+function simpleWaterMaterial(shore,waves,patch){
+ const material=new THREE.MeshStandardMaterial({name:patch?'Agua_lago_ondas':'Agua_lago',color:0x0d1a17,roughness:.06,metalness:0,envMapIntensity:1.2,polygonOffset:true,polygonOffsetFactor:-1,alphaTest:.5,alphaToCoverage:true});
+ material.onBeforeCompile=shader=>{
+  Object.assign(shader.uniforms,waves.uniforms,{landTime:shared.time,shoreMap:{value:shore.texture},shoreBounds:{value:shore.bounds}});
+  shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWaterWorld;'+waveVertexCommon).replace('#include <begin_vertex>','#include <begin_vertex>'+waveVertex+'\nvWaterWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
+  shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
+uniform float landTime;uniform sampler2D shoreMap;uniform vec4 shoreBounds;varying vec3 vWaterWorld;${waveFragmentCommon}${waveWhitewater}
+float waterWave(vec2 p){return sin(p.x)*sin(p.y*.8+p.x*.3);}`).replace('#include <color_fragment>',`#include <color_fragment>
+${waveClip('vWaterWorld.xz')}
+// The water ends on the smooth shoreline, not on the grid cells it was built from.
+float waterShore=texture2D(shoreMap,vec2((vWaterWorld.x-shoreBounds.x)/shoreBounds.z,(-vWaterWorld.z-shoreBounds.y)/shoreBounds.w)).r;
+diffuseColor.a=smoothstep(-.3,.3,waterShore);
+diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.1,.095,.07),(1.0-smoothstep(.0,2.8,waterShore))*.5);
+vec2 waveSlope=vec2(0.0);
+#ifdef LAKE_WAVES
+waveSlope=vWaveSlope;
+diffuseColor.rgb=mix(diffuseColor.rgb,${WAVE_MUD},vWave.y*.75);
+diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.5,.55,.52),waveWhite(vWaterWorld.xz,vWave.x)*.85);
+#endif`).replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
+vec2 wp=vWaterWorld.xz*.35;float t=landTime*.9;
+vec2 ripple=vec2(waterWave(wp+vec2(t,.3*t))-waterWave(wp*1.7-vec2(.6*t,t)),waterWave(wp.yx*1.3+t)-waterWave(wp*.7+vec2(t*.4,-t)))*.035-waveSlope;
+normal=normalize(normal+(viewMatrix*vec4(ripple.x,0.0,ripple.y,0.0)).xyz);`);
+ };
+ if(patch)material.defines={LAKE_WAVES:''};
+ material.customProgramCacheKey=()=>'lake-simple-v4'+(patch?'-waves':'');
+ return material;
+}
+
+function waterMesh(field,bodies,waves,shore){
  const positions=[],indices=[],{nx,x0,y0,sx,sy}=field;
  for(const body of bodies){
   const rows=new Map();
@@ -170,26 +193,7 @@ function waterMesh(field,bodies,ripples,shore){
   }
  }
  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setIndex(indices);geometry.computeVertexNormals();
- const material=new THREE.MeshStandardMaterial({name:'Agua_lago',color:0x0d1a17,roughness:.06,metalness:0,envMapIntensity:1.2,polygonOffset:true,polygonOffsetFactor:-1,alphaTest:.5,alphaToCoverage:true});
- material.onBeforeCompile=shader=>{
-  shader.uniforms.landTime=shared.time;shader.uniforms.lakeRipples=ripples;shader.uniforms.shoreMap={value:shore.texture};shader.uniforms.shoreBounds={value:shore.bounds};
-  shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vWaterWorld;').replace('#include <begin_vertex>','#include <begin_vertex>\nvWaterWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
-  shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-uniform float landTime;uniform sampler2D shoreMap;uniform vec4 shoreBounds;varying vec3 vWaterWorld;
-float waterWave(vec2 p){return sin(p.x)*sin(p.y*.8+p.x*.3);}${lakeRings}`).replace('#include <color_fragment>',`#include <color_fragment>
-// The water ends on the smooth shoreline, not on the grid cells it was built from.
-float waterShore=texture2D(shoreMap,vec2((vWaterWorld.x-shoreBounds.x)/shoreBounds.z,(-vWaterWorld.z-shoreBounds.y)/shoreBounds.w)).r;
-diffuseColor.a=smoothstep(-.3,.3,waterShore);
-diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.1,.095,.07),(1.0-smoothstep(.0,2.8,waterShore))*.5);
-vec3 ring=lakeRingSlope(vWaterWorld.xz,landTime,max(length(dFdx(vWaterWorld.xz)),length(dFdy(vWaterWorld.xz))));
-diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.5,.55,.52),ring.z*.85);`).replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
-vec2 wp=vWaterWorld.xz*.35;float t=landTime*.9;
-vec2 ripple=vec2(waterWave(wp+vec2(t,.3*t))-waterWave(wp*1.7-vec2(.6*t,t)),waterWave(wp.yx*1.3+t)-waterWave(wp*.7+vec2(t*.4,-t)))*.035-ring.xy;
-normal=normalize(normal+(viewMatrix*vec4(ripple.x,0.0,ripple.y,0.0)).xyz);`);
- };
- material.defines={LAKE_RIPPLES:ripples.value.length};
- material.customProgramCacheKey=()=>'lake-simple-v3-'+ripples.value.length;
- const mesh=new THREE.Mesh(geometry,material);mesh.name='Lagos_e_rio';mesh.receiveShadow=true;return mesh;
+ const mesh=new THREE.Mesh(geometry,simpleWaterMaterial(shore,waves,false));mesh.name='Lagos_e_rio';mesh.receiveShadow=true;return mesh;
 }
 
 // Signed distance to the shore in metres (positive over water), so the outline
@@ -253,10 +257,10 @@ function digLakeBeds(t,heights,shore){
 
 // --- Realistic lakes (opt-in setting) -----------------------------------------
 
-const lakeVertex=['#include <common>','#include <common>\nvarying vec3 vLakeWorld;','#include <begin_vertex>','#include <begin_vertex>\nvLakeWorld=(modelMatrix*vec4(transformed,1.0)).xyz;'];
+const lakeVertex=['#include <common>','#include <common>\nvarying vec3 vLakeWorld;'+waveVertexCommon,'#include <begin_vertex>','#include <begin_vertex>'+waveVertex+'\nvLakeWorld=(modelMatrix*vec4(transformed,1.0)).xyz;'];
 const lakeCommon=`#include <common>
 uniform float landTime,planarWeight;uniform vec2 windDir,lakeLens;uniform vec3 lakeBed;uniform vec4 shoreBounds;uniform mat4 reflectionMatrix;uniform sampler2D shoreMap,reflectionMap;
-varying vec3 vLakeWorld;
+varying vec3 vLakeWorld;${waveFragmentCommon}${waveWhitewater}
 float lakeHash(vec2 p){p=fract(p*vec2(123.34,456.21));p+=dot(p,p+45.32);return fract(p.x*p.y);}
 float lakeNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(lakeHash(i),lakeHash(i+vec2(1,0)),f.x),mix(lakeHash(i+vec2(0,1)),lakeHash(i+vec2(1,1)),f.x),f.y);}
 // Value noise with its analytic gradient (x: value, yz: d/dp).
@@ -288,9 +292,9 @@ vec2 lakeSlope(vec2 p,float footprint,float strength,out float lost){
   lost+=steep*steep*.25*(1.0-fade);size*=.52;
  }
  return g;
-}${lakeRings}`;
+}`;
 const lakeSurface=`
-vec2 lakeP=vLakeWorld.xz;
+vec2 lakeP=vLakeWorld.xz;${waveClip('lakeP')}
 // Shoreline from the distance field, roughened so it does not follow the grid.
 float lakeShore=texture2D(shoreMap,vec2((lakeP.x-shoreBounds.x)/shoreBounds.z,(-lakeP.y-shoreBounds.y)/shoreBounds.w)).r;
 lakeShore+=(lakeNoise(lakeP*.19)-.5)*2.2+(lakeNoise(lakeP*.83)-.5)*.6;
@@ -305,7 +309,11 @@ vec2 lakeAlong=vec2(dot(lakeP,windDir),dot(lakeP,vec2(-windDir.y,windDir.x)))*ve
 lakeAlong+=vec2(lakeNoise(lakeAlong*1.9+5.2),lakeNoise(lakeAlong*1.9-3.7))*.8;
 float lakeWind=mix(.22,1.0,smoothstep(.3,.8,lakeNoise(lakeAlong)*.6+lakeNoise(lakeAlong*2.3+9.1)*.4))*mix(.35,1.0,smoothstep(0.0,14.0,lakeShore));
 float lakeLost;vec2 lakeGrad=lakeSlope(lakeP,lakeFootprint,lakeWind,lakeLost);
-vec3 lakeRing=lakeRingSlope(lakeP,landTime,lakeFootprint);lakeGrad+=lakeRing.xy;float lakeFoam=lakeRing.z*smoothstep(-1.0,.5,lakeShore);
+// Around the car: the slope of the waves it pushes and the whitewater it churns.
+float lakeFoam=0.0;
+#ifdef LAKE_WAVES
+lakeGrad+=vWaveSlope;lakeFoam=waveWhite(lakeP,vWave.x)*smoothstep(-1.0,.5,lakeShore);
+#endif
 vec3 lakeNormal=normalize(vec3(-lakeGrad.x,1.0,-lakeGrad.y));
 // Murky urban water over the dug basin (0.2 m at the bank, 0.85 m out in the lake):
 // the bed shows only in the first metres, anything sunk in it fades within a few spans.
@@ -313,7 +321,11 @@ vec3 lakeView=normalize(cameraPosition-vLakeWorld);
 float lakeCosT=sqrt(1.0-(1.0-lakeView.y*lakeView.y)/1.777),lakeDepth=clamp(.2+.1*lakeShore,.02,.85);
 float lakeCover=smoothstep(-1.2,1.6,lakeShore),lakeOpacity=lakeCover*(1.0-exp(-lakeDepth*3.0/max(lakeCosT,.15)));
 diffuseColor.rgb=mix(lakeBed,diffuse,smoothstep(.2,.9,lakeOpacity));
-// Churned water behind the wheels: white, rough and opaque.
+#ifdef LAKE_WAVES
+// Mud the tyres stir off the bed clouds the water behind the car.
+diffuseColor.rgb=mix(diffuseColor.rgb,${WAVE_MUD},vWave.y*.75);lakeOpacity=max(lakeOpacity,vWave.y*.85*lakeCover);
+#endif
+// Churned water behind the car: white, rough and opaque.
 diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.5,.55,.52),lakeFoam*.85);lakeOpacity=max(lakeOpacity,lakeFoam*.9*lakeCover);
 `;
 const lakeReflection=`#include <lights_fragment_maps>
@@ -328,6 +340,10 @@ const lakeReflection=`#include <lights_fragment_maps>
  vec2 lakeUv=lakeClip.xy/lakeClip.w+vec2(lakeRay.x-lakeMirrorRay.x,lakeMirrorRay.y-lakeRay.y)*lakeLens*.5;
  vec2 lakeEdge=smoothstep(vec2(0.0),vec2(.04),lakeUv)*smoothstep(vec2(0.0),vec2(.04),1.0-lakeUv);
  float lakeMix=planarWeight*lakeEdge.x*lakeEdge.y*step(0.0,lakeClip.w);
+ #ifdef LAKE_WAVES
+ // Steep faces of the car's waves would pick random spots off the mirror: they take the sky probe.
+ lakeMix*=1.0-smoothstep(.12,.35,length(vWaveSlope));
+ #endif
  if(lakeMix>0.0)radiance=mix(radiance,texture2D(reflectionMap,lakeUv).rgb,lakeMix);
 }
 #endif`;
@@ -335,8 +351,8 @@ const lakeReflection=`#include <lights_fragment_maps>
 const lakeOutput=`gl_FragColor=vec4(totalDiffuse*lakeOpacity+(totalSpecular+totalEmissiveRadiance)*lakeCover,lakeOpacity);`;
 const lakeFog=THREE.ShaderChunk.fog_fragment.replace('gl_FragColor.rgb = mix( gl_FragColor.rgb, fogColor, fogFactor );','gl_FragColor.rgb=gl_FragColor.rgb*(1.0-fogFactor)+fogColor*fogFactor*gl_FragColor.a;');
 
-function lakeMaterial(uniforms,mobile){
- const material=new THREE.MeshPhysicalMaterial({name:'Agua_lago_realista',color:new THREE.Color(.018,.034,.026),roughness:.03,metalness:0,ior:1.333,transparent:true,depthWrite:true,
+function lakeMaterial(uniforms,mobile,patch=false){
+ const material=new THREE.MeshPhysicalMaterial({name:patch?'Agua_lago_realista_ondas':'Agua_lago_realista',color:new THREE.Color(.018,.034,.026),roughness:.03,metalness:0,ior:1.333,transparent:true,depthWrite:true,
   blending:THREE.CustomBlending,blendSrc:THREE.OneFactor,blendDst:THREE.OneMinusSrcAlphaFactor,blendSrcAlpha:THREE.OneFactor,blendDstAlpha:THREE.OneMinusSrcAlphaFactor});
  const planarWeight={value:0};
  material.onBeforeCompile=shader=>{
@@ -347,20 +363,21 @@ function lakeMaterial(uniforms,mobile){
    .replace('#include <normal_fragment_maps>','normal=normalize((viewMatrix*vec4(lakeNormal,0.0)).xyz);')
    .replace('#include <lights_fragment_maps>',lakeReflection).replace('#include <opaque_fragment>',lakeOutput).replace('#include <fog_fragment>',lakeFog);
  };
- material.defines={LAKE_OCTAVES:mobile?4:6,LAKE_RIPPLES:uniforms.lakeRipples.value.length};
- material.customProgramCacheKey=()=>'lake-realistic-v2'+(mobile?'-mobile':'');
+ material.defines={LAKE_OCTAVES:mobile?4:6,...(patch?{LAKE_WAVES:''}:{})};
+ material.customProgramCacheKey=()=>'lake-realistic-v3'+(mobile?'-mobile':'')+(patch?'-waves':'');
  material.userData.planarWeight=planarWeight;
  return material;
 }
 
 // One flat surface per body over its bounding box; the shore field cuts the outline.
 // A single planar reflection per frame, at the level of the nearest visible body.
-function realisticLakes(field,bodies,shore,ripples,{mobile=false}={}){
+// Around the car a denser patch, lifted by the waves, takes over from the flat surface.
+function realisticLakes(field,bodies,shore,waves,{mobile=false}={}){
  const root=new THREE.Group();root.name='Lagos_realistas';
  const target=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:true});
  target.texture.name='Reflexo_lagos';
- const reflectionMatrix=new THREE.Matrix4(),lens=new THREE.Vector2(1,1),uniforms={landTime:shared.time,windDir:{value:new THREE.Vector2(.82,.57)},lakeLens:{value:lens},lakeBed:{value:new THREE.Color(.05,.045,.028)},
-  shoreBounds:{value:shore.bounds},shoreMap:{value:shore.texture},lakeRipples:ripples,reflectionMap:{value:target.texture},reflectionMatrix:{value:reflectionMatrix}};
+ const reflectionMatrix=new THREE.Matrix4(),lens=new THREE.Vector2(1,1),uniforms={...waves.uniforms,landTime:shared.time,windDir:{value:new THREE.Vector2(.82,.57)},lakeLens:{value:lens},lakeBed:{value:new THREE.Color(.05,.045,.028)},
+  shoreBounds:{value:shore.bounds},shoreMap:{value:shore.texture},reflectionMap:{value:target.texture},reflectionMatrix:{value:reflectionMatrix}};
  const {nx,x0,y0,sx,sy}=field,margin=4,lakes=[];
  for(const body of bodies){
   let k0=nx,k1=0,j0=Infinity,j1=0;
@@ -371,6 +388,8 @@ function realisticLakes(field,bodies,shore,ripples,{mobile=false}={}){
   mesh.name='Lago_realista';mesh.receiveShadow=true;mesh.renderOrder=1;root.add(mesh);
   geometry.computeBoundingBox();lakes.push({mesh,level:body.level,box:geometry.boundingBox,weight:material.userData.planarWeight});
  }
+ const patchMaterial=lakeMaterial(uniforms,mobile,true),patch=new THREE.Mesh(waves.patchGeometry(),patchMaterial),patchWeight=patchMaterial.userData.planarWeight;
+ patch.name='Lago_realista_ondas';patch.receiveShadow=true;patch.renderOrder=1;patch.visible=false;root.add(patch);
  const virtual=new THREE.PerspectiveCamera(),frustum=new THREE.Frustum(),matrix=new THREE.Matrix4(),size=new THREE.Vector2();
  const eye=new THREE.Vector3(),look=new THREE.Vector3(),normal=new THREE.Vector3(0,1,0),plane=new THREE.Plane(),clip=new THREE.Vector4(),q=new THREE.Vector4(),point=new THREE.Vector3();
  const scale=mobile?.35:.5,state={frame:0,rendered:-1,reflections:0,level:null};
@@ -378,9 +397,9 @@ function realisticLakes(field,bodies,shore,ripples,{mobile=false}={}){
   // Rear-view mirror and other off-screen passes use the sky probe only; the film look's
   // main view (cinematic.js marks it isMainView) counts as the screen.
   const current=renderer.getRenderTarget();
-  if(current&&!current.isMainView){for(const lake of lakes)lake.weight.value=0;state.rendered=-1;return;}
+  if(current&&!current.isMainView){for(const lake of lakes)lake.weight.value=0;patchWeight.value=0;state.rendered=-1;return;}
   if(state.rendered===state.frame)return;state.rendered=state.frame;state.level=null;
-  for(const lake of lakes)lake.weight.value=0;
+  for(const lake of lakes)lake.weight.value=0;patchWeight.value=0;
   matrix.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);frustum.setFromProjectionMatrix(matrix);
   eye.setFromMatrixPosition(camera.matrixWorld);
   let best=null,bestDistance=1600;
@@ -410,12 +429,14 @@ function realisticLakes(field,bodies,shore,ripples,{mobile=false}={}){
   renderer.setRenderTarget(current);renderer.shadowMap.autoUpdate=shadows;root.visible=true;
   state.reflections++;
   for(const lake of lakes)lake.weight.value=1-smooth(.3,1.2,Math.abs(lake.level-level));
+  patchWeight.value=1-smooth(.3,1.2,Math.abs(waves.level-level));
  }
  for(const lake of lakes)lake.mesh.onBeforeRender=reflect;
- return {root,target,
+ patch.onBeforeRender=reflect;
+ return {root,target,patch,
   update(){state.frame++;},
   info:()=>({bodies:lakes.length,reflections:state.reflections,level:state.level,size:[target.width,target.height]}),
-  dispose(){target.dispose();for(const lake of lakes){lake.mesh.geometry.dispose();lake.mesh.material.dispose();}}};
+  dispose(){target.dispose();patch.geometry.dispose();patchMaterial.dispose();for(const lake of lakes){lake.mesh.geometry.dispose();lake.mesh.material.dispose();}}};
 }
 
 // Shoreline of the current circuit's lakes, for the terrain's wet banks (set by createLandscape).
@@ -711,7 +732,7 @@ function chunked(name,geometry,material,items,compose,{size=380,shadows=true}={}
  for(const item of items){const key=Math.floor(item.x/size)+':'+Math.floor(item.y/size);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item);}
  for(const list of groups.values()){
   const mesh=new THREE.InstancedMesh(geometry,material,list.length);mesh.name=name+'_bloco';
-  list.forEach((item,i)=>{compose(item,matrix,color);mesh.setMatrixAt(i,matrix);mesh.setColorAt(i,color);});
+  list.forEach((item,i)=>{compose(item,matrix,color);mesh.setMatrixAt(i,matrix);mesh.setColorAt(i,color);item.instance={mesh,index:i};});
   mesh.computeBoundingSphere();mesh.castShadow=shadows;mesh.receiveShadow=true;root.add(mesh);
  }
  return root;
@@ -735,8 +756,14 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
  const rand=random(data.samples.length*7919+17),stats={trees:0,houses:0,water:0};
  const trees=[],tall=[],houses=[],flats=[],lajes=[];
  const {x0,y0,width,height}=field;
- let bodies=[],simpleWater=null,lakes=null,shore=null;terrainShore.shoreOn.value=0;terrainShore.shoreMap.value=null;
- const ripples=Array.from({length:mobile?12:24},()=>new THREE.Vector4(0,0,-100,0)),rippleUniform={value:ripples};let rippleCursor=0;
+ let bodies=[],simpleWater=null,simplePatch=null,lakes=null,shore=null,waves=null;terrainShore.shoreOn.value=0;terrainShore.shoreMap.value=null;
+ // Lakes for the car: the surface over a point (null on land), the nearest lake from the
+ // bank, and the waves the car pushes (lake-waves.js), shown by a patch that follows it.
+ const water={
+  at(x,y){if(!shore)return null;const s=shore.distance(x,y);if(s<-1.5)return null;const body=shore.body(x,y);return body?{level:body.level,shore:s,depth:lakeBedDepth(s)}:null;},
+  near(x,y){if(!shore)return null;const body=shore.body(x,y);return body?{level:body.level,shore:shore.distance(x,y)}:null;},
+  waves:null
+ };
  // Trunks and walls stay out of the water: clear of the shore, and above the level beside a lake.
  const dry=(x,y,clearance)=>{
   if(!shore)return true;const s=shore.distance(x,y);if(s>-clearance)return false;if(s<-8)return true;
@@ -747,7 +774,9 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
   if(bodies.length){
    shore=shoreField(field,bodies);stats.lakeBed=digLakeBeds(data.terrain,data.terrain.z,shore);
    terrainShore.shoreMap.value=shore.texture;terrainShore.shoreBounds.value.copy(shore.bounds);terrainShore.shoreOn.value=1;
-   simpleWater=waterMesh(field,bodies,rippleUniform,shore);root.add(simpleWater);
+   waves=water.waves=new LakeWaves(water,{mobile});
+   simpleWater=waterMesh(field,bodies,waves,shore);root.add(simpleWater);
+   simplePatch=new THREE.Mesh(waves.patchGeometry(),simpleWaterMaterial(shore,waves,true));simplePatch.name='Lago_ondas';simplePatch.receiveShadow=true;simplePatch.visible=false;root.add(simplePatch);
   }
   const spacing=mobile?8.5:6;
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
@@ -786,7 +815,7 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
  // Trees are chunked in 200 m blocks; each block picks near or distant crowns every frame.
  const lodBlocks=[];
  for(const [list,kind,seed,name] of [[trees,'round',11,'Arvores'],[tall,'tall',23,'Arvores_altas']]){
-  if(!list.length)continue;const near=build(kind,seed,1),far=build(kind,seed,0);
+  if(!list.length)continue;const near=build(kind,seed,1),far=build(kind,seed,0);for(const item of list)item.kind=kind;
   const group=chunked(name,near,treeMaterial,list,composeTree,{size:200});root.add(group);
   for(const mesh of group.children){mesh.geometry=far;lodBlocks.push({mesh,near,far,center:mesh.boundingSphere.center.clone(),radius:mesh.boundingSphere.radius});}
  }
@@ -798,40 +827,41 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
  const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado'});root.add(horizon.root);
  Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
  let realistic=false;
- return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}lakes?.dispose();shore?.texture.dispose();},update(dt,camera){
-  shared.time.value+=dt;lakes?.update();if(!camera)return;
+ return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
+  shared.time.value+=dt;lakes?.update();
+  if(waves){waves.sync();const patch=realistic?lakes?.patch:simplePatch;if(simplePatch)simplePatch.visible=false;if(lakes)lakes.patch.visible=false;if(patch&&waves.active){patch.visible=true;waves.placePatch(patch);}}
+  if(!camera)return;
   for(const block of lodBlocks){const geometry=camera.position.distanceTo(block.center)-block.radius<lodDistance?block.near:block.far;if(block.mesh.geometry!==geometry)block.mesh.geometry=geometry;}
  },
  // Trees give way to later trackside structures (marshal posts, TV towers): points {x,y,r} in track metres.
  clearAround(points){
-  let removed=0;const matrix=new THREE.Matrix4(),position=new THREE.Vector3(),zero=new THREE.Matrix4().makeScale(0,0,0);
-  for(const {mesh} of lodBlocks){let changed=false;
-   for(let i=0;i<mesh.count;i++){mesh.getMatrixAt(i,matrix);position.setFromMatrixPosition(matrix);if(matrix.elements[0]===0&&matrix.elements[5]===0)continue;
-    const width=Math.hypot(matrix.elements[0],matrix.elements[2]);
-    if(points.some(q=>Math.hypot(position.x-q.x,-position.z-q.y)<q.r+width*.45)){mesh.setMatrixAt(i,zero);changed=true;removed++;}}
-   if(changed){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();}}
+  let removed=0;const zero=new THREE.Matrix4().makeScale(0,0,0),changed=new Set();
+  for(const item of [...trees,...tall]){
+   if(item.removed||!item.instance||!points.some(q=>Math.hypot(item.x-q.x,item.y-q.y)<q.r+item.width*.45))continue;
+   item.removed=true;item.instance.mesh.setMatrixAt(item.instance.index,zero);changed.add(item.instance.mesh);removed++;
+  }
+  for(const mesh of changed){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();}
   stats.cleared=(stats.cleared??0)+removed;return removed;
  },
+ // Standing trees, for their trunks (tree-contact.js): position, size, kind, colour and instance.
+ trunks:()=>[...trees,...tall].filter(t=>!t.removed&&t.instance),
  // The physics ground was dug when the lakes were found; the visible terrain grid gets the same basin.
  digLakeBeds:heights=>shore?digLakeBeds(data.terrain,heights,shore):0,
- // Lakes for the car: the surface over a point (null on land), and rings on the water.
- water:{
-  at(x,y){if(!shore)return null;const s=shore.distance(x,y);if(s<-1.5)return null;const body=shore.body(x,y);return body?{level:body.level,shore:s,depth:lakeBedDepth(s)}:null;},
-  ripple(x,y,strength){ripples[rippleCursor].set(x,-y,shared.time.value,strength);rippleCursor=(rippleCursor+1)%ripples.length;},
-  activeRipples:()=>ripples.filter(r=>r.w>0&&shared.time.value-r.z<4.5).length
- },
+ water,
  // Opt-in lakes with planar reflections; built the first time they are switched on.
  setRealisticWater(on){
   realistic=!!on;if(!bodies.length)return;
-  if(realistic&&!lakes){lakes=realisticLakes(field,bodies,shore,rippleUniform,{mobile});root.add(lakes.root);}
+  if(realistic&&!lakes){lakes=realisticLakes(field,bodies,shore,waves,{mobile});root.add(lakes.root);}
   simpleWater.visible=!realistic;if(lakes)lakes.root.visible=realistic;
  },
+ // The wave patch is hidden until the car nears a lake: show it while the programs compile at loading.
+ revealWaves(on){if(!waves)return;const patch=realistic?lakes?.patch:simplePatch;if(patch)patch.visible=on||waves.active;},
  // The mirror pass renders into a linear target: compile those program variants during loading too.
  async compileWater(renderer,scene,camera){
   if(!realistic||!lakes)return;const previous=renderer.getRenderTarget();renderer.setRenderTarget(lakes.target);
   let pending;try{pending=renderer.compileAsync(scene,camera);}finally{renderer.setRenderTarget(previous);}await pending;
  },
- waterInfo:()=>({realistic,bodies:bodies.length,simpleVisible:!!simpleWater?.visible,...(realistic&&lakes?lakes.info():{reflections:0,level:null,size:null}),
+ waterInfo:()=>({realistic,bodies:bodies.length,simpleVisible:!!simpleWater?.visible,waves:waves?.info()??null,...(realistic&&lakes?lakes.info():{reflections:0,level:null,size:null}),
   lakes:bodies.map(b=>{let x=0,y=0;for(const c of b.cells){const k=c%field.nx;x+=k;y+=(c-k)/field.nx;}return {level:b.level,area:Math.round(b.cells.length*field.sx*field.sy),center:[field.x0+(x/b.cells.length+.5)*field.sx,field.y0+(y/b.cells.length+.5)*field.sy]};})})};
 }
 

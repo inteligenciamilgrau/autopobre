@@ -1,6 +1,6 @@
 """Visual QA of the opt-in realistic lake water: default off, remembered after a reload,
 planar reflections at the nearest lake, rear-view mirror pass, toggling off, the car driven into
-the lake (bed under the water, splash, rings, spray, drag), and Curvelo (no lakes).
+the lake (bed under the water, splash, the waves it pushes, spray, drag), and Curvelo (no lakes).
 
 The camera is placed on the shore by overriding it just before each screen render."""
 from browser_config import GAME_URL, browser_executable, browser_args, wait_js, open_menu, enter_track, wait_race_start
@@ -85,7 +85,8 @@ with sync_playwright() as p:
         print('realistic water verified', label, flush=True)
         context.close()
     # Driving into the infield lake: the bed lies under the water (physics and visible terrain),
-    # the body splashes, the wheels leave rings and spray, and the water slows the car.
+    # the body splashes, the car pushes a bow wave and a wake (lake-waves.js, shown by the wave
+    # patch), throws spray, and the water and its waves slow the car.
     for mobile, width, height in [(False, 1280, 720), (True, 844, 390)]:
         label = 'mobile' if mobile else 'desktop'
         context = browser.new_context(viewport={'width': width, 'height': height}, is_mobile=mobile, has_touch=mobile, device_scale_factor=1)
@@ -120,7 +121,11 @@ with sync_playwright() as p:
         lakeinfo = page.evaluate('interlagos.lakeInfo()')
         speed = page.evaluate('Math.hypot(interlagos.car.vx,interlagos.car.vy)')
         assert lakeinfo['inWater'] and lakeinfo['hull'] > .2 and lakeinfo['splashes'] >= 1, lakeinfo
-        assert lakeinfo['ripples'] >= 5 and lakeinfo['drops'] >= 100 and lakeinfo['peakDrag'] > 5, lakeinfo
+        waves = lakeinfo['waves']
+        assert waves and waves['active'] and waves['steps'] > 60 and waves['height'] > .05 and waves['foam'] > .1, lakeinfo
+        assert lakeinfo['drops'] >= 100 and lakeinfo['sheets'] > 20 and lakeinfo['peakDrag'] > 5, lakeinfo
+        assert page.evaluate('interlagos.waterInfo().waves.active'), 'the wave patch follows the car'
+
         assert speed < entry * .6, (entry, speed)
         report['drive_' + label] = {'bed': bed, 'entry': entry, 'speed': speed, **lakeinfo}
         print('car in the lake verified', label, flush=True)

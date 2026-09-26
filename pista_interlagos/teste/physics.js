@@ -325,6 +325,8 @@ export class TestCar {
    }
    this.surface=this.sample(this.x,this.y);
   }
+  // Tree trunks (tree-contact.js; main.js gives them to the player's car).
+  if(this.posts){const hit=this.posts.collide(this);if(hit)this.wallImpactSpeed=Math.max(this.wallImpactSpeed,hit);}
   this.distance+=speed*dt;this.clock+=dt;this.spin+=v*dt/.31595;
   this.rearSpin=(this.rearSpin??0)+(input.handbrake&&!burning?0:v+this.rearSlipSpeed)*dt/.31595;
   // Upside down or on its side and at rest: after a pause the marshals right it.

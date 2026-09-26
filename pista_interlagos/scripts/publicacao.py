@@ -16,7 +16,7 @@ MODULES = (
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'car-openings.js', 'cockpit.js', 'cockpit-materials.js', 'cockpit-instruments.js', 'cockpit-rear.js', 'cockpit-equipment.js',
     'driver.js', 'driver-rig.js', 'driver-controls.js', 'driver-helmet.js', 'rival-driver.js', 'family-phone.js',
     'immersive-mode.js', 'immersive-state.js', 'immersive-visuals.js',
-    'skid-marks.js', 'track-surface.js', 'tyre-smoke.js', 'sky.js', 'cinematic.js', 'trackside.js', 'tv-camera.js', 'intro-cinematic.js', 'landscape.js', 'lake-contact.js',
+    'skid-marks.js', 'track-surface.js', 'tyre-smoke.js', 'sky.js', 'cinematic.js', 'trackside.js', 'tv-camera.js', 'intro-cinematic.js', 'landscape.js', 'lake-contact.js', 'lake-waves.js', 'tree-contact.js',
     'style.css', 'immersive.css', 'abertura.css', 'index.html', 'sobre.html',
     'favicon.svg', 'favicon.ico', 'apple-touch-icon.png',
 )

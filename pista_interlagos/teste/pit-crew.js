@@ -338,9 +338,24 @@ class Crowd{
   if(!best)return null;const dx=best.x-AT.x,dz=best.z-AT.z,flat=Math.hypot(dx,dz),angle=wrap(Math.atan2(-dz,dx)-f.yaw);if(Math.abs(angle)>2.3)return null;
   f.look.angle=angle;f.look.pitch=Math.atan2(best.y+.6-AT.y-eye,flat);f.look.tilt=Math.atan2(best.y+.5-AT.y,flat);return f.look;
  }
+ // Someone here run over: the flight is worked out in the mesh's frame, and the group is
+ // drawn even when its box is off screen while anyone is in the air.
+ launch(f,velocity,car){
+  const inverse=this.mesh.matrixWorld.clone().invert(),turn=new THREE.Quaternion().setFromRotationMatrix(this.mesh.matrixWorld).invert();
+  f.home??=f.spot.position.clone();
+  f.tumble=new Tumble({feet:f.spot.position,yaw:f.yaw,velocity:velocity.clone().applyQuaternion(turn),home:f.home,homeYaw:f.yaw,car:car.clone().applyMatrix4(inverse)});
+  this.flying=(this.flying??0)+1;this.mesh.frustumCulled=false;
+ }
  update(dt,cars){
   for(const f of this.folk){
-   const s=f.show,c=f.camera;copyPose(s,f.base);
+   const s=f.show,c=f.camera;
+   if(f.tumble){
+    copyPose(s,POSES.stand);
+    if(f.tumble.update(dt,s)){f.spot.position.copy(f.tumble.feet);f.spot.quaternion.copy(f.tumble.q);}
+    else{f.spot.position.copy(f.home);f.spot.rotation.set(0,f.yaw,0);f.tumble=null;if(!--this.flying)this.mesh.frustumCulled=true;}
+    applyPose(f.rig,s);continue;
+   }
+   copyPose(s,f.base);
    if(!c){f.mind.apply(s,dt,{pose:f.pose,look:this.sight(f,f.watch,cars,1.6)});}
    else{
     // The cameraman keeps the lens on the nearest car in range, panning the head and
@@ -361,6 +376,128 @@ class Crowd{
  }
 }
 const shown=o=>{for(;o;o=o.parent)if(!o.visible)return false;return true;};
+
+// ---- Run over (by accident, of course). ----
+// A car that hits someone throws them up like a cartoon: floaty hang time, spinning like
+// a pinwheel with arms and legs flailing, a couple of rubbery bounces. They lie flat out a
+// moment, get up dizzy, shake a fist at the car and walk back to their spot.
+// Works in any frame with y up (a crowd's mesh, or the world for the Box 99 crew): feet
+// are where the figure's origin goes, q its orientation.
+const TUMBLE_G=6.5,HIPS=.93,UP=new THREE.Vector3(0,1,0),ALONG=new THREE.Vector3(0,0,1),EVENTS=[];
+const TQ=new THREE.Quaternion(),TQ2=new THREE.Quaternion(),TV=new THREE.Vector3();
+class Tumble{
+ constructor({feet,yaw,velocity,home,homeYaw,car,seed=Math.random()}){
+  const rand=dice(seed);
+  this.hips=new THREE.Vector3(feet.x,feet.y+HIPS,feet.z);this.v=velocity.clone();this.floor=feet.y;this.yaw=yaw;
+  this.home=home.clone();this.homeYaw=homeYaw;this.car=car.clone();this.phase='fly';this.t=0;this.clock=0;this.bounces=0;this.step=0;
+  // Tumbling head over heels about the horizontal line across the throw, and twirling.
+  this.axis=new THREE.Vector3(-velocity.z,0,velocity.x);if(this.axis.lengthSq()<1e-6)this.axis.set(1,0,0);this.axis.normalize();
+  this.spin=(8+rand()*6)*(rand()<.5?-1:1);this.twirl=(2+rand()*4)*(rand()<.5?-1:1);this.angle=0;
+  this.q=new THREE.Quaternion().setFromAxisAngle(UP,yaw);this.from=new THREE.Quaternion();this.feet=feet.clone();
+ }
+ upright(q=this.q){return q.setFromAxisAngle(UP,this.yaw);}
+ // Lying on the back: the body's front turned to the sky.
+ flat(q){return q.setFromAxisAngle(UP,this.yaw).multiply(TQ2.setFromAxisAngle(ALONG,Math.PI/2));}
+ go(phase){
+  this.phase=phase;this.t=0;this.from.copy(this.q);
+  // Getting up: the hips come up over the feet, which stay where the legs lay.
+  if(phase==='rise'){this.riseFrom=this.hips.clone();this.riseTo=new THREE.Vector3(this.feet.x,this.floor+HIPS,this.feet.z);}
+ }
+ // Advance by dt and pose the figure on s (a copy of its standing pose); false once home.
+ update(dt,s){
+  this.t+=dt;this.clock+=dt;const t=this.clock;s.y=0;
+  if(this.phase==='fly'){
+   this.v.y-=TUMBLE_G*dt;this.hips.addScaledVector(this.v,dt);this.angle+=this.spin*dt;this.yaw+=this.twirl*dt;
+   this.q.setFromAxisAngle(this.axis,this.angle).multiply(TQ.setFromAxisAngle(UP,this.yaw));
+   // Flailing: arms windmilling overhead, legs kicking.
+   s.arm[0]=2.1+.7*Math.sin(t*17);s.arm[1]=1.9+.7*Math.sin(t*15+1);s.spread[0]=1.1+.4*Math.sin(t*13);s.spread[1]=1.2+.4*Math.sin(t*11+2);
+   s.elbow[0]=.4+.3*Math.sin(t*9);s.elbow[1]=.6;s.thigh[0]=.6*Math.sin(t*14);s.thigh[1]=-.6*Math.sin(t*14);
+   s.knee[0]=.7+.4*Math.sin(t*9);s.knee[1]=.8+.4*Math.cos(t*10);s.lean=-.25;s.head=-.35;
+   if(this.hips.y<this.floor+.35&&this.v.y<0){
+    const drop=-this.v.y;this.hips.y=this.floor+.35;
+    // Rubbery: two bounces, each lower, then flat on the ground.
+    if(this.bounces<2&&drop>2.2){this.v.y=drop*.5;this.v.x*=.35;this.v.z*=.35;this.spin*=.55;this.twirl*=.5;this.bounces++;EVENTS.push({sound:'boing',strength:Math.min(1.2,drop/7)});}
+    else{this.v.y=0;this.go('lie');EVENTS.push({sound:'boing',strength:.4});}
+   }
+  }else if(this.phase==='lie'){
+   // Slides to a stop, sprawled like a starfish, one foot twitching.
+   const k=Math.exp(-dt*4);this.v.x*=k;this.v.z*=k;this.hips.x+=this.v.x*dt;this.hips.z+=this.v.z*dt;
+   this.hips.y+=(this.floor+.16-this.hips.y)*Math.min(1,dt*10);this.q.slerpQuaternions(this.from,this.flat(TQ),smooth(this.t/.3));
+   s.arm[0]=s.arm[1]=.3;s.spread[0]=s.spread[1]=1.35;s.elbow[0]=s.elbow[1]=.2;s.thigh[0]=.25;s.thigh[1]=-.2;s.knee[1]=.1;s.knee[0]=.2+.35*Math.max(0,Math.sin(t*14))*(this.t>.6);s.lid=1;
+   if(this.t>1.5)this.go('rise');
+  }else if(this.phase==='rise'){
+   const k=smooth(this.t/.7);this.q.slerpQuaternions(this.from,this.upright(TQ),k);this.hips.lerpVectors(this.riseFrom,this.riseTo,k);
+   s.knee[0]=s.knee[1]=.9*(1-k);s.thigh[0]=s.thigh[1]=.8*(1-k);s.arm[0]=s.arm[1]=.5*(1-k);s.lid=1-k;
+   if(this.t>.7)this.go('dizzy');
+  }else if(this.phase==='dizzy'){
+   // Seeing stars: swaying in circles, head lolling.
+   this.upright();s.sway=.06*Math.sin(t*5);s.tilt=.2*Math.sin(t*4);s.head=.15*Math.sin(t*3.3);s.turn=.35*Math.sin(t*2.5);s.lid=.45;
+   s.arm[0]=s.arm[1]=.35;s.spread[0]=.55+.1*Math.sin(t*5);s.spread[1]=.55-.1*Math.sin(t*5);
+   if(this.t>1.3){this.go('fist');EVENTS.push({sound:'talk',strength:.8});}
+  }else if(this.phase==='fist'){
+   // Turns to the car and shakes a fist at it.
+   const want=Math.atan2(-(this.car.z-this.hips.z),this.car.x-this.hips.x);this.yaw+=wrap(want-this.yaw)*Math.min(1,dt*6);this.upright();
+   s.arm[1]=2.5;s.elbow[1]=1.25+.4*Math.sin(t*22);s.spread[1]=.25;s.arm[0]=-.3;s.spread[0]=.5;s.lean=-.06;s.head=-.12;s.tilt=.08*Math.sin(t*22);
+   if(this.t>1.1)this.go('walk');
+  }else if(this.phase==='walk'||this.phase==='turn'){
+   const dx=this.home.x-this.hips.x,dz=this.home.z-this.hips.z,dist=Math.hypot(dx,dz);
+   if(this.phase==='walk'&&dist>.05){
+    // Back to the spot at a limping walk.
+    const len=Math.min(dist,1.8*dt);this.hips.x+=dx/dist*len;this.hips.z+=dz/dist*len;this.step+=len*4.3;
+    this.yaw+=wrap(Math.atan2(-dz,dx)-this.yaw)*Math.min(1,dt*8);gait(s,this.step,1,false);s.tilt+=.07*Math.sin(this.step);s.sway+=.03*Math.sin(this.step);
+   }else{
+    if(this.phase==='walk')this.go('turn');
+    this.hips.x=this.home.x;this.hips.z=this.home.z;this.yaw+=wrap(this.homeYaw-this.yaw)*Math.min(1,dt*6);
+    if(this.t>.6){this.yaw=this.homeYaw;this.upright();this.feet.copy(this.home);return false;}
+   }
+   this.hips.y=this.home.y+HIPS;this.upright();
+  }
+  // Feet below the hips along the body.
+  this.feet.copy(this.hips).sub(TV.set(0,HIPS,0).applyQuaternion(this.q));
+  return true;
+ }
+}
+// The Box 99 crew and the Tia (Actors, in world coordinates) can be run over too.
+const ACTORS=new Set();
+// How a car throws someone it hits (world, three.js axes): mostly up, and ahead and off to
+// the side it was on, harder the faster the car (high rather than far: they walk back).
+function throwFrom(car,side){
+ const speed=Math.hypot(car.vx,car.vy),c=Math.cos(car.heading),s=Math.sin(car.heading),k=(.25+Math.random()*.15)*Math.min(1,14/Math.max(speed,1)),out=side*(1+Math.random()*1.5);
+ const up=3+Math.min(speed,25)*.4+Math.random();
+ return new THREE.Vector3(car.vx*k-s*out,up,-(car.vy*k+c*out));
+}
+// Once a frame (main.js) with the player's car: anyone standing in its path, on the same
+// level and hit faster than a walk, goes flying. Returns how many were hit.
+// CAR_GROUND: the centre of mass above the ground (physics.js CG_HEIGHT).
+const CAR_FRONT=2.42,CAR_REAR=2.35,CAR_SIDE=.93,BODY=.3,HIT_SPEED=2,CAR_GROUND=.52;
+export function hitPeople(car){
+ const speed=Math.hypot(car.vx,car.vy);if(speed<HIT_SPEED)return 0;
+ const c=Math.cos(car.heading),s=Math.sin(car.heading),ground=car.z-CAR_GROUND,where=new THREE.Vector3(car.x,ground,-car.y);let hits=0;
+ // Body frame of the car: along (forward) and across (left); true when (x, y) is inside the plan.
+ const inside=(x,y,z)=>{if(Math.abs(z-ground)>1.3)return 0;const dx=x-car.x,dy=y-car.y,b=dx*c+dy*s,l=-dx*s+dy*c;
+  return b>-CAR_REAR-BODY&&b<CAR_FRONT+BODY&&Math.abs(l)<CAR_SIDE+BODY?(Math.sign(l)||1):0;};
+ for(const crowd of LIVE){
+  if(!crowd.attached||!shown(crowd.mesh))continue;
+  CENTRE.copy(crowd.centre).applyMatrix4(crowd.mesh.matrixWorld);if(Math.hypot(CENTRE.x-car.x,-CENTRE.z-car.y)>crowd.radius+4)continue;
+  for(const f of crowd.folk){
+   if(f.tumble||f.camera)continue;AT.copy(f.spot.position).applyMatrix4(crowd.mesh.matrixWorld);
+   const side=inside(AT.x,-AT.z,AT.y);if(!side)continue;
+   crowd.launch(f,throwFrom(car,side),where);hits++;
+  }
+ }
+ for(const a of ACTORS){
+  let root=a.person;while(root.parent)root=root.parent;
+  // Actors of a circuit that was unloaded are forgotten.
+  if(!root.isScene){if(a.attached)ACTORS.delete(a);continue;}a.attached=true;
+  if(a.tumble||!shown(a.person))continue;
+  const side=inside(a.x,a.y,a.person.position.y);if(!side)continue;
+  a.tumble=new Tumble({feet:a.person.position,yaw:a.yaw,velocity:throwFrom(car,side),home:a.person.position,homeYaw:a.yaw,car:where});hits++;
+ }
+ for(let i=0;i<hits;i++)EVENTS.push({sound:'bonk',strength:Math.min(1.3,.5+speed/15)});
+ return hits;
+}
+// Sounds from the flights since the last call ({sound, strength}), for main.js to play.
+export function takePeopleEvents(){return EVENTS.splice(0);}
 // Once a frame (main.js): people near the camera idle every frame, the ones farther off
 // every fourth, beyond 300 m not at all; past 200 m they cast no shadow and past 800 m (a
 // pixel or two tall) they are not drawn. cars: Object3Ds (the player's car and the rivals) whose positions catch the
@@ -380,7 +517,15 @@ export {ARMS as IDLE_ARMS,GESTURES as IDLE_GESTURES,KINDS as IDLE_KINDS,applyPos
 // Test hook: how many idle crowds are live and what their people are doing.
 export function peopleInfo(){return [...LIVE].map(c=>({name:c.mesh.name,people:c.folk.length,attached:c.attached,visible:c.mesh.visible,
  doing:c.folk.map(f=>f.mind.gesture?.name??(f.camera&&f.camera.busy>.5?'filmando':null)),using:c.folk.map(f=>f.mind.using),kinds:c.folk.map(f=>f.mind.kind),
- spots:c.folk.map(f=>{const w=f.spot.getWorldPosition(new THREE.Vector3());return [w.x,w.y,w.z,f.yaw];}),pan:c.folk.map(f=>f.camera?f.camera.pan:null)}));}
+ spots:c.folk.map(f=>{const w=f.spot.getWorldPosition(new THREE.Vector3());return [w.x,w.y,w.z,f.yaw];}),pan:c.folk.map(f=>f.camera?f.camera.pan:null),
+ tumbles:c.folk.map(f=>f.tumble?.phase??null)}));}
+// Test hook: everyone in the air or on the way back ({phase, feet} in world metres, three.js axes).
+export function tumbleInfo(){
+ const out=[];
+ for(const c of LIVE)for(const f of c.folk)if(f.tumble){const w=f.tumble.feet.clone().applyMatrix4(c.mesh.matrixWorld);out.push({crowd:c.mesh.name,phase:f.tumble.phase,feet:[w.x,w.y,w.z]});}
+ for(const a of ACTORS)if(a.tumble)out.push({actor:a.person.name,phase:a.tumble.phase,feet:a.tumble.feet.toArray()});
+ return out;
+}
 
 // One animated person: walks or jogs to a target spot, turns to face its heading,
 // settles into a pose and layers small work movements on top.
@@ -388,9 +533,15 @@ export function peopleInfo(){return [...LIVE].map(c=>({name:c.mesh.name,people:c
 // fills the waits; calm (set by the owner) keeps it to breathing and glances.
 class Actor{
  constructor(person,x,y,yaw,idle={}){this.person=person;this.x=x;this.y=y;this.yaw=yaw;this.speed=0;this.phase=0;this.t=Math.random()*9;this.act=null;this.look=0;this.calm=false;this.target={x,y,yaw,pose:'stand'};this.show=clonePose(person.userData.pose);
-  this.props=idle.props??{};this.mind=new IdleMind(idle.kind??'crew',{hands:idle.hands,props:Object.keys(this.props),seed:idle.seed});this.mind.posture=idle.posture??true;}
+  this.props=idle.props??{};this.mind=new IdleMind(idle.kind??'crew',{hands:idle.hands,props:Object.keys(this.props),seed:idle.seed});this.mind.posture=idle.posture??true;this.tumble=null;ACTORS.add(this);}
  go(x,y,yaw,pose,pass=false){Object.assign(this.target,{x,y,yaw,pose,pass});}
  step(dt,ground){
+  // Run over: the flight, the fall and the walk back take over until they are done.
+  if(this.tumble){
+   const s=this.show;copyPose(s,POSES.stand);
+   if(this.tumble.update(dt,s)){applyPose(this.person.userData.rig,s);this.person.position.copy(this.tumble.feet);this.person.quaternion.copy(this.tumble.q);this.x=this.tumble.feet.x;this.y=-this.tumble.feet.z;return;}
+   this.yaw=this.tumble.yaw;this.tumble=null;this.person.rotation.set(0,this.yaw,0);
+  }
   const dx=this.target.x-this.x,dy=this.target.y-this.y,dist=Math.hypot(dx,dy),p=this.person.userData.pose;this.t+=dt;let moving=0;
   if(dist>.05){const want=this.target.pass?3.2:Math.min(dist>2.5?3.6:1.7,dist*3+.3);this.speed+=(want-this.speed)*Math.min(1,dt*6);const len=Math.min(dist,this.speed*dt);this.x+=dx/dist*len;this.y+=dy/dist*len;this.yaw+=wrap(Math.atan2(dy,dx)-this.yaw)*Math.min(1,dt*10);moving=Math.min(1,this.speed/1.1);this.phase+=len*(this.speed>2.3?3.2:4.3);}
   else{this.speed=0;this.yaw+=wrap(this.target.yaw-this.yaw)*Math.min(1,dt*6);}

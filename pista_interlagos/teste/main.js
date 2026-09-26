@@ -34,7 +34,8 @@ import {LakeContact} from './lake-contact.js';
 import {fitGround,applyGroundHeights,groundHeight} from './track-clearance.js';
 import {createGrandstands} from './interlagos-stands.js';
 import {createTrackside} from './trackside.js';
-import {updatePeople} from './pit-crew.js';
+import {updatePeople,hitPeople,takePeopleEvents,tumbleInfo} from './pit-crew.js';
+import {TreeField} from './tree-contact.js';
 import {TvCamera} from './tv-camera.js';
 import {CinematicIntro} from './intro-cinematic.js';
 const $=id=>document.getElementById(id);
@@ -79,7 +80,7 @@ function chooseImmersive(value){
  preferences.update({immersive:value});if(ready)updateMenuLabels();
 }
 const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');
-let sky,landscape,landscapeField,terrainTextures,lakeContact=null,cinematic,trackside=null,tvCamera=null;const tvVelocity=new THREE.Vector3();
+let sky,landscape,landscapeField,terrainTextures,lakeContact=null,treeField=null,cinematic,trackside=null,tvCamera=null;const tvVelocity=new THREE.Vector3();
 // Film-style opening shots before the free race's 3-2-1 and when the story begins.
 const intro=new CinematicIntro();let introHidden=null;
 let renderer;
@@ -598,7 +599,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
- tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);lakeContact?.update(paused?0:dt,renderer.domElement.height);
+ tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  // The same command drives the engine sound and the driver's hands and feet.
  const driveCommand=pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input();
@@ -611,6 +612,8 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  if(immersive?.visual)immersive.visual.renderAhead=renderAhead();immersive?.update(paused?0:dt,camera);if(watchedRival())updateCamera(dt);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
  // Marshals, cameramen, crews, the terrace and the café idle; passing cars catch their eye.
+ // Anyone the Opala runs over goes flying (a cartoon, not a crash): the car barely notices.
+ if(!paused&&hitPeople(car)){car.vx*=.97;car.vy*=.97;}for(const e of takePeopleEvents())carAudio.effect(e.sound,{strength:e.strength});
  updatePeople(paused?0:dt,camera,[carRoot,...(immersive?.visual?.rivals??[])]);
  raceResults.update(immersive,paused,$('settings').open);
  $('finishFade').classList.toggle('fading',!paused&&immersive.finishing);$('finishFade').style.opacity=String(!paused?immersive.finishOpacity:0);
@@ -746,7 +749,7 @@ function clearCircuit(){
  landscapeField?.texture.dispose();landscapeField=null;landscape?.dispose();landscape=null;
  roadSurface=null;loadedCircuit=null;raceResults.mode=null;raceResults.snapshot=null;raceResults.root.hidden=true;renderer?.renderLists.dispose();
  if(skidMarks){skidMarks.breakTrails();skidMarks.count=skidMarks.total=skidMarks.cursor=0;skidMarks.geometry.setDrawRange(0,0);}
- tyreSmoke?.reset();lakeContact=null;accumulator=0;followInitialized=false;
+ tyreSmoke?.reset();lakeContact=null;treeField=null;accumulator=0;followInitialized=false;
  window.interlagos={ready:false,audioInfo:()=>carAudio.info()};
 }
 async function loadCircuit(){
@@ -797,6 +800,8 @@ async function loadCircuit(){
  const tvProbe=new TestCar(data),tvObstacles=[...cameraObstacles];branding.root.traverse(o=>{if(o.isMesh)tvObstacles.push(o);});
  tvCamera=new TvCamera(data,trackside.towers,(x,y,i)=>{tvProbe.index=i;return tvProbe.sample(x,y).z;},tvObstacles);
  landscape.clearAround(tvCamera.cameras.filter(c=>!c.tower).map(c=>({x:c.position.x,y:-c.position.z,r:3.5})));
+ // The trees left standing are posts the Opala can hit.
+ treeField=new TreeField(landscape.trunks(),{mobile:touchDevice});scene.add(treeField.points);car.posts=treeField;
  restBodyPose();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;immersive.laps=preferences.values.laps;immersive.visual.viewCamera=camera;
@@ -816,13 +821,13 @@ async function loadCircuit(){
  const roster=$('gridRoster');roster.replaceChildren();for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':` · Ritmo ${entry.level}/100`}`;roster.append(row);}
  // Compile the new programs while the loading label is still shown, instead of
  // freezing the first race frame (D3D shader compilation is slow on Windows).
- updateCar(1);updateCamera(1);try{await cinematic.compile(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}
+ updateCar(1);updateCamera(1);landscape.revealWaves(true);try{await cinematic.compile(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}finally{landscape.revealWaves(false);}
  ready=true;loadedCircuit=circuit.id;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;
  window.interlagos={ready:true,circuit:circuit.id,car,renderAhead,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),pitInfo:()=>pitstop?.info()??null,
   audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),
   cinematicInfo:()=>({...cinematic.info(),adaptation:cinematic.adaptation()}),tvInfo:()=>tvCamera.info(),tvCamera:()=>tvCamera,introInfo:()=>intro.info(),skipIntro:()=>intro.stop(),setCinematic:level=>cinematic.setLevel(level),cinematicLook:patch=>Object.assign(cinematic.look,patch||{}),
-  skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),waterInfo:()=>landscape.waterInfo(),lakeInfo:()=>lakeContact?.info()??null,waterAt:(x,y)=>landscape.water.at(x,y),
+  skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),waterInfo:()=>landscape.waterInfo(),lakeInfo:()=>lakeContact?.info()??null,treeInfo:()=>treeField?.info()??null,tumbleInfo,waterAt:(x,y)=>landscape.water.at(x,y),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),
   openingsInfo:()=>openings.info(),holdOpening:(name,on=true)=>openings.hold(name,'teste',on),
   // materials: those shown on the rival (whatever its distance detail), numbers: its own number decals.
