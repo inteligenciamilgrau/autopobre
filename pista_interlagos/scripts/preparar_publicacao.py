@@ -38,7 +38,13 @@ def build():
     policy = content_policy(html)
     html = html.replace('<link rel="icon"', '<meta http-equiv="Content-Security-Policy" content="' + policy + '">\n<meta name="referrer" content="no-referrer">\n<link rel="icon"', 1)
     payload['index.html'] = html.encode('utf-8')
-    payload['main.js'] = payload['main.js'].replace(b'../dados/pista.json', b'./dados/pista.json').replace(b'../exports/interlagos_pista.glb', b'./exports/interlagos_pista.glb')
+    # Published, dados/ and exports/ sit beside index.html instead of one folder up.
+    payload['main.js'] = payload['main.js'].replace(b'../dados/', b'./dados/').replace(b'../exports/interlagos_pista.glb', b'./exports/interlagos_pista.glb')
+    # Fail closed on any other path that only resolves in the repository layout (an
+    # uncorrected one fetches from the parent site: the /dev/ build read the main link's files).
+    for name, data in payload.items():
+        if name.endswith('.js') and re.search(rb'''['"`]\.\./(?:dados|exports)/''', data):
+            raise ValueError('Repository-only data path in public file: ' + name)
     payload['_headers'] = ('/*\n' + ''.join(f'  {k}: {v}\n' for k, v in security_headers(html).items())).encode()
     payload['.nojekyll'] = b''
     # Fail closed on accidental workstation paths or credential-like literals in text.

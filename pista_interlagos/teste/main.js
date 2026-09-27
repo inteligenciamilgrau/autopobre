@@ -859,7 +859,8 @@ async function loadCircuit(){
  if(reuse){if(activeLivery!==$('livery').value)await setLivery($('livery').value);ready=true;window.interlagos.ready=true;$('skinButton').disabled=false;return true;}
  initializeRenderer();clearCircuit();showCircuitSelection();
 
- data=circuit.id==='curvelo'?createCurveloData():await (await fetch(circuit.data??'../dados/pista.json')).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);
+ // Track files live in dados/, beside teste/ here and beside index.html once published (preparar_publicacao.py).
+ data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/'+(circuit.data??'pista.json'))).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);
  roadSurface=await createTrackSurface(renderer,data);
  if(!driver){driver=await createDriver(cockpit);carBody.add(driver.root);}
  terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];
