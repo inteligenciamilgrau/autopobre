@@ -21,11 +21,11 @@ MODULES = (
     'favicon.svg', 'favicon.ico', 'apple-touch-icon.png',
 )
 ASSETS = (
-    'branding/old_stock_preparada_v1.png',
+    'branding/old_stock_preparada_v1.jpg',
     'circuitos/cascavel_solo.jpg', 'circuitos/piracicaba_solo.jpg',
     'opala99_assinaturas_omp.glb', 'opala99_seiva_danilo.glb',
-    'abertura/desclassificado_v1.png', 'abertura/abertura_stevan_opala99.png', 'abertura/logo_auto_pobre_racing.png',
-    'piloto/capacete_publico.jpg', 'piloto/referencia_frente.png',
+    'abertura/desclassificado_v1.jpg', 'abertura/abertura_stevan_opala99.jpg', 'abertura/logo_auto_pobre_racing.webp',
+    'piloto/capacete_publico.jpg', 'piloto/referencia_frente.jpg',
     'audio/car_trying_to_start.mp3',
     'texturas/asfalto_diff_v3.jpg', 'texturas/asfalto_nor_gl_v3.jpg', 'texturas/asfalto_rough_v3.jpg',
     'texturas/asfalto_creditos.txt', 'texturas/cockpit_faixa_invent.png',

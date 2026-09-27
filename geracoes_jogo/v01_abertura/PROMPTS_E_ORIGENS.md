@@ -4,7 +4,7 @@ Geradas com a ferramenta integrada image_gen, em 13/09/2026. Não foi utilizada 
 
 - `logo_auto_pobre_racing.png`: 1774 × 887, PNG RGBA com transparência real. Nome e subtítulo conferidos.
 - `abertura_stevan_opala99.png`: 1672 × 941, PNG RGB. Arte cinematográfica inspirada nas referências aprovadas do piloto e do Opala OMP com assinaturas.
-- Os dois originais estão nesta pasta separada. Cópias de produção em `../../pista_interlagos/teste/assets/abertura/`.
+- Os dois originais estão nesta pasta separada. Cópias de produção, recomprimidas para a web na mesma resolução, em `../../pista_interlagos/teste/assets/abertura/`: `logo_auto_pobre_racing.webp` (WebP qualidade 85, transparência sem perda) e `abertura_stevan_opala99.jpg` (JPEG qualidade 85).
 - A imagem e a logo aparecem na abertura dos dois modos. **Versão Imersiva opcional** ativa apenas as regras extras. A arte também pode ser aberta diretamente em tamanho completo.
 - Ilustração de abertura: cenário artístico inspirado em Interlagos; não substitui os dados do circuito ou as referências técnicas de modelagem. Pequenos patrocinadores e assinaturas são detalhes ilustrativos.
 

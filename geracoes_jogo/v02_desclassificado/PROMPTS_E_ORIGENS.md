@@ -1,6 +1,6 @@
 # Encerramento: a foto ficou
 
-Gerado com a ferramenta integrada `image_gen`, usando `pista_interlagos/teste/assets/abertura/abertura_stevan_opala99.png` como referência visual. Original preservado em `desclassificado_v1.png`; cópia do jogo em `pista_interlagos/teste/assets/abertura/desclassificado_v1.png`. A piada é texto HTML sobreposto para permanecer legível em desktop e celular.
+Gerado com a ferramenta integrada `image_gen`, usando `pista_interlagos/teste/assets/abertura/abertura_stevan_opala99.png` como referência visual. Original preservado em `desclassificado_v1.png`; cópia do jogo, recomprimida em JPEG qualidade 85 na mesma resolução, em `pista_interlagos/teste/assets/abertura/desclassificado_v1.jpg`. A piada é texto HTML sobreposto para permanecer legível em desktop e celular.
 
 ## Prompt enviado
 

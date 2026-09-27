@@ -17,7 +17,7 @@ export async function createDriver(cockpit){
  // Controls the driver touches ride in this group so they show through the windows too.
  for(const part of controls.parts)root.add(part);
  const motion=new DriverMotion(),choreography=new DriverControls();
- const tex=await new THREE.TextureLoader().loadAsync('./assets/piloto/referencia_frente.png');tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=8;
+ const tex=await new THREE.TextureLoader().loadAsync('./assets/piloto/referencia_frente.jpg');tex.colorSpace=THREE.SRGBColorSpace;tex.anisotropy=8;
  const red=new THREE.MeshStandardMaterial({color:0xd91920,roughness:.92});
  const fabric=tex.clone();fabric.repeat.set(.07,.09);fabric.offset.set(.36,.49);fabric.needsUpdate=true;
  red.map=fabric;red.bumpMap=fabric;red.bumpScale=.0008;red.color.setHex(0xffffff);

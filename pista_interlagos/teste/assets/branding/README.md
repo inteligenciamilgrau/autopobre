@@ -1,6 +1,6 @@
 # Old Stock Race — textura do jogo
 
-Arquivo final: `old_stock_preparada_v1.png` (1536 × 1024, PNG).
+Arquivo do jogo: `old_stock_preparada_v1.jpg` (1536 × 1024, JPEG qualidade 85, recomprimido para a web). O PNG original gerado (1,1 MB) fica em `geracoes_jogo/old_stock/old_stock_preparada_v1.png`, fora da publicação.
 
 Origem: logo pequena enviada pelo usuário na conversa. Preparação com a ferramenta integrada **imagegen**, usando essa imagem como referência; não foi usado CLI. É uma recriação ampliada da referência, não o arquivo vetorial original da marca. O resultado foi copiado sem alterações para esta pasta. Aplicação: abertura, outdoors do circuito e para-lamas do Opala #70.
 

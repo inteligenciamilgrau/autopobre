@@ -27,8 +27,8 @@ export function billboardSpots(data){
 
 export async function createTrackBranding(data){
  const loader=new THREE.TextureLoader(),[oldStock,game]=await Promise.all([
-  loader.loadAsync('./assets/branding/old_stock_preparada_v1.png'),
-  loader.loadAsync('./assets/abertura/logo_auto_pobre_racing.png'),
+  loader.loadAsync('./assets/branding/old_stock_preparada_v1.jpg'),
+  loader.loadAsync('./assets/abertura/logo_auto_pobre_racing.webp'),
  ]);for(const texture of [oldStock,game]){texture.colorSpace=THREE.SRGBColorSpace;texture.anisotropy=4;}
  const root=new THREE.Group();root.name='Outdoors_AutoPobre_OldStock';
  const frameMaterial=new THREE.MeshStandardMaterial({color:0x263a3a,roughness:.8,metalness:.3});
