@@ -4,6 +4,9 @@
 // stripe from the list the 99 team sent (2026-09-27); a null stripe keeps the plain light one
 // (only the body colour is known), #88's colours are not known yet.
 const LIGHT_STRIPE=0xe4e4d5;
+// Race option "Koyzinho Indestrutível" (off by default): this car drives as the ace (ACE_STYLE in
+// race-field.js) and starts just ahead of the player, in the last rival slot.
+export const ACE_NUMBER='2';
 const entries=[
  ['73','Konrad Viehmann','Konrad Viehmann',192,1,3,4,1,0xe8731c,null],
  ['00','Koy Bechtold','Clóvis “Koy” Bechtold',166,2,5,3,2,0xeeeeea,0x1f4fb5],

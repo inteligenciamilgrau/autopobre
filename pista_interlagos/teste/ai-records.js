@@ -20,7 +20,8 @@ export class AutomaticAIRecords {
   if(signature===this.signature)return;
   let changed=false;const rows=this.rows.map(r=>({...r}));
   for(const rival of mode.rivals){
-   const lap=rival.car.best;if(!valid(lap))continue;
+   // Koyzinho Indestrutível is a test setting: his times stay off the AI board.
+   const lap=rival.car.best;if(!valid(lap)||rival.style?.ace)continue;
    const row=rows.find(r=>r.circuit===circuit&&r.mode===category&&r.number===rival.entry.number);if(!row)continue;
    const race=standard&&rival.finished&&valid(rival.finishTime)?rival.finishTime:null;
    const bestLap=Math.min(row.bestLap,lap),bestRace=best(row.bestRace,race);

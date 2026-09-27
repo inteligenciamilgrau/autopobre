@@ -14,7 +14,7 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v=20260923-capotagem';
-import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
+import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY,ACE_NUMBER} from './race-roster.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260927-omp-retrovisores';
 import {CarOpenings} from './car-openings.js';
@@ -67,6 +67,14 @@ $('livery').value=preferences.values.livery;
 $('camera').value=preferences.values.camera;
 $('carDamage').checked=preferences.values.damage;
 $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked});pitstop?.setDamage(preferences.values.damage);};
+// The grid list in the race settings; Koyzinho is marked while he races as the ace.
+function showRoster(){
+ const roster=$('gridRoster');roster.replaceChildren();
+ for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':` · Ritmo ${entry.level}/100`}`;roster.append(row);}
+}
+// Koyzinho Indestrutível: taken at the next start (RaceField.reset), like the race length.
+$('aceKoyzinho').checked=preferences.values.aceKoyzinho;
+$('aceKoyzinho').onchange=()=>{preferences.update({aceKoyzinho:$('aceKoyzinho').checked});if(immersive)immersive.field.ace=preferences.values.aceKoyzinho;if(ready)showRoster();};
 $('realisticWater').checked=preferences.values.realisticWater;
 $('realisticWater').onchange=()=>{preferences.update({realisticWater:$('realisticWater').checked});landscape?.setRealisticWater(preferences.values.realisticWater);};
 // Race length (both modes, every circuit): taken at the next start, so a race under way keeps its own.
@@ -815,7 +823,7 @@ async function loadCircuit(){
  treeField=new TreeField(landscape.trunks(),{mobile:touchDevice});scene.add(treeField.points);car.posts=treeField;
  restBodyPose();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{chooseImmersive(false);reset();menu(true);}});
- immersive.onMainMenu=returnToMainMenu;immersive.laps=preferences.values.laps;immersive.visual.viewCamera=camera;
+ immersive.onMainMenu=returnToMainMenu;immersive.laps=preferences.values.laps;immersive.field.ace=preferences.values.aceKoyzinho;immersive.visual.viewCamera=camera;
  // Sessions started from the menu open with the cinematic intro (the 3-2-1 waits for it).
  const beginCountdown=immersive.beginCountdown.bind(immersive),startStory=immersive.start.bind(immersive);
  immersive.beginCountdown=()=>{beginCountdown();if(paused&&!automatic&&introWanted()){immersive.state.sounds=immersive.state.sounds.filter(sound=>sound.name!=='countdown');intro.play('race',introContext);}};
@@ -829,7 +837,7 @@ async function loadCircuit(){
  // Car 70's Old Stock ads sit on its doors, bent onto the body.
  const oldStockMaterial=new THREE.MeshStandardMaterial({map:branding.oldStock,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
  for(const decal of immersive.visual.doorStickers(kleber,oldStockMaterial))decal.name='OldStock_no_Opala70';
- const roster=$('gridRoster');roster.replaceChildren();for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':` · Ritmo ${entry.level}/100`}`;roster.append(row);}
+ showRoster();
  // Compile the new programs while the loading label is still shown, instead of
  // freezing the first race frame (D3D shader compilation is slow on Windows).
  updateCar(1);updateCamera(1);landscape.revealWaves(true);try{await cinematic.compile(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}finally{landscape.revealWaves(false);}

@@ -2,7 +2,8 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {TestCar} from '../teste/physics.js';
-import {RaceField,racingLine} from '../teste/race-field.js';
+import {RaceField,racingLine,ACE_STYLE} from '../teste/race-field.js';
+import {RIVAL_ROSTER,ACE_NUMBER} from '../teste/race-roster.js';
 import {pitGeometry,wallContact} from '../teste/pit-lane.js';
 import {createCurveloData} from '../teste/curvelo-data.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));data.meta.id='interlagos';
@@ -72,4 +73,30 @@ const hero=heroRace(5);
 assert(hero.position!==null&&hero.position<=6,'the recon driver finishes three laps in the top six from the back');
 assert(hero.passes>=3&&hero.walls===0&&hero.offroad<.005,'the recon driver passes cleanly, on the asphalt');
 assert(hero.best<122,'the recon driver laps near the front-runners\' pace');
-console.log(JSON.stringify({passed:true,interlagos,curvelo,hero},null,1));
+// "Koyzinho Indestrutível" (the race option, RaceField ace): off by default, Koyzinho keeps his own
+// style. On, he is the ace: last rival slot on every grid, just ahead of the player; alone at
+// Interlagos well under the player's well-driven 1:53, with no unforced errors; from the back he
+// wins a seeded race cleanly, and contacts never stun him.
+assert.equal(RIVAL_ROSTER.find(e=>e.number===ACE_NUMBER)?.shortName,'Koyzinho Bechtold');
+assert(new RaceField(data,{seed:1}).rivals.every(r=>!r.style.ace),'off by default: no ace in the field');
+const aceOf=f=>f.rivals.find(q=>q.entry.number===ACE_NUMBER);
+for(const seed of [1,2,3,4,5]){const f=new RaceField(data,{seed,ace:true});f.reset(0,{grid:true});const r=aceOf(f);assert.equal(r.slot,RIVAL_ROSTER.length-1,'the ace starts from the last rival slot');assert.equal(r.style,ACE_STYLE);assert.equal(Math.min(...f.rivals.map(q=>q.progress)),r.progress,'nobody but the player starts behind the ace');}
+function aceSolo(){
+ const player=new TestCar(data);player.resetGrid();const f=new RaceField(data,{seed:1,ace:true});f.reset(player.surface.s,{grid:true});player.x=player.y=10000;player.surface=player.sample(player.x,player.y);
+ const r=aceOf(f);f.rivals=[r];let offroad=0,steps=0;
+ while(!r.finished&&steps<120*300){f.step(player,1/120,2);steps++;if(!r.car.surface.onRoad)offroad++;}
+ return {best:r.car.best,offroad,mistakes:r.mistakes};
+}
+const aceAlone=aceSolo();
+assert(aceAlone.best<112.5&&aceAlone.offroad===0&&aceAlone.mistakes===0,'the ace laps Interlagos alone under 1:52.5, on the asphalt, without errors');
+function aceRace(seed){
+ const player=new TestCar(data);player.resetGrid();const f=new RaceField(data,{seed,ace:true});f.reset(player.surface.s,{grid:true});player.x=player.y=10000;player.surface=player.sample(player.x,player.y);
+ const r=aceOf(f);let offroad=0,walls=0,stun=0,steps=0;
+ while(f.rivals.some(q=>!q.finished)&&steps<120*900){f.step(player,1/120,3);steps++;if(!r.car.surface.onRoad)offroad++;if(r.car.wallImpactSpeed>2)walls++;stun=Math.max(stun,r.stun);}
+ const order=f.rivals.filter(q=>q.finished).sort((a,b)=>a.finishTime-b.finishTime);
+ return {position:order.indexOf(r)+1,best:r.car.best,offroad,walls,stun};
+}
+const ace=aceRace(4);
+assert(ace.position===1&&ace.offroad===0&&ace.walls===0,'from the back of the grid the ace wins, on the asphalt and off the walls');
+assert.equal(ace.stun,0,'contacts never stun the ace');
+console.log(JSON.stringify({passed:true,interlagos,curvelo,hero,aceAlone,ace},null,1));

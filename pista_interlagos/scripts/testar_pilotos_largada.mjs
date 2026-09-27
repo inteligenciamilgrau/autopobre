@@ -30,6 +30,10 @@ const humanCount=readRecords(storage).length,aiBefore=readAIRecords(storage);ass
 const ai=new AutomaticAIRecords(storage);ai.update({data:{meta:{id:'curvelo'}},active:false,rivals:[{entry:{number:'70'},car:{best:37},finished:true,finishTime:120}]});
 assert.equal(readRecords(storage).length,humanCount,'AI never enters human storage');assert.equal(readAIRecords(storage).find(r=>r.circuit==='curvelo'&&r.mode==='normal'&&r.number==='70').bestLap,37);
 assert(!new PilotProfiles(storage).names.some(n=>n.includes('Kleber')),'AI is not a saved human pilot');
+// Koyzinho Indestrutível is a test setting: his laps never reach the AI board.
+const koy=()=>readAIRecords(storage).find(r=>r.circuit==='curvelo'&&r.mode==='normal'&&r.number==='2').bestLap,koyBefore=koy();
+ai.update({data:{meta:{id:'curvelo'}},active:false,rivals:[{entry:{number:'2'},style:{ace:true},car:{best:20},finished:true,finishTime:70}]});
+assert.equal(koy(),koyBefore,'the indestructible Koyzinho leaves the AI board alone');
 
 storage.setItem(RECORD_VIEW_KEY,JSON.stringify({circuit:'interlagos',mode:'immersive',source:'ai'}));assert.deepEqual(readRecordView(storage),{circuit:'interlagos',mode:'immersive',source:'ai'});storage.setItem(RECORD_VIEW_KEY,JSON.stringify({circuit:'curvelo',mode:'normal',source:'invalid'}));assert.equal(readRecordView(storage),null);
 

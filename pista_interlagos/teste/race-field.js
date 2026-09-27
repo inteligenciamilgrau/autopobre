@@ -1,5 +1,5 @@
 import {TestCar,clamp,wrap,steerLimit,WHEELBASE} from './physics.js?v=20260923-capotagem';
-import {RIVAL_ROSTER,GRID_ROW_SPACING} from './race-roster.js';
+import {RIVAL_ROSTER,GRID_ROW_SPACING,ACE_NUMBER} from './race-roster.js';
 import {pitGeometry,wallContact,pitLane,curveloPitFrame,CURVELO_PIT} from './pit-lane.js';
 const HALF_LENGTH=2.38,HALF_WIDTH=.93,MASS=1250,INERTIA=MASS*(4.76**2+1.86**2)/12;
 const axes=c=>[[Math.cos(c.heading),Math.sin(c.heading)],[-Math.sin(c.heading),Math.cos(c.heading)]];
@@ -16,6 +16,13 @@ export const DRIVER_STYLES=Object.freeze([
  {name:'Atacante',maxSpeed:54,cornerGrip:8,braking:8,brakeResponse:.82,throttleResponse:.9,lookAhead:.54,engineScale:1.1,passDistance:40,passSide:-1,laneRate:2.2,passCooldown:1.9,lineUse:.97,apex:1,followTime:.24,aggression:1,defend:.85,consistency:.6},
  {name:'Foguete de reta',maxSpeed:56,cornerGrip:7.2,braking:7.5,brakeResponse:.75,throttleResponse:.72,lookAhead:.61,engineScale:1.14,passDistance:46,passSide:1,laneRate:1.4,passCooldown:3.7,lineUse:.9,apex:-1,followTime:.34,aggression:.65,defend:.7,consistency:.75},
 ].map(Object.freeze));
+// The ace (the race option "Koyzinho Indestrutível", race-roster.js): drives the car at its limit instead of a style's
+// comfort zone, the way racing-game AI keeps its best drivers at 98-99% of the real grip. Corner
+// grip and brakes just under what the tyres give; braking on a friction ellipse (trail braking:
+// full brakes in a straight line, easing off as the wheel goes in); the pedal a blink ahead (react).
+// No unforced errors, no off days, and contacts barely move him (heavy: mass factor in contacts).
+// Racecraft follows the overlap rules instead of courtesy braking (see decide()).
+export const ACE_STYLE=Object.freeze({name:'Ás',maxSpeed:57,cornerGrip:11.2,braking:10.4,brakeResponse:1,throttleResponse:1.2,lookAhead:.5,engineScale:1.11,passDistance:52,passSide:-1,laneRate:2.4,passCooldown:1,lineUse:1,apex:1,followTime:.18,aggression:1,defend:.9,consistency:1,ellipse:true,react:.04,heavy:2,ace:true});
 export function styleForDriver(entry){
  const base=DRIVER_STYLES[entry.styleIndex],r=entry.rating;
  // On the racing line these grip levels leave a well-driven player car (about 1:53 at
@@ -47,11 +54,13 @@ export function bodyContact(a,b){
 export function resolveContact(a,b){
  const hit=bodyContact(a,b);if(!hit)return null;
  const {normal:n,point:p}=hit,ra=[p[0]-a.x,p[1]-a.y],rb=[p[0]-b.x,p[1]-b.y];
+ // A car's contactMass (the ace's) scales its mass and inertia in the contact only.
+ const ma=MASS*(a.contactMass??1),mb=MASS*(b.contactMass??1),ia=INERTIA*(a.contactMass??1),ib=INERTIA*(b.contactMass??1);
  const velocity=(c,r)=>[c.vx-c.yaw*r[1],c.vy+c.yaw*r[0]];
  const va=velocity(a,ra),vb=velocity(b,rb),rv=vb.map((v,i)=>v-va[i]),closing=-dot(rv,n);
- const impulse=(j,axis)=>{a.vx-=axis[0]*j/MASS;a.vy-=axis[1]*j/MASS;b.vx+=axis[0]*j/MASS;b.vy+=axis[1]*j/MASS;a.yaw=clamp(a.yaw-cross(ra,axis)*j/INERTIA,-3,3);b.yaw=clamp(b.yaw+cross(rb,axis)*j/INERTIA,-3,3);};
- if(closing>0){const j=1.12*closing/(2/MASS+cross(ra,n)**2/INERTIA+cross(rb,n)**2/INERTIA);impulse(j,n);const tangent=[-n[1],n[0]],friction=clamp(-dot(rv,tangent)/(2/MASS+cross(ra,tangent)**2/INERTIA+cross(rb,tangent)**2/INERTIA),-j*.3,j*.3);impulse(friction,tangent);}
- const correction=(hit.depth+.002)/2;a.x-=n[0]*correction;a.y-=n[1]*correction;b.x+=n[0]*correction;b.y+=n[1]*correction;
+ const impulse=(j,axis)=>{a.vx-=axis[0]*j/ma;a.vy-=axis[1]*j/ma;b.vx+=axis[0]*j/mb;b.vy+=axis[1]*j/mb;a.yaw=clamp(a.yaw-cross(ra,axis)*j/ia,-3,3);b.yaw=clamp(b.yaw+cross(rb,axis)*j/ib,-3,3);};
+ if(closing>0){const j=1.12*closing/(1/ma+1/mb+cross(ra,n)**2/ia+cross(rb,n)**2/ib);impulse(j,n);const tangent=[-n[1],n[0]],friction=clamp(-dot(rv,tangent)/(1/ma+1/mb+cross(ra,tangent)**2/ia+cross(rb,tangent)**2/ib),-j*.3,j*.3);impulse(friction,tangent);}
+ const share=mb/(ma+mb),correction=hit.depth+.002;a.x-=n[0]*correction*share;a.y-=n[1]*correction*share;b.x+=n[0]*correction*(1-share);b.y+=n[1]*correction*(1-share);
  return {...hit,speed:Math.max(0,closing)};
 }
 // --- Racing line: centreline offsets that minimise curvature inside the asphalt (the
@@ -140,21 +149,24 @@ export function pitRoute(data){
 function random(seed){let t=seed>>>0;return ()=>{t=t+0x6D2B79F5>>>0;let r=Math.imul(t^t>>>15,1|t);r=r+Math.imul(r^r>>>7,61|r)^r;return ((r^r>>>14)>>>0)/4294967296;};}
 const trackGap=(from,to,L)=>{let gap=to.surface.s-from.surface.s;if(gap>L/2)gap-=L;if(gap<-L/2)gap+=L;return gap;};
 export class RaceField {
- constructor(data,{onStep,onReset,seed}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
+ // ace: Koyzinho drives as the ace from the next reset (the race option, main.js).
+ constructor(data,{onStep,onReset,seed,ace=false}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.ace=ace;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
  reset(startS=0,{grid=false,seed=this.seed}={}){
   this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;this.hero=null;
   // A fresh seed per start: the same grid never races the same way twice.
   this.raceSeed=seed??Math.floor(Math.random()*4294967296);const rand=this.random=random(this.raceSeed),pick=(lo,hi)=>lo+(hi-lo)*rand();
   this.gridLeadIn=grid?(this.data.meta.reconstructed_xy_m-startS)%this.data.meta.reconstructed_xy_m:0;
   // Qualifying on the day: the grid follows the drivers' level, shuffled by a good or bad session.
-  const slots=[];RIVAL_ROSTER.map((entry,i)=>({i,time:-entry.rating+pick(-.18,.18)})).sort((a,b)=>a.time-b.time).forEach((q,slot)=>slots[q.i]=slot);
+  // The ace starts from the last rival slot, just ahead of the player.
+  const ace=entry=>this.ace&&entry.number===ACE_NUMBER;
+  const slots=[];RIVAL_ROSTER.map((entry,i)=>({i,time:-entry.rating+pick(-.18,.18)+(ace(entry)?1e3:0)})).sort((a,b)=>a.time-b.time).forEach((q,slot)=>slots[q.i]=slot);
   this.rivals=RIVAL_ROSTER.map((entry,i)=>{
-   const slot=slots[i],style=styleForDriver(entry),progress=(Math.ceil(RIVAL_ROSTER.length/2)-Math.floor(slot/2))*GRID_ROW_SPACING+8-(slot%2)*2;
+   const slot=slots[i],style=ace(entry)?ACE_STYLE:styleForDriver(entry),progress=(Math.ceil(RIVAL_ROSTER.length/2)-Math.floor(slot/2))*GRID_ROW_SPACING+8-(slot%2)*2;
    const L=this.data.meta.reconstructed_xy_m,s=((startS+progress)%L+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;
-   const car=new TestCar(this.data);car.reset(index);car.awaitingStart=grid;car.engineScale=style.engineScale;
+   const car=new TestCar(this.data);car.reset(index);car.awaitingStart=grid;car.engineScale=style.engineScale;if(style.heavy)car.contactMass=style.heavy;
    const lane=slot%2?2.2:-2.2;car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);
    const rating=entry.rating;
-   return {car,entry,style,progress,lastS:car.surface.s,finished:false,finishTime:null,stun:0,
+   const rival={car,entry,style,progress,lastS:car.surface.s,finished:false,finishTime:null,stun:0,
     // Personal line: share of the road used, apex timing and a slow wander of a few decimetres.
     lineUse:clamp(style.lineUse*pick(.95,1.04),.8,1),apex:style.apex+Math.round(pick(-1.4,1.4)),
     wander:{amp:pick(.08,.3)*(1.4-rating),rate:pick(.06,.14)*2*Math.PI,phase:pick(0,2*Math.PI)},
@@ -165,6 +177,10 @@ export class RaceField {
     // Race-day form: some days a driver simply has more pace than the standings suggest.
     day:1+pick(-.012,.012),
     lane,blend:1,blendTarget:1,mode:'line',rival:null,passSide:0,modeTime:0,cooldown:pick(1,3),defended:-1,rolled:-1,mistake:null,brakePedal:0,mistakes:0,passes:0,stuck:0,pit:null,yieldSide:0,yieldTime:0};
+   // The ace: the whole line every lap, no off days, a sharp start (the dice are still drawn,
+   // so the other drivers' races stay as they were).
+   if(style.ace)Object.assign(rival,{lineUse:1,apex:style.apex,wander:{...rival.wander,amp:0},rhythm:{...rival.rhythm,amp:0},reaction:grid?.13:0,day:1});
+   return rival;
   });
   this.onReset?.();
  }
@@ -182,7 +198,7 @@ export class RaceField {
   for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
    if(Math.abs((bodies[i].z??bodies[i].surface.z)-(bodies[j].z??bodies[j].surface.z))>1.6)continue;
    const hit=resolveContact(bodies[i],bodies[j]);if(!hit)continue;
-   if(hit.speed>1.6&&this.time-(this.cooldowns.get(`${i}:${j}`)??-10)>.35){this.cooldowns.set(`${i}:${j}`,this.time);this.collisions++;impacts.push({...hit,player:i===0});for(const k of [i,j])if(k>0)this.rivals[k-1].stun=Math.min(1.5,hit.speed*.06);}
+   if(hit.speed>1.6&&this.time-(this.cooldowns.get(`${i}:${j}`)??-10)>.35){this.cooldowns.set(`${i}:${j}`,this.time);this.collisions++;impacts.push({...hit,player:i===0});for(const k of [i,j])if(k>0&&!this.rivals[k-1].style.ace)this.rivals[k-1].stun=Math.min(1.5,hit.speed*.06);}
   }
   for(const c of bodies){c.surface=c.sample(c.x,c.y);c.index=c.surface.i;}
   if(this.onStep)this.rivals.forEach((r,i)=>this.onStep(r,i,commands[i],dt));
@@ -208,9 +224,10 @@ export class RaceField {
   const L=this.data.meta.reconstructed_xy_m,a=this.data.samples,n=a.length,line=this.line,ds=line.ds,t=this.time,rand=r.random??this.random;
    const c=r.car,st=r.style,here=c.surface,i=c.index,d=here.d,speed=Math.hypot(c.vx,c.vy),along=c.vx*here.tx+c.vy*here.ty,fx=Math.cos(c.heading),fy=Math.sin(c.heading);
    const lap=Math.floor(Math.max(0,r.progress-this.gridLeadIn)/L);
-   if(lap!==r.lap){r.lap=lap;r.form=r.day*(1+(rand()-.5)*.03*(1.4-st.consistency));}
+   if(lap!==r.lap){r.lap=lap;r.form=r.day*(1+(rand()-.5)*.03*(1.4-st.consistency));if(st.ace)r.form=1;}
    r.cooldown=Math.max(0,r.cooldown-dt);r.modeTime+=dt;
-   const wander=r.wander.amp*Math.sin(t*r.wander.rate+r.wander.phase),fit=(v,k)=>clamp(v,line.laneLo[k],line.laneHi[k]);
+   // The ace keeps his move lanes 60 cm further off the edges: at the limit a car can overshoot.
+   const wander=r.wander.amp*Math.sin(t*r.wander.rate+r.wander.phase),edge=st.ace?.6:0,fit=(v,k)=>clamp(v,line.laneLo[k]+edge,line.laneHi[k]-edge);
    // Planned offset at sample k: the personal racing line, blended toward a chosen lane.
    const own=k=>clamp(r.lineUse*line.off[(k-r.apex+n)%n]+wander,line.lo[k],line.hi[k]);
    const plan=k=>{const base=own(k);return base+(fit(r.lane,k)-base)*r.blend;};
@@ -220,18 +237,26 @@ export class RaceField {
     if(o===c)continue;const dx=o.x-c.x,dy=o.y-c.y;if(Math.abs(dx)+Math.abs(dy)>150)continue;
     const gap=trackGap(c,o,L),od=o.surface.d,ov=o.vx*o.surface.tx+o.vy*o.surface.ty;
     if(Math.abs(gap)<5.4&&Math.abs(od-d)<4)beside.push({o,gap,od,v:ov});
-    if(gap>4.4&&gap<120&&Math.abs(od-plan(o.surface.i))<2.1&&(!ahead||gap<ahead.gap))ahead={o,gap,od,v:ov};
+    // The ace also reads where a car ahead is heading: one crossing toward his path by the time he
+    // gets there (turning in for its apex) is already in it. The car he is passing is the move's own
+    // business (the pass checks below).
+    let path=Math.abs(od-plan(o.surface.i));
+    if(st.ace&&gap>4.4&&path>=2.1&&!(r.mode==='pass'&&o===r.rival)&&along>ov+.5){const drift=(o.vx*o.surface.lx+o.vy*o.surface.ly)*Math.min(1.2,(gap-4.4)/(along-ov)),p=plan(o.surface.i),lo=Math.min(od,od+drift),hi=Math.max(od,od+drift);path=p<lo?lo-p:p>hi?p-hi:0;}
+    // Until he is out from behind a car (moving over to pass it, say), it is still in his way.
+    if(st.ace&&gap<25)path=Math.min(path,Math.abs(od-d));
+    if(gap>4.4&&gap<120&&path<2.1&&(!ahead||gap<ahead.gap))ahead={o,gap,od,v:ov};
     if(gap<-4.4&&gap>-40&&(!behind||gap>behind.gap))behind={o,gap,od,v:ov};
     // Last-moment braking for a slower body right in front; contacts handle the rest.
     const forward=dx*fx+dy*fy,side=dy*fx-dx*fy,relative=speed-(o.vx*fx+o.vy*fy);
-    if(forward>0&&forward<6+Math.max(0,relative)*.8&&Math.abs(side)<2)emergency=Math.max(emergency,clamp((7+relative-forward)/7,.2,1));
+    // (The ace only for a car he is closing on: one pulling away is no reason to lift.)
+    if(forward>0&&forward<6+Math.max(0,relative)*.8&&Math.abs(side)<2&&!(st.ace&&relative<.5))emergency=Math.max(emergency,clamp((7+relative-forward)/7,.2,1));
    }
    const corner=line.cornerAt[i],bend=line.corners[corner],toCorner=line.cornerDist[i];
    const attack=!!ahead&&ahead.gap<Math.max(12,along*1.1),pressured=!!behind&&behind.gap>-Math.max(8,along*.5);
    if(r.mistake&&r.mistake.corner!==corner)r.mistake=null;
    // Once per braking zone a driver may misjudge it, more so under pressure or on the attack:
    // brakes too late or carries too much speed, and runs wide.
-   if(bend&&corner!==r.rolled&&toCorner<140&&toCorner>40&&speed>22&&!r.finished){
+   if(bend&&corner!==r.rolled&&toCorner<140&&toCorner>40&&speed>22&&!r.finished&&!st.ace){
     r.rolled=corner;const chance=(.006+.03*(1-r.entry.rating))*(pressured?1.7:1)*(attack?1+.6*st.aggression:1);
     if(rand()<chance){
      // Either a hesitant corner (early braking, lost time) or an overcooked one that runs wide.
@@ -241,13 +266,38 @@ export class RaceField {
    // Speed plan: every bend ahead on the planned path caps the speed through the braking curve.
    // On the attack a driver pushes a little; alongside in a move they brake later still.
    const m=r.mistake,rh=r.rhythm,wobble=rh.amp*(.6*Math.sin(t*rh.rates[0]+rh.phases[0])+.4*Math.sin(t*rh.rates[1]+rh.phases[1])),push=(attack?st.aggression:0)+(r.mode==='pass'?1+st.aggression:0);
-   const grip=m?m.grip:st.cornerGrip*r.form*(1+wobble)*(1+.02*push),braking=m?m.brake:st.braking*(1+1.5*wobble)*(1+.05*push);
+   // The ace is already at the limit: a move asks only a little more of him, and a move round the
+   // outside of the corner ahead leaves him a margin instead (the car drifts out as it gets there).
+   const outside=st.ace&&r.mode==='pass'&&!!bend&&r.passSide===-bend.dir,pushGrip=st.ace?(outside?0:.006):.02,pushBrake=st.ace?.025:.05;
+   const grip=m?m.grip:st.cornerGrip*r.form*(1+wobble)*(1+pushGrip*push)*(outside?.97:1),braking=m?m.brake:st.braking*(1+1.5*wobble)*(1+pushBrake*push);
+   // Bend of the planned path at sample k. A parallel lane bends tighter on the inside
+   // (curvature / (1 - curvature * offset)); banking helps.
+   const bendAt=k=>{const cl=line.centre[k],mine=r.lineUse*line.curve[(k-r.apex+n)%n]+(1-r.lineUse)*cl;return mine+(cl/Math.max(.5,1-cl*fit(r.lane,k))-mine)*r.blend;};
    // maxSpeed is a style target, not a limiter: engine, drag and the tow decide the straights.
-   let target=st.maxSpeed*r.form*1.12,bindV=target,bindDist=0;
-   for(let j=0,reach=speed*speed/(2*braking)+30;j*ds<reach&&j<n;j+=2){
-    const k=(i+j)%n,cl=line.centre[k],mine=r.lineUse*line.curve[(k-r.apex+n)%n]+(1-r.lineUse)*cl,lane=fit(r.lane,k);
-    // A parallel lane bends tighter on the inside (curvature / (1 - curvature * offset)); banking helps.
-    const kap=mine+(cl/Math.max(.5,1-cl*lane)-mine)*r.blend,lateral=Math.max(2,grip-G*Math.sign(kap)*a[k][5]);
+   let target=st.maxSpeed*r.form*1.12,bindV=target,bindDist=0,planNeed=0,slow=null;
+   if(st.ellipse){
+    // Friction ellipse, walked back from the far end of the view: each metre of braking shares the
+    // tyres with the cornering there, so the brakes ease off as the wheel goes in (trail braking)
+    // and a straight braking zone gets the full pedal right up to the turn-in. Slopes count, and so
+    // does the path's own length (shorter on the inside of a bend). planNeed is the deceleration
+    // the plan asks for a blink ahead (react), for the pedal; slow is the slowest point in view.
+    const count=Math.min(n-3,Math.ceil((speed*speed/(2*braking)+40)/ds)),lead=Math.min(count-2,Math.round(speed*st.react/ds));let v=Infinity,next=Infinity,slowV=Infinity,slowJ=0;
+    for(let j=count;j>=0;j--){
+     // Where the plan lies further across than the car can move by then (about 0.15 m per metre),
+     // the car is still on a lane nearer its own: that lane's bend counts if it is tighter.
+     const k=(i+j)%n,want=plan(k),room=.3+.15*j*ds,on=clamp(d,line.laneLo[i],line.laneHi[i]),off=clamp(want,on-room,on+room);let kap=bendAt(k);
+     if(Math.abs(off-want)>.4){const cl=line.centre[k],lane=cl/Math.max(.5,1-cl*off);if(Math.abs(lane)>Math.abs(kap))kap=lane;}
+     const lateral=Math.max(2,grip-G*Math.sign(kap)*a[k][5]),length=ds*Math.max(.5,1-line.centre[k]*want),vc=Math.sqrt(lateral/Math.max(Math.abs(kap),1e-4));
+     if(v<Infinity){const use=Math.min(1,v*v*Math.abs(kap)/lateral);v=Math.sqrt(Math.max(0,v*v+2*length*(braking*Math.sqrt(1-use*use)+G*a[k][6])));}
+     v=Math.min(v,vc);if(vc<slowV){slowV=vc;slowJ=j;}
+     if(j===lead+2)next=v;
+     if(j===lead)planNeed=Math.max(0,(v*v-next*next)/(4*ds));
+    }
+    target=Math.min(target,v);
+    const spot=(i+slowJ)%n;slow={v:slowV,dist:slowJ*ds,dir:Math.sign(line.curve[spot])||1,corner:line.cornerAt[spot]};
+   }
+   else for(let j=0,reach=speed*speed/(2*braking)+30;j*ds<reach&&j<n;j+=2){
+    const k=(i+j)%n,kap=bendAt(k),lateral=Math.max(2,grip-G*Math.sign(kap)*a[k][5]);
     const vc=Math.sqrt(lateral/Math.max(Math.abs(kap),1e-4)),dist=Math.max(0,j*ds-speed*.12),limit=Math.sqrt(vc*vc+2*braking*dist);
     if(limit<target){target=limit;bindV=vc;bindDist=dist;}
    }
@@ -256,6 +306,8 @@ export class RaceField {
    const g0=4.9+Math.max(0,along)*st.followTime*(r.mode==='pass'?.4:bend&&toCorner<150?1:.5),closing=ahead?along-ahead.v:0;
    // Held up: close behind a car slower than this driver would go here.
    r.stuck=ahead&&ahead.gap<g0+4&&free>ahead.v+1?(r.stuck??0)+dt:Math.max(0,(r.stuck??0)-2*dt);
+   // For the ace: a real braking zone in view (his plan sheds more than about 10 km/h there).
+   const zone=!!st.ace&&slow.v<speed-3;
    if(r.finished&&totalLaps){
     // Past the flag the driver eases off (about 2.5 m/s²) rather than braking in front of the pack.
     if(r.mode!=='line')Object.assign(r,{mode:'line',rival:null});target=Math.min(target,COOL_PACE+Math.max(0,32-2.5*(t-r.finishTime)));
@@ -278,12 +330,23 @@ export class RaceField {
     // Take a lane with room for a whole car and hold it.
     // A stopped or crawling car is an obstacle: go round it on whichever side is free.
     const obstacle=!!ahead&&ahead.v<6&&ahead.gap<35,near=bend&&toCorner<150&&!obstacle,late=near&&toCorner<40&&!(ahead&&ahead.gap<6);
-    if(r.mode!=='pass'&&ahead&&r.cooldown===0&&!late&&(ahead.gap<g0+6&&(closing>.8||r.stuck>1.3*(1.4-st.aggression))||ahead.gap<st.passDistance&&closing>4||obstacle)){
-     let low=-Infinity,high=Infinity;for(let j=0;j<44;j+=4){const q=(i+j)%n;low=Math.max(low,line.laneLo[q]);high=Math.min(high,line.laneHi[q]);}
-     const pref=near?bend.dir:Math.abs(ahead.od)>.8?-Math.sign(ahead.od):st.passSide;
-     for(const side of near?[pref]:[pref,-pref]){
-      const lane=clamp(ahead.od+side*2.8,low,high);if(Math.abs(lane-ahead.od)<2.3)continue;
-      if(bodies.some(o=>{if(o===c||o===ahead.o)return false;const gap=trackGap(c,o,L);return gap>(obstacle?0:-8)&&gap<ahead.gap+20&&Math.abs(o.surface.d-lane)<2.2;}))continue;
+    // The ace reads his moves off his own plan instead of the corner map (in the infield one bend
+    // runs into the next, and "near a corner" never ends). Into a braking zone he dives for the
+    // inside while he can still get alongside before the turn-in: at the closing speed plus what
+    // braking later gains (about 3 m/s), before the last 15 m to the slow point. With no braking
+    // close ahead, either side out of the tow. Only the car he is passing and those just beyond
+    // it can close the lane.
+    const inTime=!zone||!ahead||ahead.gap-2<(Math.max(0,closing)+3)*(slow.dist-15)/Math.max(along,1);
+    if(r.mode!=='pass'&&r.mode!=='room'&&ahead&&r.cooldown===0&&(st.ace?inTime:!late)&&(ahead.gap<g0+6&&(closing>(st.ace?.3:.8)||r.stuck>1.3*(1.4-st.aggression))||ahead.gap<st.passDistance&&closing>(st.ace?3:4)||obstacle)){
+     const view=st.ace?clamp(Math.round(Math.min(slow.dist,90)/ds),8,44):44;
+     let low=-Infinity,high=Infinity;for(let j=0;j<view;j+=4){const q=(i+j)%n;low=Math.max(low,line.laneLo[q]);high=Math.min(high,line.laneHi[q]);}
+     // Near a bend only the inside will do. For the ace that is a braking zone, or a corner within
+     // 80 m; round the outside of a fast one (no braking) only from where he already is, never
+     // across the road mid-corner.
+     const heavy=zone&&slow.dist<90,inside=st.ace?(obstacle?0:heavy?slow.dir:bend&&toCorner<80?bend.dir:0):near?bend.dir:0,pref=inside||(Math.abs(ahead.od)>.8?-Math.sign(ahead.od):st.passSide);
+     for(const side of inside&&!(st.ace&&!heavy)?[pref]:[pref,-pref]){
+      const lane=clamp(ahead.od+side*2.8,low,high);if(Math.abs(lane-ahead.od)<2.3||st.ace&&inside&&side!==inside&&Math.abs(lane-d)>3)continue;
+      if(bodies.some(o=>{if(o===c||o===ahead.o)return false;const gap=trackGap(c,o,L);return gap>(obstacle?0:-8)&&gap<ahead.gap+(st.ace?8:20)&&Math.abs(o.surface.d-lane)<2.2;}))continue;
       Object.assign(r,{mode:'pass',rival:ahead.o,passSide:side,lane,blendTarget:1,modeTime:0});break;
      }
      if(r.mode!=='pass')r.cooldown=.5;
@@ -295,27 +358,48 @@ export class RaceField {
      const done=gap<-5.5,shut=gap>4.2&&Math.abs(r.lane-o.surface.d)<2.1,fading=gap>10&&along<ov-1.5,lost=gap>st.passDistance+15||r.modeTime>12;
      if(done||shut||fading||lost){if(done)r.passes++;Object.assign(r,{mode:'line',rival:null,blendTarget:0,cooldown:done?1:st.passCooldown,stuck:0});}
     }
+    // Leaving room (the ace, below): keep a car's width outside the attacker until one of them is clear.
+    if(r.mode==='room'){const o=r.roomFor,gap=trackGap(c,o,L);r.lane=o.surface.d-r.passSide*(CAR_GAP+.4);if(Math.abs(gap)>6||r.modeTime>5)Object.assign(r,{mode:'line',roomFor:null,blendTarget:0});}
     // Defence: with a car close behind before a braking zone, cover the inside, once per corner.
-    if(r.mode==='line'&&behind&&bend&&toCorner>30&&toCorner<150&&corner!==r.defended&&behind.gap>-15&&behind.v>along-2){
-     r.defended=corner;if(rand()<st.defend)Object.assign(r,{mode:'defend',lane:.6*(bend.dir>0?line.laneHi[i]:line.laneLo[i]),blendTarget:.35+.5*st.defend,modeTime:0});
+    // The ace covers only a real braking zone, from a car close and quick enough to try, half-way.
+    if(st.ace){
+     if(r.mode==='line'&&behind&&zone&&slow.dist>30&&slow.dist<150&&slow.corner!==r.defended&&behind.gap>-9&&behind.v>along-.5){
+      r.defended=slow.corner;if(rand()<st.defend)Object.assign(r,{mode:'defend',lane:.6*(slow.dir>0?line.laneHi[i]:line.laneLo[i]),blendTarget:.5,modeTime:0});
+     }
+     if(r.mode==='defend'&&(!zone||slow.dist<10||slow.corner!==r.defended||r.modeTime>6))Object.assign(r,{mode:'line',blendTarget:0});
     }
-    if(r.mode==='defend'&&(corner!==r.defended||toCorner<8||r.modeTime>6))Object.assign(r,{mode:'line',blendTarget:0});
+    else{
+     if(r.mode==='line'&&behind&&bend&&toCorner>30&&toCorner<150&&corner!==r.defended&&behind.gap>-15&&behind.v>along-2){
+      r.defended=corner;if(rand()<st.defend)Object.assign(r,{mode:'defend',lane:.6*(bend.dir>0?line.laneHi[i]:line.laneLo[i]),blendTarget:.35+.5*st.defend,modeTime:0});
+     }
+     if(r.mode==='defend'&&(corner!==r.defended||toCorner<8||r.modeTime>6))Object.assign(r,{mode:'line',blendTarget:0});
+    }
    }
    const spread=Math.max(1.2,Math.abs(fit(r.lane,i)-own(i))),rate=st.laneRate*(r.mode==='pass'?1.6:1)/spread;
    r.blend+=clamp(r.blendTarget-r.blend,-rate*dt,rate*dt);
    // A car we cannot pass yet: close up no faster than we could brake to its speed, then sit at
    // the driver's own following distance, in the tow.
    if(ahead)target=Math.min(target,ahead.v+Math.sqrt(2*.6*braking*Math.max(0,ahead.gap-g0))-Math.max(0,g0-ahead.gap));
+   // The ace watches the brake lights too: behind a car in his path that is really braking (more
+   // than lifting off or cornering takes) he keeps the distance to stop a metre off its bumper, taking
+   // it to brake hard (a car on the brakes soon brakes hard).
+   const seen=st.ace&&ahead?-(ahead.o.longAccel??0):0,hard=Math.max(seen,8);
+   if(st.ace&&ahead&&seen>4)target=Math.min(target,Math.sqrt(2*.9*braking*(Math.max(0,ahead.gap-5.8)+ahead.v*ahead.v/(2*hard))));
    // Steering: pure pursuit of the planned path, never into a car alongside.
    const look=7+speed*st.lookAhead*.6,k=(i+Math.round(look/ds))%n,low=line.laneLo[k]-.3,high=line.laneHi[k]+.3;let aim=plan(k);
    for(const b of beside){
     const side=Math.sign(b.od-d)||1,limit=b.od-side*CAR_GAP;if(side>0?aim>limit:aim<limit)aim=limit;
     // Squeezed against the edge by a car that is ahead: back out of it (the car behind yields).
-    if(aim<low||aim>high){aim=clamp(aim,low,high);if(b.gap>.5&&speed>4)target=Math.min(target,Math.max(b.v-1.5,b.v*.9));}
+    // (The ace backs out only for a car at least half a length ahead.)
+    if(aim<low||aim>high){aim=clamp(aim,low,high);if(b.gap>(st.ace?2:.5)&&speed>4)target=Math.min(target,Math.max(b.v-1.5,b.v*.9));}
     // Racing etiquette: a car alongside on the inside of the corner, with its nose level or
     // ahead of our middle, has the corner. The player earns the same room as an attacking rival.
     const attacker=b.o===player||driverOf.get(b.o)?.rival===c;
-    if(attacker&&bend&&toCorner<60&&side===bend.dir&&b.gap>-2.5&&speed>8)target=Math.min(target,b.v-.8);
+    if(!st.ace&&attacker&&bend&&toCorner<60&&side===bend.dir&&b.gap>-2.5&&speed>8)target=Math.min(target,b.v-.8);
+    // The ace gives room, not the corner: an attacker who has earned the inside (front axle up to
+    // his mirror, about a metre behind his centre) gets a car's width, and the ace races on round
+    // the outside at the speed that lane allows, instead of braking below the attacker's pace.
+    if(st.ace&&attacker&&zone&&slow.dist<70&&side===slow.dir&&b.gap>-1&&r.mode!=='room'&&speed>8)Object.assign(r,{mode:'room',rival:null,roomFor:b.o,passSide:side,lane:b.od-side*(CAR_GAP+.4),blendTarget:1,modeTime:0});
    }
    // Rejoin a distant line at a shallow angle (about 7 degrees), never with a swerve.
    const reach=1+.12*look;aim=clamp(aim,d-reach,d+reach);
@@ -323,10 +407,14 @@ export class RaceField {
    // After a spin the path can lie behind: turn round on full lock, slowly.
    const turn=away?Math.sign(alpha):clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(dx,dy))/steerLimit(speed),-1,1);
    if(away)target=Math.min(target,6);
+   // Off the asphalt the ace eases off until the tyres are back on it.
+   if(st.ace&&!here.onRoad&&!here.pit)target=Math.min(target,Math.max(12,speed-1));
    // Pedals: proportional to the speed error, plus the deceleration the braking curve asks for.
    const slide=along>3?Math.abs(Math.atan2(-c.vx*fy+c.vy*fx-1.117*c.yaw,c.vx*fx+c.vy*fy)):0,need=bindDist>1&&speed>bindV?(speed*speed-bindV*bindV)/(2*bindDist):0;
    let throttle=clamp((target-speed)*st.throttleResponse,0,1)*clamp(1-(slide-.06)*8,0,1);
-   const brake=clamp((speed-target)*st.brakeResponse+(target===free&&need>2&&speed>target-1?(need-1.5)/BRAKE_FULL:0),0,1);
+   // The ace's pedal gives the plan's deceleration less what drag, rolling and the engine already take.
+   const feed=st.ellipse?(target===free&&planNeed>1&&speed>target-1?(planNeed-.6-.00043*speed*speed)/BRAKE_FULL:0):target===free&&need>2&&speed>target-1?(need-1.5)/BRAKE_FULL:0;
+   const brake=clamp((speed-target)*st.brakeResponse+feed,0,1);
    // A released pedal is exactly zero: at rest any brake holds the car (physics hold).
    r.brakePedal+=(brake-r.brakePedal)*(1-Math.exp(-dt*(5+st.brakeResponse*10)));if(r.brakePedal<.005)r.brakePedal=0;
    const input={left:Math.max(0,turn),right:Math.max(0,-turn),throttle,brake:r.brakePedal,reverse:0,handbrake:0};
