@@ -74,7 +74,7 @@ export class ImmersiveMode {
   const marker=this.visual.deskMarker?.marker.visible?this.visual.deskMarker:null;
   const leo=this.visual.leo,hit=ray.intersectObjects([...this.visual.fans.flatMap(f=>[f.person,f.label,...(f.dollar.visible?[f.dollar]:[])]),...(marker?[marker.marker,marker.sign]:[]),...(leo?[leo.person,leo.label]:[])],true)[0];if(!hit)return;
   // Leonardo: the pilot walks up to him, and he asks (again) once there.
-  if(leo&&(hit.object===leo.label||hit.object===leo.person||hit.object.parent===leo.person)){this.state.fan=null;this.state.feedback='';this.walkToFan=this.walkToDesk=null;if(this.visual.nearLeo(2.4))this.action('leo');else this.walkToLeo=true;this.ui();return;}
+  if(leo&&(hit.object===leo.label||hit.object===leo.person||hit.object.parent===leo.person)){this.state.fan=null;this.state.feedback='';this.walkToFan=this.walkToDesk=null;if(this.visual.nearLeo(2.4))this.action('leo');else this.walkToLeo=this.visual.leoRoute();this.ui();return;}
   // The registration circle or its sign: he walks there by the steps.
   if(marker&&(hit.object===marker.sign||hit.object.parent===marker.marker)){this.state.fan=null;this.state.feedback='';this.walkToFan=null;this.walkToDesk=this.visual.deskRoute();this.state.touch();this.ui();return;}
   const index=this.visual.fans.findIndex(f=>{let obj=hit.object;while(obj){if(obj===f.person||obj===f.label||obj===f.dollar)return true;obj=obj.parent;}return false;});if(index<0)return;
@@ -330,7 +330,7 @@ export class ImmersiveMode {
    // A click on a supporter (or the registration circle) walks the pilot there (any key
    // takes over); while talking he stands.
    const free=s.fan===null&&!s.desk&&!s.leo,steering=input.throttle||input.brake||input.left||input.right;let walking=free?input:still;
-   if(free&&this.walkToLeo){if(steering)this.walkToLeo=false;else{const hero=this.visual.hero.position,target=this.visual.leo.pos;walking=this.visual.toward(Math.atan2(-(target.z-hero.z),target.x-hero.x),touchScreen());}}
+   if(free&&this.walkToLeo){if(steering)this.walkToLeo=false;else{const hero=this.visual.hero.position,route=this.walkToLeo;while(route.length>1&&Math.hypot(route[0].x-hero.x,route[0].z-hero.z)<.6)route.shift();const target=route[0];walking=this.visual.toward(Math.atan2(-(target.z-hero.z),target.x-hero.x),touchScreen());}}
    if(free&&this.walkToFan!==null&&this.walkToFan!==undefined){
     if(steering)this.walkToFan=null;
     else{const hero=this.visual.hero.position,target=this.visual.fans[this.walkToFan].pos,dx=target.x-hero.x,dz=target.z-hero.z;if(Math.hypot(dx,dz)<2.4){s.talk(this.walkToFan);this.walkToFan=null;walking=still;}else walking=this.visual.toward(Math.atan2(-dz,dx),touchScreen());}

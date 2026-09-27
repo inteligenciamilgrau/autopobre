@@ -302,7 +302,8 @@ const cameraHead=()=>merge([piece(block(.62,.3,.26),0x1b1d20,[0,.12,0]),piece(tu
 // People who stay at their spot, idling. One skinned mesh per neighbourhood (a draw
 // call each, culled together; every vertex on a single bone like person()), updated
 // by updatePeople. Entries: {outfit, pose, x, y, z, yaw, idle?, hands?, props?, watch?,
-// camera?} in the parent's frame; idle is a KINDS name (default seated or stand);
+// camera?, name?} in the parent's frame; name labels the person's spot bone (found with
+// getObjectByName; scaled to ~0 it hides the person); idle is a KINDS name (default seated or stand);
 // camera {x, y, z, back, drop} puts a TV camera head on a panning tripod top there, the
 // operator `back` metres behind it and `drop` below.
 const LIVE=new Set(),CENTRE=new THREE.Vector3(),EYE=new THREE.Vector3(),AT=new THREE.Vector3(),CARS=[],POOL=[];
@@ -314,7 +315,7 @@ class Crowd{
    g.setAttribute('skinIndex',new THREE.Uint16BufferAttribute(index,4));g.setAttribute('skinWeight',new THREE.Float32BufferAttribute(weight,4));geometries.push(g);};
   for(const e of entries){
    const o={...BASE,...e.outfit},{bones:own,parts,rig,head}=skeletonFor(o),kind=e.idle??(['sit','stool'].includes(e.pose)?'seated':'stand');
-   const spot=bone('Lugar',null,e.x,e.y,e.z);spot.rotation.y=e.yaw;roots.push(spot);let feet=spot,camera=null;
+   const spot=bone(e.name??'Lugar',null,e.x,e.y,e.z);spot.rotation.y=e.yaw;roots.push(spot);let feet=spot,camera=null;
    if(e.camera){const c=e.camera;spot.position.set(c.x,c.y,c.z);camera={spot,tilt:bone('Camera_tv',spot),pan:0,speed:0,step:0,busy:0,back:c.back};feet=bone('Operador',spot,-c.back,-c.drop,0);}
    feet.add(rig.hips);for(const b of own){slot.set(b,bones.length);bones.push(b);}
    const carried=e.props??KIND_PROPS[kind]??[],props={};for(const name of carried)props[name]=bone('Objeto_'+name,rig.limbs[1].hand);
@@ -480,7 +481,7 @@ export function hitPeople(car){
   if(!crowd.attached||!shown(crowd.mesh))continue;
   CENTRE.copy(crowd.centre).applyMatrix4(crowd.mesh.matrixWorld);if(Math.hypot(CENTRE.x-car.x,-CENTRE.z-car.y)>crowd.radius+4)continue;
   for(const f of crowd.folk){
-   if(f.tumble||f.camera)continue;AT.copy(f.spot.position).applyMatrix4(crowd.mesh.matrixWorld);
+   if(f.tumble||f.camera||f.spot.scale.x<.01)continue;AT.copy(f.spot.position).applyMatrix4(crowd.mesh.matrixWorld);
    const side=inside(AT.x,-AT.z,AT.y);if(!side)continue;
    crowd.launch(f,throwFrom(car,side),where);hits++;
   }

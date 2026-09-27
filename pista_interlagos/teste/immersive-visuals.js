@@ -77,12 +77,16 @@ export class ImmersiveVisuals {
    }
    const own=this.ownCar(rivalTemplate);own.position.copy(L.point(0,pit.box99.front+6.5,.05));own.rotation.y=L.heading-Math.PI/2;this.crowd.add(own);this.ownSpot={x:0,d:pit.box99.front+6.5};this.own=own;this.ownOpenings=new CarOpenings().attach(own);
   }
-  // Leonardo Martins, of the #19 (gold and black), with his coffee by the door of the Tia's café:
-  // he offers the pilot one when he walks up (ImmersiveMode; state.offerCoffee). The pilot's own
-  // cup, in his right hand, shows once he has taken it.
-  {const entry=RIVAL_ROSTER.find(r=>r.number==='19'),front=pit?.box99?pit.box99.front:L.spotD+2.5,pos=L.point(-7.2,front-1.1);
+  // Leonardo Martins, of the #19 (gold and black), with his coffee at the door of his team's garage
+  // (the roller door painted 19), where one of his crew stands in the race: the crewman steps
+  // out of the paddock while he is there (leoDoor, pit-building.js). He offers the pilot a coffee
+  // when he walks up (ImmersiveMode; state.offerCoffee). The pilot's own cup, in his right hand,
+  // shows once he has taken it. Without that door (no pit block) he waits by the Tia's café.
+  {const entry=RIVAL_ROSTER.find(r=>r.number==='19'),door=scene.getObjectByName('Porta_equipe_19');let pos,yaw;
+   if(door){door.updateWorldMatrix(true,false);pos=door.getWorldPosition(new THREE.Vector3()).sub(this.crowd.position);const f=new THREE.Vector3(1,0,0).applyQuaternion(door.getWorldQuaternion(new THREE.Quaternion()));yaw=Math.atan2(-f.z,f.x);this.leoDoor=door;}
+   else{const front=pit?.box99?pit.box99.front:L.spotD+2.5;pos=L.point(-7.2,front-1.1);yaw=Math.atan2(-(this.heroStart.z-pos.z),this.heroStart.x-pos.x);}
    const person=this.people.person({top:entry.color,bottom:0x1b1d20,trim:entry.stripe,hat:'cap',hatColor:entry.stripe,skin:0xc68e6a});person.name='Leonardo_Martins_19';
-   const yaw=Math.atan2(-(this.heroStart.z-pos.z),this.heroStart.x-pos.x);person.position.copy(pos);person.rotation.y=yaw;setPose(person,POSES.stand);this.crowd.add(person);
+   person.position.copy(pos);person.rotation.y=yaw;setPose(person,POSES.stand);this.crowd.add(person);
    const cup=this.people.carry('cup',person.userData.rig.limbs[1].hand);
    this.leo={pos,person,cup,yaw,label:this.tag(this.crowd,'Leonardo Martins · #19',[pos.x,pos.y+2.1,pos.z],2.6,.3),idler:new Idler(person,'counter',{props:{cup},seed:.57})};}
   this.heroCup=this.people.carry('cup',this.hero.userData.rig.limbs[1].hand);
@@ -346,6 +350,15 @@ export class ImmersiveVisuals {
  crouch(){this.foot.crouch=!this.foot.crouch;}
  // Close enough to Leonardo for him to come over (and for the action key).
  nearLeo(radius=2.6){return !!this.leo&&!this.inCar&&this.hero.position.distanceTo(this.leo.pos)<radius;}
+ // The way to him on foot (a tap on him): the cars parked nose in at the garages fill the working
+ // lane, so the pilot steps out toward the pit wall, passes behind their tails and comes up to his
+ // door (lane coordinates; blocked() keeps 2.7 m round a parked car's centre across the lane).
+ leoRoute(){
+  if(!this.leo)return null;const L=this.lane,to=this.leo.pos,h=L.lane(this.hero.position),goal=L.lane(to);
+  const clear=Math.max(L.bounds.d0+.6,Math.min(L.spotD,...this.parked.map(p=>p.d-2.7))-.8),step=Math.sign(goal.x-h.x);
+  const at=(x,d)=>{const v=L.point(x,d);v.y=this.hero.position.y;return v;};
+  return Math.abs(goal.x-h.x)<2?[to.clone()]:[at(h.x+step,clear),at(goal.x,clear),to.clone()];
+ }
  nearestFan(){let best=-1,d=2.5;this.fans.forEach((f,i)=>{const distance=this.hero.position.distanceTo(f.pos);if(distance<d){best=i;d=distance;}});this.nearSocial=best;return best;}
  showDonation(index){const f=this.fans[index];if(f){f.cheerUntil=this.time+2.3;f.dollar.visible=false;f.reaction.visible=true;}}
  drawCracks(value){
@@ -361,7 +374,7 @@ export class ImmersiveVisuals {
   ctx.clearRect(0,0,1024,120);this.crackTexture.needsUpdate=true;
  }
  // focus: the car the cameras watch (main.js, recon lap), else the player's: name tags show round it.
- updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);const focus=this.focus??this.carRoot.position;this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-focus.x,c.y+focus.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(rivals[i].input?.brake??0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
+ updateFree(rivals,dt){this.time+=dt;this.leoDoor?.scale.setScalar(1);this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);const focus=this.focus??this.carRoot.position;this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-focus.x,c.y+focus.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(rivals[i].input?.brake??0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
  update(state,car,dt,rivals,projectile,towOrigin){
   this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;this.ownOpenings?.update(dt);
   const staged=['crowd','podium'].includes(state.phase);this.stage.visible=state.phase==='podium';this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged||!!this.inCar;if(this.own)this.own.visible=!this.inCar;if(this.inCar)this.hero.visible=false;
@@ -376,7 +389,7 @@ export class ImmersiveVisuals {
   if(this.leo){const l=this.leo,h=this.hero.position,target=!this.inCar&&h.distanceTo(l.pos)<6?Math.atan2(-(h.z-l.pos.z),h.x-l.pos.x):l.yaw;
    l.person.rotation.y+=Math.atan2(Math.sin(target-l.person.rotation.y),Math.cos(target-l.person.rotation.y))*Math.min(1,dt*4);
    if(this.crowd.visible)l.idler.update(dt,'stand',{calm:!!state.leo});l.cup.visible=true;}
-  this.heroCup.visible=!!state.coffee;
+  this.heroCup.visible=!!state.coffee;this.leoDoor?.scale.setScalar(state.phase==='crowd'?1e-4:1);
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);
   this.tankTethers.visible=state.tankDetached;const ta=this.tankTethers.geometry.attributes.position;for(let i=0;i<2;i++){ta.setXYZ(i*2,-1.6,.24,(i-.5)*.6);ta.setXYZ(i*2+1,this.tank.position.x+.24,this.tank.position.y,(i-.5)*.6);}ta.needsUpdate=true;
   this.drawCracks(state.glass);this.crackedGlass.visible=state.glass>0;

@@ -53,7 +53,7 @@ export function createPitBuildings({pit,c,lerp,at,root,obstacles,textures,labels
    box(parts.frames,p,front-.06,0,bay-2.1,.26,.2,4.6);for(const side of [-1,1])box(parts.frames,p,front-.06,side*(bay-2.25)/2,.15,.26,4.6,0);
    const team=teams.has(b)?RIVAL_ROSTER[teams.get(b)]:null;signs.push({p,front,label:String(b+1).padStart(2,'0'),color:team?.color??0x5d666b});
    // The rival crews wait at their doors, some with a stack of tyres.
-   if(team){const side=b%2?1:-1,w=at(p,front-.7);crowd.push({outfit:{top:team.color,bottom:0x2d3338,trim:0xf4f1ea,hands:0x1b1d20,hat:'cap',hatColor:team.color,skin:skins[b%5],mustache:b%4===1},pose:['folded','stand','ready'][b%3],x:w.x+p[c.tx]*side*3,y:w.y+.05,z:w.z-p[c.ty]*side*3,yaw:hd-Math.PI/2+(b%3-1)*.4});
+   if(team){const side=b%2?1:-1,w=at(p,front-.7);crowd.push({name:'Porta_equipe_'+team.number,outfit:{top:team.color,bottom:0x2d3338,trim:0xf4f1ea,hands:0x1b1d20,hat:'cap',hatColor:team.color,skin:skins[b%5],mustache:b%4===1},pose:['folded','stand','ready'][b%3],x:w.x+p[c.tx]*side*3,y:w.y+.05,z:w.z-p[c.ty]*side*3,yaw:hd-Math.PI/2+(b%3-1)*.4});
     if(b%2===0){const t=at(p,front-.62);tyres.push([t.x-p[c.tx]*side*3.6,t.y+.035,t.z+p[c.ty]*side*3.6,hd,3+b%3]);}}
   }
   // Kerb between the lane's edge and the doors.
