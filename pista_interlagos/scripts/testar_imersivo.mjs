@@ -8,6 +8,11 @@ const s=fresh();check('optional_off_by_default',!new ImmersiveState().active);
 s.talk(0);s.joke(1);check('no_laugh_no_money',s.cash===0);s.joke(0);const cash=s.cash;s.joke(0);check('laugh_donates_once',cash>0&&s.cash===cash);
 const desk=fresh();check('desk_opens_without_money',desk.openDesk()&&desk.desk&&desk.cash===0);desk.talk(0);check('desk_keeps_supporters_waiting',desk.fan===null);check('poor_kitty_stays_in_paddock',!desk.buy(2,false)&&desk.phase==='crowd'&&desk.desk);
 check('desk_closes_back_to_supporters',desk.closeDesk()&&!desk.desk&&desk.phase==='crowd');fund(desk);desk.openDesk();check('fuel_chosen_at_desk_goes_to_start',desk.buy(6,true)&&desk.phase==='starting'&&!desk.desk&&desk.fuel===6&&desk.film);
+// Leonardo Martins (#19) offers a coffee in the paddock: one conversation at a time, one answer.
+const leo=fresh();check('leo_offers_coffee',leo.offerCoffee()&&leo.leo==='ask'&&!leo.coffee);leo.talk(0);check('leo_keeps_other_talks_waiting',leo.fan===null&&!leo.openDesk()&&!leo.desk);
+check('leo_coffee_accepted_once',leo.answerCoffee(true)&&leo.leo==='yes'&&leo.coffee&&!leo.answerCoffee(false));check('leo_asked_again_just_chats',leo.closeCoffee()&&leo.leo===null&&leo.offerCoffee()&&leo.leo==='chat');
+const busy=fresh();busy.talk(1);check('leo_waits_for_supporter_talk',!busy.offerCoffee()&&busy.leo===null);
+const refused=fresh();refused.offerCoffee();check('leo_coffee_declined',refused.answerCoffee(false)&&refused.leo==='no'&&!refused.coffee&&refused.closeCoffee());
 fund(s);check('crowd_can_fund_entry_and_full_tank',s.cash>=208&&s.openDesk());check('fuel_and_protection_purchase',s.buy(12,true)&&s.fuel===12&&s.film);
 s.starter=true;for(let i=0;i<120;i++)s.startEngine({throttle:s.pressure<.45?1:0},1/120);check('no_ign_turns_but_never_fires',s.phase==='starting'&&s.crank>0);s.starter=false;s.startEngine({},1/120);
 check('ign_switch_flips',s.switchIgnition()&&s.ignOn);s.starter=true;for(let i=0;i<240&&s.phase==='starting';i++)s.startEngine({throttle:s.pressure<.45?1:0},1/120);check('controlled_start_works',s.phase==='grid');

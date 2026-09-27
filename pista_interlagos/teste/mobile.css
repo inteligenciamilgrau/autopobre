@@ -32,3 +32,16 @@ html,body{width:100%;height:100%;overflow:hidden}#view{position:fixed;inset:0;wi
 html:has(body.touch-device),.touch-device,.touch-device *{touch-action:pan-x pan-y}.touch-device input[type=range]{touch-action:none}
 /* Narrow phones: the recon badge floats just above the toolbar so the toolbar stays clear of the steering and the RÉ button. */
 @media(max-width:740px) and (orientation:landscape){.touch-toolbar .tour-badge{position:absolute;left:50%;bottom:calc(100% + 6px);transform:translateX(-50%)}}
+
+/* Phones (players' request): no track name at the top; the map, the speedometer and the steering pad climb to where the left thumb rests. The map takes the top corner, the speedometer sits under it and the pad under that, at about two thirds of the screen height (never over the speedometer on short screens). */
+.touch-device header{display:none}
+.touch-device #mapcard{top:max(10px,env(safe-area-inset-top));left:max(12px,env(safe-area-inset-left))}
+.touch-device #telemetry{top:calc(max(10px,env(safe-area-inset-top)) + 110px);bottom:auto;left:max(12px,env(safe-area-inset-left))}
+.touch-device .touch-steering{bottom:max(28px,min(26vh,calc(100vh - 268px)));bottom:max(28px,env(safe-area-inset-bottom),min(26dvh,calc(100dvh - 268px)))}
+.touch-device #status{top:12px}
+.touch-device #immersiveHud,.touch-device.immersive-mode.cockpit-mode #immersiveHud{top:max(10px,env(safe-area-inset-top));left:128px;bottom:auto}
+
+/* Leonardo's coffee on phones: both answers fit without scrolling (no prompt line or subtitles). */
+.touch-device #immersivePanel.leo-dialogue .social-prompt,.touch-device #immersivePanel.leo-dialogue .social-choices small{display:none}
+.touch-device #immersivePanel.leo-dialogue .speech-bubble{padding:9px 12px}
+.touch-device #immersivePanel.leo-dialogue .social-choices button{margin:5px 0}

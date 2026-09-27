@@ -16,12 +16,14 @@ import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v=20260923-capotagem';
 import {GRID_SIZE,RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
-import {createCockpit} from './cockpit.js?v=20260923-interior-fotos';
+import {createCockpit} from './cockpit.js?v=20260927-omp-retrovisores';
 import {CarOpenings} from './car-openings.js';
+import {SideMirrors} from './side-mirrors.js';
+import {createBrakeLights} from './brake-lights.js';
 import {CameraReturn,LookBack,turnHead,neckTwist,HEAD_YAW_COCKPIT,HEAD_YAW_HOOD} from './camera-return.js';
 import {createDriver} from './driver.js?v=20260923-controls';
 import {SkidMarks} from './skid-marks.js?v=20260923-capotagem';
-import {TyreSmoke} from './tyre-smoke.js?v=20260923-capotagem';
+import {TyreSmoke} from './tyre-smoke.js?v=20260927-visibilidade';
 import {ImmersiveMode} from './immersive-mode.js';
 import {MobileControls} from './mobile-controls.js';
 import {setupSettings} from './settings.js';
@@ -144,7 +146,9 @@ function cabinVisibility(){
 }
 const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
 function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
-let cockpit,skidMarks,tyreSmoke;
+let cockpit,skidMarks,tyreSmoke,sideMirrors;
+// The Opala 99's brake lights (brake-lights.js), on the sprung body with the model.
+const brakeLamps=createBrakeLights();carBody.add(brakeLamps);
 // The two TVs in Box 99's garage and the team stand's monitors show this track's records (the mode
 // being played, and the other mode's best laps on the stand); they are
 // checked every 1.5 s and redrawn only when the lists change (a new record, the other mode).
@@ -161,7 +165,9 @@ function initializeRenderer(){
  sky=createSky(renderer,scene,{mobile:touchDevice});
  // Film look: linear HDR scene, then occlusion, haze, bloom, lens and grade (cinematic.js).
  cinematic=createCinematic(renderer,{mobile:touchDevice,level:cinematicLevel()});cinematic.setSun(SUN_DIRECTION);
- cockpit=createCockpit(renderer);carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(384,64);
+ cockpit=createCockpit(renderer);carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(510,85);
+ // The door mirrors show the same picture of the road behind (side-mirrors.js).
+ sideMirrors=new SideMirrors(cockpit.mirrorTarget.texture);
  skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
 }
@@ -240,7 +246,7 @@ async function setLivery(value){
  model.updateMatrixWorld(true);const structuralParts=[];
  model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
  for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
- carBody.add(model,carStructure);cabinVisibility();activeLivery=value;status('');
+ carBody.add(model,carStructure);sideMirrors.attach(model,carBody,cockpit.eye);cabinVisibility();activeLivery=value;status('');
  preferences.update({livery:value});if(ready)carAudio.effect('paint');
  }finally{
   if(token===loadToken){
@@ -268,7 +274,7 @@ function drawMap(){
  const ctx=$('map').getContext('2d'),w=260,h=300;ctx.clearRect(0,0,w,h);
  const xy=p=>projectMap(p[1],p[2]);
  ctx.beginPath();data.samples.forEach((p,i)=>{const [x,y]=xy(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.lineWidth=8;ctx.strokeStyle='#ffffff16';ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle='#b6c5b5';ctx.stroke();
- if(immersive&&(!immersive.active||['starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle='#'+r.entry.color.toString(16).padStart(6,'0');ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
+ if(immersive&&(!immersive.active||['starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle='#'+r.entry.mark.toString(16).padStart(6,'0');ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
  if(pitstop){ctx.beginPath();let started=false;const nodes=data.samples.filter(p=>pitLane(data,p[0])).sort((a,b)=>pitLane(data,a[0]).u-pitLane(data,b[0]).u);for(const p of nodes){const d=pitLane(data,p[0]).offset,[x,y]=projectMap(p[1]-p[8]*d,p[2]+p[7]*d);if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y);}ctx.strokeStyle='#55e0db';ctx.lineWidth=2;ctx.stroke();const [px,py]=projectMap(pitstop.anchor.x,-pitstop.anchor.z);ctx.fillStyle='#114e43';ctx.fillRect(px-9,py-21,18,16);ctx.fillStyle='#fff5a1';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillText('P',px,py-9);}
  if(data.pit){const c=data.pit.columns,x=c.indexOf('x'),y=c.indexOf('y');ctx.beginPath();data.pit.samples.forEach((p,i)=>{const [px,py]=projectMap(p[x],p[y]);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.lineWidth=1.5;ctx.strokeStyle=car.surface.pit?'#55e0db':'#7fa7a0';ctx.stroke();}
  const [sx,sy]=xy(data.samples[0]);ctx.fillStyle='#ffffff';ctx.fillRect(sx-3,sy-3,6,6);
@@ -568,24 +574,26 @@ function adaptResolution(rawDt){
  if(Math.abs(next-current)>.001){renderer.setPixelRatio(next);renderer.setSize(innerWidth,innerHeight,false);}
 }
 function updateCountdown(){const count=immersive?.active?(immersive.state.phase==='grid'?Math.max(1,Math.ceil(immersive.state.countdown)):0):Math.ceil(immersive?.freeCountdown||0),go=immersive?.goTime>0;const visible=sessionStarted&&!paused&&(count>0||go);$('raceCountdown').hidden=!visible;if(visible){const label=count>0?String(count):'VAI!';if($('countdownNumber').textContent!==label){$('countdownNumber').textContent=label;$('countdownCaption').textContent=count>0?'PREPARE-SE':'BOA CORRIDA!';}}}
-// Crossing the line: the lap just run, the best lap and the position, for a few seconds.
-let lapSeen=0,lapShown=0;
+// Crossing the line: one line at the top of the screen with the lap just run and how far it is
+// from the best lap before it (minus: faster, green; plus: slower, red), for a few seconds. The
+// lap count and the position stay in the timing panel; the road ahead stays in sight.
+let lapSeen=0,lapShown=0,bestBefore=null;
 function lapBanner(dt){
  const banner=$('lapBanner');
  if(car.lapStart!==lapSeen){
   const crossed=car.lapStart>lapSeen&&car.lastLap!==null&&car.lastLapValid!==null;lapSeen=car.lapStart;
   if(crossed){
-   const total=immersive?.active?immersive.storyLaps:immersive?.freeTotalLaps??3,valid=car.lastLapValid,record=valid&&car.laps>1&&car.best===car.lastLap;
-   const position=immersive?.active?immersive.state.result?.position??immersive.state.position:immersive?.freePosition;
-   $('lapBannerTitle').textContent=valid?`VOLTA ${Math.min(car.laps,total)} DE ${total}`:'VOLTA NÃO CONTOU';
+   const valid=car.lastLapValid,delta=valid&&bestBefore!==null?car.lastLap-bestBefore:null;
    $('lapBannerTime').textContent=fmt(car.lastLap);
-   $('lapBannerNote').textContent=!valid?(car.lastInvalidReason==='pit'?'EXCESSO DE VELOCIDADE NOS BOXES':'TRECHO CORTADO'):record?'NOVA MELHOR VOLTA!':car.lastLap>car.best?`+${(car.lastLap-car.best).toFixed(3).replace('.',',')} s da melhor`:'';
-   $('lapBannerBest').textContent=fmt(car.best);$('lapBannerPosition').textContent=position?`${position}º de ${GRID_SIZE}`:'—';
-   banner.classList.toggle('record',record);banner.classList.toggle('invalid',!valid);
+   $('lapBannerDelta').textContent=delta===null?'':`${delta<0?'−':'+'}${Math.abs(delta).toFixed(3).replace('.',',')}`;
+   $('lapBannerNote').textContent=valid?'':car.lastInvalidReason==='pit'?'Não contou · velocidade nos boxes':'Não contou · trecho cortado';
+   banner.classList.toggle('faster',delta!==null&&delta<0);banner.classList.toggle('slower',delta!==null&&delta>=0);banner.classList.toggle('invalid',!valid);
    // Restart the entrance animation even when two crossings come close together.
    banner.hidden=true;void banner.offsetWidth;banner.hidden=false;lapShown=5;
   }
  }
+ // The best lap as it stood before this frame's crossing, if any.
+ bestBefore=car.best;
  if(lapShown>0){lapShown-=dt;if(lapShown<=0)banner.hidden=true;}
 }
 function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
@@ -599,11 +607,12 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
- tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
+ tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[1.2,5.5]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  // The same command drives the engine sound and the driver's hands and feet.
  const driveCommand=pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input();
  const rivalSound=heard!==car?immersive.rivalSound(heard):null;
+ brakeLamps.userData.set(model?.visible&&!driveCommand.engineOff?driveCommand.brake:0);
  carAudio.update(heard,rivalSound?.command??driveCommand,rivalSound?.skid??skid,paused,mode);
  carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
@@ -641,8 +650,10 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
   renderer.setRenderTarget(cockpit.mirrorTarget);renderer.render(scene,cockpit.rearCamera);renderer.setRenderTarget(null);
   tyreSmoke.material.uniforms.viewport.value=renderer.domElement.height;
   mirrorFrame=renderedFrame;
+  // The door mirrors look up this picture in the main pass below.
+  sideMirrors.show(true);sideMirrors.update(camera.position,carBody,cockpit.rearCamera);
   renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;if(model)model.visible=bodyShown;
- }
+ }else sideMirrors.show(false);
  // Long lenses (broadcast camera, opening shots) get depth of field focused on their subject.
  const subject=watchedCar?.car??car,dof=intro.active?intro.dof:mode==='tv'?{focus:camera.position.distanceTo(watchedCar?.obj.position??carRoot.position),amount:.35}:null;
  cinematic.render(scene,camera,{dt:paused?0:dt,speed:Math.hypot(subject.vx,subject.vy),mode,hazeBase:hazeBase(),dof});
@@ -838,7 +849,7 @@ async function loadCircuit(){
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
   // Interior cameras ride on the sprung body, so report them in its frame.
   cockpitInfo:()=>({...cockpit.info(),eyeLocal:carBody.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
-   renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray()}),
+   renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray(),sideMirrors:sideMirrors.info()}),
   viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs,
    lookBack:{held:lookBack.held,allowed:lookBackAllowed(),amount:lookBack.amount,side:lookBack.side,viewYaw:headView.yaw,viewPitch:headView.pitch,eyeShift:[...twist]},photo:cockpitView&&structuredClone(cockpitView)}),
   // Interior photography: a fixed cockpit-local pose {eye:[x,y,z],yaw,pitch,fov,hideDriver,roll?} replaces the

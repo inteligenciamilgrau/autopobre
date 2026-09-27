@@ -32,15 +32,21 @@ export class ImmersiveState {
  touch(){this.revision++;}
  start(){
   this.sounds=[];this.emitSound('crowdWelcome');
-  Object.assign(this,{active:true,phase:'crowd',cash:0,donors:[],fan:null,desk:false,feedback:'',fuel:0,tankDetached:false,tankWear:0,health:1,glass:0,film:false,
+  Object.assign(this,{active:true,phase:'crowd',cash:0,donors:[],fan:null,desk:false,leo:null,coffee:false,feedback:'',fuel:0,tankDetached:false,tankWear:0,health:1,glass:0,film:false,
    pressure:0,crank:0,flood:0,battery:1,ignitionGood:0,starter:false,ignOn:false,raceTime:0,position:GRID_SIZE,result:null,reason:'',towSnags:0,inspection:0,judging:false,inspected:false,paid:false,prize:0,savedCash:0,podiumPlace:null,disqualifiedTime:0,alert:'',alertTime:0});this.touch();
  }
  disable(){this.sounds=[];this.active=false;this.phase='off';this.touch();}
- talk(index){if(this.phase!=='crowd'||this.desk||!FANS[index])return;this.emitSound('talk');this.fan=index;this.feedback='';this.touch();}
+ talk(index){if(this.phase!=='crowd'||this.desk||this.leo||!FANS[index])return;this.emitSound('talk');this.fan=index;this.feedback='';this.touch();}
  // The registration is made with the team at the computers of its stand on the pit wall:
  // they show the kitty against the costs, and the pilot goes back for more or to the track.
- openDesk(){if(this.phase!=='crowd'||this.desk)return false;this.emitSound('talk');this.desk=true;this.fan=null;this.feedback='';this.touch();return true;}
+ openDesk(){if(this.phase!=='crowd'||this.desk||this.leo)return false;this.emitSound('talk');this.desk=true;this.fan=null;this.feedback='';this.touch();return true;}
  closeDesk(){if(!this.desk)return false;this.desk=false;this.touch();return true;}
+ // Leonardo Martins, of the #19, comes over in the paddock and offers a coffee (the Tia's, next
+ // door). leo: 'ask' (the question), 'yes' or 'no' (his answer to the pilot's), 'chat' (asked
+ // again after one); coffee: the pilot has his cup.
+ offerCoffee(){if(this.phase!=='crowd'||this.desk||this.fan!==null||this.leo)return false;this.emitSound('talk');this.leo=this.coffee?'chat':'ask';this.touch();return true;}
+ answerCoffee(yes){if(this.leo!=='ask')return false;this.leo=yes?'yes':'no';if(yes){this.coffee=true;this.emitSound('pitCoffee');}else this.emitSound('talk');this.touch();return true;}
+ closeCoffee(){if(!this.leo)return false;this.leo=null;this.touch();return true;}
  joke(index){
   if(this.phase!=='crowd'||this.fan===null||!JOKES[index])return false;
   const fan=FANS[this.fan],laughed=fan.taste===JOKES[index].topic;
@@ -124,7 +130,7 @@ export class ImmersiveState {
  }
  releaseBlazer(){if(this.phase==='complete'&&!this.profile.released&&this.profile.fund>=BLAZER_COST){this.emitSound('blazer');this.profile.fund-=BLAZER_COST;this.profile.released=true;this.touch();return true;}return false;}
  info(){return {active:this.active,phase:this.phase,cash:this.cash,desk:!!this.desk,fuel:this.fuel,health:this.health,glass:this.glass,tankDetached:this.tankDetached,pressure:this.pressure,ignOn:!!this.ignOn,flood:this.flood,battery:this.battery,
-  position:this.position,result:this.result,reason:this.reason,towGap:this.towGap,towSnags:this.towSnags,inspected:this.inspected,podiumPlace:this.podiumPlace,prize:this.prize,savedCash:this.savedCash,profile:{...this.profile}};}
+  leo:this.leo,coffee:!!this.coffee,position:this.position,result:this.result,reason:this.reason,towGap:this.towGap,towSnags:this.towSnags,inspected:this.inspected,podiumPlace:this.podiumPlace,prize:this.prize,savedCash:this.savedCash,profile:{...this.profile}};}
 }
 
 // Flat tow strap with a fixed five-metre length; slack bows sideways on the ground.

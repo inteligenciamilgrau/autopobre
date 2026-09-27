@@ -188,7 +188,7 @@ export function createCockpit(renderer){
  const bankRig=new THREE.Group();bankRig.name='Painel_botoes_suporte';root.add(bankRig);
  buildSwitchBank({...kit,root:bankRig},[.285,1.275,-.40],.30,new THREE.Vector3(.29,1.345,-.40));
  const display=buildSpeedDisplay(kit,[.54,.9325,-.09],-.2);
- // --- Sparco suede wheel (carro_24, 32): black anodised dished spokes, six-bolt hub
+ // --- Suede wheel (carro_24, 32): black anodised dished spokes, six-bolt hub
  // with an open centre, yellow centring stripe and the radio button strapped on.
  const wheel=panel([.22,.88,-.34],root,-.38);wheel.name='Volante_animado';wheel.rotation.z=.035;
  const wheelTurn=new THREE.Group();wheel.add(wheelTurn);
@@ -223,8 +223,9 @@ export function createCockpit(renderer){
  // Universal joint and the shaft on to the firewall.
  mesh(new THREE.SphereGeometry(.024,14,10),new THREE.MeshStandardMaterial({color:0x6b4a33,metalness:.5,roughness:.8}),[.625,.717,-.34]);
  bar([.63,.715,-.34],[.78,.68,-.345],.012,steel);
+ // The spoke carries OMP, the team's sponsor (the wheel in the photos is a Sparco).
  const logo=new THREE.Group();logo.position.set(.10,0,.0032-DISH*.062/.13);logo.rotation.y=-Math.atan(DISH/.13);spokes[0].add(logo);
- mesh(new THREE.PlaneGeometry(.085,.021),new THREE.MeshStandardMaterial({map:logoTexture('sparco',{color:'#f6e21c',underline:true,font:'italic 900 104px "Arial Rounded MT Bold",Arial,sans-serif'}),transparent:true,alphaTest:.1,roughness:.5,polygonOffset:true,polygonOffsetFactor:-2}),[0,0,0],logo).castShadow=false;
+ mesh(new THREE.PlaneGeometry(.085,.021),new THREE.MeshStandardMaterial({map:logoTexture('OMP',{color:'#f4f3ee',font:'italic 900 112px "Arial Black",Arial,sans-serif'}),transparent:true,alphaTest:.1,roughness:.5,polygonOffset:true,polygonOffsetFactor:-2}),[0,0,0],logo).castShadow=false;
  // Radio push-to-talk strapped to the left spoke at the rim.
  const ptt=new THREE.Group();ptt.position.set(.146,-.022,.012);spokes[1].add(ptt);
  mesh(cushion(.04,.03,.018,.008,.006),m.shell,[0,0,0],ptt);
@@ -290,7 +291,7 @@ export function createCockpit(renderer){
  buildWindscreenNumber(kit);
  buildRearCabin(kit);
  // Functional rear-view mirror: the texture is filled by the game renderer.
- const mirrorTarget=new THREE.WebGLRenderTarget(768,128);
+ const mirrorTarget=new THREE.WebGLRenderTarget(1020,170);
  const mirror=panel([.34,1.33,.035]);box([0,0,0],[.58,.107,.023],m.plastic,mirror);
  const mirrorGeo=new THREE.PlaneGeometry(.555,.092);const uv=mirrorGeo.attributes.uv;for(let i=0;i<uv.count;i++)uv.setX(i,1-uv.getX(i));
  mesh(mirrorGeo,new THREE.MeshBasicMaterial({map:mirrorTarget.texture,toneMapped:false}),[0,0,.014],mirror);
@@ -367,6 +368,6 @@ export function createCockpit(renderer){
  }
  // drop: how far setView lowered the cabin; the driver (driver.js) and photo poses follow it.
  return {root,wheel,wheelTurn,controls,eye,update,setView,drop:()=>root.position.y,mirrorTarget,rearCamera,resetPhone:()=>phone.reset(),
-  info:()=>({reference:INTERIOR_REFERENCES,steering:wheelTurn.rotation.z,speed:display.speed,mirror:[768,128],visible:root.visible,phone:phone.info(),controls:controls.info(),
+  info:()=>({reference:INTERIOR_REFERENCES,steering:wheelTurn.rotation.z,speed:display.speed,mirror:[mirrorTarget.width,mirrorTarget.height],visible:root.visible,phone:phone.info(),controls:controls.info(),
    materials:reflective.size,cabinReflections:!!m.envMap,seat:seat.children.length,view:{classic:classic.visible,cabin:cabin.visible,fillers:fillers.visible,drop:root.position.y,eye:eye.toArray(),mirrorY:mirror.position.y}})};
 }

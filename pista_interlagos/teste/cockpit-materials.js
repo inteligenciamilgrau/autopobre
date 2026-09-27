@@ -147,7 +147,7 @@ export function createInteriorMaterials(renderer){
   bitumen:new THREE.MeshPhysicalMaterial({color:0x0c0c0d,roughness:.3,clearcoat:.9,clearcoatRoughness:.2,normalMap:bumps,normalScale:new THREE.Vector2(.6,.6),envMapIntensity:inside}),
   // Sgarbi seat centres and back: open air mesh.
   airMesh:new THREE.MeshStandardMaterial({map:mesh,bumpMap:mesh,bumpScale:1.5,roughness:.96,envMapIntensity:.15}),
-  // Black anodised Sparco spokes and hub plate.
+  // Black anodised spokes and hub plate.
   anodized:new THREE.MeshStandardMaterial({color:0x17181a,metalness:.7,roughness:.3,envMapIntensity:1}),
   polished:new THREE.MeshStandardMaterial({color:0xe4e6e8,metalness:1,roughness:.16,envMapIntensity:1.3}),
   perforated:new THREE.MeshStandardMaterial({...brushed,color:0xc9ccce,metalness:.85,roughness:.5,alphaMap:holes,alphaTest:.5,side:THREE.DoubleSide,envMapIntensity:.9}),
@@ -266,12 +266,12 @@ export function switchPanelTexture(){
   luizaoLogo(ctx,px(.004),py(.019),112);
  });
 }
-// Lettering on a transparent (or plain) card: Sparco spoke, Sgarbi seat and belts.
+// Lettering on a transparent (or plain) card: OMP on the wheel spoke, Sgarbi seat and belts.
 export function logoTexture(text,{width=512,height=128,color='#f2c81b',font='italic 900 96px Arial,sans-serif',background=null,underline=false}={}){
  return canvasTexture(width,height,(ctx,w,h)=>{
   if(background){ctx.fillStyle=background;ctx.fillRect(0,0,w,h);}else ctx.clearRect(0,0,w,h);
   ctx.fillStyle=color;ctx.font=font;ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(text,w/2,h/2+(underline?-8:4));
-  // Sparco's swoosh under the name.
+  // A swoosh under the name (underline).
   if(underline){ctx.beginPath();ctx.moveTo(w*.12,h*.86);ctx.quadraticCurveTo(w*.5,h*.74,w*.9,h*.8);ctx.lineTo(w*.9,h*.86);ctx.quadraticCurveTo(w*.5,h*.8,w*.12,h*.93);ctx.closePath();ctx.fill();}
  });
 }

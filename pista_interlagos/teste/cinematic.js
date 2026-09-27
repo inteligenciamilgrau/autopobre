@@ -23,7 +23,8 @@ export const LOOK={
  aoRadius:1.2,aoIntensity:2.2,aoBias:.2,aoFade:[70,160],
  // Aerial perspective: metres of clear air, density of the haze and how fast it thins with height.
  hazeDensity:.00032,hazeFalloff:.012,hazeStart:40,hazeColor:[.62,.69,.76],hazeSun:[1.0,.8,.58],
- flare:.9,streak:.45,
+ // Sun through the lens: players lost the road to it, so the glow and streak stay modest.
+ flare:.6,streak:.28,
  // 0 picture, 1 occlusion only (for tuning).
  debug:0
 };

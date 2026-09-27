@@ -19,6 +19,8 @@ with sync_playwright() as p:
   page.tap('#settingsButton');check('settings_fit_landscape',page.evaluate("()=>{const r=document.querySelector('#settings').getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight&&r.right<=innerWidth}"));shot('config')
   page.tap('#settingsBack');enter_track(page,tap=True);wait_js(page,"!document.querySelector('#touchControls').classList.contains('hidden')")
   check('touch_detected_and_resolution_capped',page.evaluate('interlagos.mobileInfo().enabled&&interlagos.mobileInfo().pixelRatio<=1'))
+  # Players' request: no track name on top; map, speedometer and steering pad climb toward the left thumb.
+  check('phone_hud_raised',page.evaluate("()=>{const r=s=>document.querySelector(s).getBoundingClientRect(),map=r('#mapcard'),speed=r('#telemetry'),steer=r('#touchSteering');return getComputedStyle(document.querySelector('header')).display==='none'&&map.top<20&&speed.top>=map.bottom&&steer.top>=speed.bottom&&innerHeight-steer.bottom>innerHeight*.2}"))
   session=context.new_cdp_session(page);points=[dict(center('#touchPedals'),y=page.locator('#touchPedals').bounding_box()['y']+18,id=1),dict(center('#touchSteering'),x=page.locator('#touchSteering').bounding_box()['x']+23,id=2)]
   session.send('Input.dispatchTouchEvent',{'type':'touchStart','touchPoints':points});wait_js(page,"interlagos.mobileInfo().throttle>.9&&interlagos.mobileInfo().steering<-.5")
   wait_js(page,'Math.hypot(interlagos.car.vx,interlagos.car.vy)>1');check('simultaneous_gas_and_steering',True);shot('corrida')

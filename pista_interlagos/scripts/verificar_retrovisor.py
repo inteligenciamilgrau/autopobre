@@ -25,6 +25,11 @@ with sync_playwright() as p:
   # The free race starts behind the car; switch to the interior on track.
   open_menu(page);enter_track(page);page.click('#cockpitButton')
   frames=sample();check('every_cockpit_frame_has_fresh_reflection',synced(frames))
+  # Door mirrors (side-mirrors.js): both glasses drawn in the cockpit, from the driver's eye looking ahead.
+  doors=page.evaluate('interlagos.cockpitInfo().sideMirrors');snap=page.evaluate('interlagos.cameraSnapshot()')
+  def in_view(c):
+   d=[c[i]-snap['position'][i] for i in range(3)];n=math.hypot(*d);f=snap['direction'];return sum(d[i]*f[i] for i in range(3))/n>math.cos(math.radians(55))
+  check('door_mirrors_live_in_cockpit',doors['count']==2 and doors['live'] and all(doors['visible']) and sorted(doors['sides'])==[-1,1] and all(in_view(c) for c in doors['centers']))
   wait_race_start(page);page.evaluate('()=>{interlagos.reposition(600);const c=interlagos.car;c.vx=Math.cos(c.heading)*15;c.vy=Math.sin(c.heading)*15;}')
   page.keyboard.down('KeyA');frames=sample(12);page.keyboard.up('KeyA')
   check('moving_and_turning_stays_synchronized',synced(frames) and frames[-1]['clock']>frames[0]['clock'])
@@ -34,10 +39,12 @@ with sync_playwright() as p:
   check('paused_reposition_refreshes_immediately',synced(frames) and frames[0]['clock']==frames[-1]['clock'])
   race_options(page,camera='chase');frames=sample(4)
   check('external_view_skips_mirror_render',len(set(f['mirror'] for f in frames))==1 and frames[-1]['frame']>frames[0]['frame'])
+  doors=page.evaluate('interlagos.cockpitInfo().sideMirrors');check('door_mirrors_hidden_outside',not doors['live'] and not any(doors['visible']))
   race_options(page,camera='cockpit');frames=sample(3)
   check('return_to_cockpit_has_no_stale_frame',synced(frames))
   race_options(page,livery='seiva_danilo');frames=sample(3)
   check('second_livery_synchronized',synced(frames))
+  doors=page.evaluate('interlagos.cockpitInfo().sideMirrors');check('door_mirrors_follow_livery',doors['count']==2 and doors['live'] and all(doors['visible']))
   check('no_browser_or_shader_errors',not report['errors']);report['passed']=True
  finally:
   report.setdefault('passed',False);(ROOT/'dados/validacao_retrovisor.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2),flush=True);browser.close()

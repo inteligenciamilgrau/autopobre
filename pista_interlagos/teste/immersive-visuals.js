@@ -7,6 +7,7 @@ import {curveloPitFrame,serviceSpot,garageBays,pitPoint} from './pit-lane.js';
 import {footState,stepOnFoot,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
 import {shutOpenings,CarOpenings,carSpot,SPOT_OPENING} from './car-openings.js';
 import {createRivalDriver,CABIN_DROP} from './rival-driver.js';
+import {createBrakeLights} from './brake-lights.js';
 import {podiumBanner,podiumPlate,podiumRibbon,signBoard} from './pit-textures.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
@@ -65,17 +66,26 @@ export class ImmersiveVisuals {
   // The pilot, out of the car in his cap; limbs listed left leg, left arm, right leg, right arm.
   this.hero=this.people.person(OUTFITS.driver);this.crowd.add(this.hero);const rig=this.hero.userData.rig.limbs;this.hero.userData.limbs=[rig[-1].leg,rig[-1].arm,rig[1].leg,rig[1].arm];
   this.heroStart=L.point(-1.5,L.spotD);this.heroYaw=L.heading;this.hero.position.copy(this.heroStart);this.hero.rotation.y=this.heroYaw;this.foot=footState(this.heroYaw,{floor:this.crowd.position.y+this.heroStart.y});
-  this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{driven:true});group.userData.entry=entry;this.root.add(group);return group;});
+  this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{driven:true,stripe:entry.stripe,finish:entry.finish});group.userData.entry=entry;this.root.add(group);return group;});
   this.parked=[];
   if(pit){
    // The four teams nearest Box 99 park nose in at their garage doors.
    const {bay,team}=garageBays(pit,RIVAL_ROSTER.length);
    for(const [b,k] of [...team.entries()].sort((m,n)=>m[1]-n[1]).slice(0,4)){
-    const sv=pit.garages[0]+(b+.5)*bay,x=sv-pit.box99.s,d=pitPoint(pit,sv).hi+.35-2.75,entry=RIVAL_ROSTER[k],parked=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName);
+    const sv=pit.garages[0]+(b+.5)*bay,x=sv-pit.box99.s,d=pitPoint(pit,sv).hi+.35-2.75,entry=RIVAL_ROSTER[k],parked=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{stripe:entry.stripe,finish:entry.finish});
     parked.position.copy(L.point(x,d));parked.rotation.y=L.heading+Math.PI/2;this.crowd.add(parked);this.parked.push({x,d});
    }
    const own=this.ownCar(rivalTemplate);own.position.copy(L.point(0,pit.box99.front+6.5,.05));own.rotation.y=L.heading-Math.PI/2;this.crowd.add(own);this.ownSpot={x:0,d:pit.box99.front+6.5};this.own=own;this.ownOpenings=new CarOpenings().attach(own);
   }
+  // Leonardo Martins, of the #19 (gold and black), with his coffee by the door of the Tia's café:
+  // he offers the pilot one when he walks up (ImmersiveMode; state.offerCoffee). The pilot's own
+  // cup, in his right hand, shows once he has taken it.
+  {const entry=RIVAL_ROSTER.find(r=>r.number==='19'),front=pit?.box99?pit.box99.front:L.spotD+2.5,pos=L.point(-7.2,front-1.1);
+   const person=this.people.person({top:entry.color,bottom:0x1b1d20,trim:entry.stripe,hat:'cap',hatColor:entry.stripe,skin:0xc68e6a});person.name='Leonardo_Martins_19';
+   const yaw=Math.atan2(-(this.heroStart.z-pos.z),this.heroStart.x-pos.x);person.position.copy(pos);person.rotation.y=yaw;setPose(person,POSES.stand);this.crowd.add(person);
+   const cup=this.people.carry('cup',person.userData.rig.limbs[1].hand);
+   this.leo={pos,person,cup,yaw,label:this.tag(this.crowd,'Leonardo Martins · #19',[pos.x,pos.y+2.1,pos.z],2.6,.3),idler:new Idler(person,'counter',{props:{cup},seed:.57})};}
+  this.heroCup=this.people.carry('cup',this.hero.userData.rig.limbs[1].hand);
   this.banner(this.crowd,'PADDOCK · VAQUINHA ANTES DA LARGADA',L.point(12,L.bounds.d1-.1,6.3),L.heading,9,.55,'#f5d279','#1a292b');
   this.truck=this.truckModel();this.root.add(this.truck);
   const strapGeometry=new THREE.BufferGeometry();strapGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(25*2*3),3));const indices=[];for(let i=0;i<24;i++)indices.push(i*2,i*2+1,i*2+2,i*2+1,i*2+3,i*2+2);strapGeometry.setIndex(indices);
@@ -230,8 +240,9 @@ export class ImmersiveVisuals {
   const far=cam?obj.position.distanceTo(cam.position)*Math.tan(cam.fov*Math.PI/360)/Math.tan(29*Math.PI/180)>40:obj.position.distanceToSquared(this.carRoot.position)>40*40;
   u.far.visible=far;u.detail.visible=!far;}
  // driven: a rival out on track, with its driver (rival-driver.js) in the team's suit and helmet;
- // the cars parked at the garages before the race stand empty.
- rivalCar(template,color,number,name='',{driven=false}={}){
+ // the cars parked at the garages before the race stand empty. color paints the body, stripe the
+ // side stripe (race-roster.js), finish overrides the paint's metalness/roughness (gold).
+ rivalCar(template,color,number,name='',{driven=false,stripe=0xe4e4d5,finish=null}={}){
   if(!template)return this.car(color,number);
   const root=template.clone(true),materials=new Map(),pivots=[];
   const structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
@@ -243,7 +254,7 @@ export class ImmersiveVisuals {
     o.castShadow=mats.some(m=>!m.transparent||m.opacity>=.95);o.receiveShadow=true;
     // No sponsor, name or number of the 99 on the other cars: their own number replaces it.
     if(mats.some(m=>LIVERY_99.test(m.name))){o.visible=false;return;}
-    const recolor=m=>{if(!['Pintura_preta','Faixa_amarela'].includes(m.name))return m;if(!materials.has(m)){const c=m.clone();c.color.setHex(m.name==='Pintura_preta'?color:0xe4e4d5);materials.set(m,c);}return materials.get(m);};
+    const recolor=m=>{if(!['Pintura_preta','Faixa_amarela'].includes(m.name))return m;if(!materials.has(m)){const c=m.clone(),body=m.name==='Pintura_preta';c.color.setHex(body?color:stripe);if(body&&finish)Object.assign(c,finish);materials.set(m,c);}return materials.get(m);};
     o.material=Array.isArray(o.material)?mats.map(recolor):recolor(o.material);
    }
    if(!o.isMesh&&o.name.startsWith('Roda_')&&o.name.includes('PIVO'))pivots.push({obj:o,base:o.quaternion.clone()});
@@ -257,6 +268,8 @@ export class ImmersiveVisuals {
   const detail=new THREE.Group();detail.name='Rival_detalhe';while(root.children.length)detail.add(root.children[0]);root.add(detail);
   if(driven){const driver=createRivalDriver({color,number});detail.add(driver.root);root.userData.driver=driver;}
   const far=this.farProxy(color);root.add(far);root.userData.detail=detail;root.userData.far=far;
+  // Brake lights on both levels of detail, lit while its driver brakes (userData.brake).
+  const lamps=[createBrakeLights(),createBrakeLights({far:true})];detail.add(lamps[0]);far.add(lamps[1]);root.userData.brake=v=>{for(const l of lamps)l.userData.set(v);};
   const label=name?this.tag(root,name,[0,2.08,0],2.7,.30,'#fff','#172a2ddb'):null;
   // The rival's own number where the Opala 99 carries its 99 (those stickers are
   // hidden): big on both rear quarters and on the roof, small on the tail. White
@@ -300,7 +313,7 @@ export class ImmersiveVisuals {
  blocked(pos,from=pos){
   const local=pos.clone().sub(this.crowd.position),back=from.clone().sub(this.crowd.position),q=this.lane.lane(local);
   if([...this.parked,...(this.ownSpot?[this.ownSpot]:[])].some(p=>Math.abs(q.x-p.x)<1.3&&Math.abs(q.d-p.d)<2.7))return true;
-  return this.fans.some(f=>{const a=Math.hypot(local.x-f.pos.x,local.z-f.pos.z);return a<.55&&a<Math.hypot(back.x-f.pos.x,back.z-f.pos.z);});
+  return [...this.fans.map(f=>f.pos),...(this.leo?[this.leo.pos]:[])].some(p=>{const a=Math.hypot(local.x-p.x,local.z-p.z);return a<.55&&a<Math.hypot(back.x-p.x,back.z-p.z);});
  }
  // Input that walks toward a world heading: sideways to the camera on a desktop; on
  // touch screens the view turns toward it first, as the steering pad does.
@@ -331,6 +344,8 @@ export class ImmersiveVisuals {
  zoomView(k){zoomFootView(this.foot,k);}
  jump(){return footJump(this.foot);}
  crouch(){this.foot.crouch=!this.foot.crouch;}
+ // Close enough to Leonardo for him to come over (and for the action key).
+ nearLeo(radius=2.6){return !!this.leo&&!this.inCar&&this.hero.position.distanceTo(this.leo.pos)<radius;}
  nearestFan(){let best=-1,d=2.5;this.fans.forEach((f,i)=>{const distance=this.hero.position.distanceTo(f.pos);if(distance<d){best=i;d=distance;}});this.nearSocial=best;return best;}
  showDonation(index){const f=this.fans[index];if(f){f.cheerUntil=this.time+2.3;f.dollar.visible=false;f.reaction.visible=true;}}
  drawCracks(value){
@@ -346,17 +361,22 @@ export class ImmersiveVisuals {
   ctx.clearRect(0,0,1024,120);this.crackTexture.needsUpdate=true;
  }
  // focus: the car the cameras watch (main.js, recon lap), else the player's: name tags show round it.
- updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);const focus=this.focus??this.carRoot.position;this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-focus.x,c.y+focus.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
+ updateFree(rivals,dt){this.time+=dt;this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);const focus=this.focus??this.carRoot.position;this.rivals.forEach((obj,i)=>{const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-focus.x,c.y+focus.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(rivals[i].input?.brake??0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
  update(state,car,dt,rivals,projectile,towOrigin){
   this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;this.ownOpenings?.update(dt);
   const staged=['crowd','podium'].includes(state.phase);this.stage.visible=state.phase==='podium';this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged||!!this.inCar;if(this.own)this.own.visible=!this.inCar;if(this.inCar)this.hero.visible=false;
-  this.rivals.forEach((obj,i)=>{obj.visible=['starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
+  this.rivals.forEach((obj,i)=>{obj.visible=['starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(state.phase==='race'?rivals[i].input?.brake??0:0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
   // The sign (seen through walls) fades out as the camera comes within a few metres of it.
   if(this.deskMarker){const m=this.deskMarker,show=state.phase==='crowd'&&!this.inCar&&!state.desk,pulse=.5+.5*Math.sin(this.time*3.2);m.marker.visible=m.sign.visible=show;
    if(show){m.beam.material.opacity=.36+.24*pulse;m.ring.material.opacity=.7+.3*pulse;m.arrow.position.y=2.2+.1*Math.sin(this.time*2.4);m.arrow.rotation.y=this.time*1.6;
     const far=this.viewCamera?this.viewCamera.position.distanceTo(m.sign.getWorldPosition(this.signPosition??=new THREE.Vector3())):99;m.sign.material.opacity=THREE.MathUtils.clamp((far-5)/4,0,1);m.sign.visible=far>5;}}
   const selected=state.fan??this.nearSocial;this.socialMarker.visible=state.phase==='crowd'&&Number.isInteger(selected)&&!!this.fans[selected];if(this.socialMarker.visible){this.socialMarker.position.copy(this.fans[selected].pos).add(new THREE.Vector3(.4,2.85,0));this.socialMarker.rotation.y=this.time*1.5;}
   this.fans.forEach((f,i)=>{const laughing=this.time<f.cheerUntil||state.fan===i&&state.feedback.includes('risada'),pose=laughing?'cheer':f.idle;if(this.crowd.visible)f.idler.update(dt,pose,{calm:laughing||state.fan===i});f.person.rotation.z=laughing?Math.sin(this.time*9)*.08:0;f.dollar.visible=!state.donors.includes(i);f.reaction.visible=this.time<f.cheerUntil;f.reaction.position.y=3.15+Math.max(0,2.3-(f.cheerUntil-this.time))*.15;f.label.material.color.setHex(state.donors.includes(i)?0xc4eb93:0xffffff);});
+  // Leonardo turns to the pilot as he comes near and keeps his cup; the pilot shows the one he took.
+  if(this.leo){const l=this.leo,h=this.hero.position,target=!this.inCar&&h.distanceTo(l.pos)<6?Math.atan2(-(h.z-l.pos.z),h.x-l.pos.x):l.yaw;
+   l.person.rotation.y+=Math.atan2(Math.sin(target-l.person.rotation.y),Math.cos(target-l.person.rotation.y))*Math.min(1,dt*4);
+   if(this.crowd.visible)l.idler.update(dt,'stand',{calm:!!state.leo});l.cup.visible=true;}
+  this.heroCup.visible=!!state.coffee;
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);
   this.tankTethers.visible=state.tankDetached;const ta=this.tankTethers.geometry.attributes.position;for(let i=0;i<2;i++){ta.setXYZ(i*2,-1.6,.24,(i-.5)*.6);ta.setXYZ(i*2+1,this.tank.position.x+.24,this.tank.position.y,(i-.5)*.6);}ta.needsUpdate=true;
   this.drawCracks(state.glass);this.crackedGlass.visible=state.glass>0;
