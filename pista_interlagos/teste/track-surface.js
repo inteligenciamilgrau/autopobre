@@ -47,16 +47,18 @@ export async function createTrackBranding(data){
  return {root,oldStock,stats:{billboards:16,oldStock:8,autoPobre:8}};
 }
 
-// Painted kerb: 1.2 m yellow/green blocks, worn paint, rubber on the track side
-// and shallow rumble ridges. DataTextures keep this usable in Node tests.
-let curbMaps=null;
-function curbTextures(){
- if(curbMaps)return curbMaps;
+// Painted kerb: 1.2 m blocks (Interlagos yellow/green; circuits from open data give their
+// own colours in meta.kerb_colors), worn paint, rubber on the track side and shallow
+// rumble ridges. DataTextures keep this usable in Node tests.
+const curbMaps=new Map();
+const rgb=hex=>[1,3,5].map(i=>parseInt(hex.slice(i,i+2),16));
+function curbTextures(colors=['#e2b22e','#1a7034']){
+ const key=colors.join();if(curbMaps.has(key))return curbMaps.get(key);
  const w=64,h=256,color=new Uint8Array(w*h*4),normal=new Uint8Array(w*h*4);
  const hash=(x,y)=>{const v=Math.sin(x*127.1+y*311.7)*43758.5453;return v-Math.floor(v);};
  const noise=(x,y)=>{const ix=Math.floor(x),iy=Math.floor(y),fx=x-ix,fy=y-iy,sx=fx*fx*(3-2*fx),sy=fy*fy*(3-2*fy);
   const a=hash(ix%16,iy%64),b=hash((ix+1)%16,iy%64),c=hash(ix%16,(iy+1)%64),d=hash((ix+1)%16,(iy+1)%64);return (a+(b-a)*sx)+((c+(d-c)*sx)-(a+(b-a)*sx))*sy;};
- const yellow=[226,178,46],green=[26,112,52];
+ const [yellow,green]=colors.map(rgb);
  for(let y=0;y<h;y++)for(let x=0;x<w;x++){
   const i=(y*w+x)*4,u=x/w,base=y<h/2?yellow:green,edge=Math.min(y%(h/2),h/2-1-y%(h/2));
   const wear=.78+.22*noise(x/6,y/6)*noise(x/2,y/2+7),rubber=Math.max(0,1-u/.45)*(.25+.35*noise(x/3,y/9)),seam=edge<2?.72:1;
@@ -67,13 +69,13 @@ function curbTextures(){
   normal[i]=Math.round((nx/len*.5+.5)*255);normal[i+1]=Math.round((-slope/len*.5+.5)*255);normal[i+2]=Math.round((1/len*.5+.5)*255);normal[i+3]=255;
  }
  const make=(data,srgb)=>{const t=new THREE.DataTexture(data,w,h,THREE.RGBAFormat);t.wrapS=t.wrapT=THREE.RepeatWrapping;t.magFilter=THREE.LinearFilter;t.minFilter=THREE.LinearMipmapLinearFilter;t.generateMipmaps=true;t.anisotropy=8;if(srgb)t.colorSpace=THREE.SRGBColorSpace;t.needsUpdate=true;return t;};
- curbMaps={map:make(color,true),normalMap:make(normal,false)};return curbMaps;
+ const maps={map:make(color,true),normalMap:make(normal,false)};curbMaps.set(key,maps);return maps;
 }
 
 export function createCurbs(data){
  const root=new THREE.Group();root.name='Zebras_circuito_completo';
  const probe=new TestCar(data),profile=[[0,.02],[.48,.065],[1.05,.02]],L=data.meta.reconstructed_xy_m;
- const maps=curbTextures(),material=new THREE.MeshStandardMaterial({name:'Zebra_pintada',map:maps.map,normalMap:maps.normalMap,normalScale:new THREE.Vector2(.9,.9),roughness:.62,metalness:0,side:THREE.DoubleSide});
+ const maps=curbTextures(data.meta.kerb_colors),material=new THREE.MeshStandardMaterial({name:'Zebra_pintada',map:maps.map,normalMap:maps.normalMap,normalScale:new THREE.Vector2(.9,.9),roughness:.62,metalness:0,side:THREE.DoubleSide});
  function vertex(p,index,side,[width,height]){
   const offset=side*(p[4]/2+width),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
   probe.index=index;return [x,probe.sample(x,y).z+height,-y];
@@ -127,6 +129,15 @@ export function createGuardrails(data){
  return {root,rails,stats:{sides:2,closed,segments,sections,coverageMetres:coverage,coverageRatio:coverage/(L*2),clearance:GUARDRAIL_CLEARANCE}};
 }
 
+// Braking and concrete zones along the lap: [from, to] in metres. A zone across the
+// timing line is split in two, each half reaching past the seam (the closing triangles run
+// to s = L + 2; pit lanes use s from 6000, far from any zone).
+function brakeZones(data){return data.meta.brake_zones??(data.meta.id==='curvelo'?[[135,280],[760,960]]:[[160,345],[1380,1590],[2320,2460],[2950,3160]]);}
+function concreteZones(data){return (data.meta.surface_zones??[]).filter(z=>z.kind==='concreto').map(z=>[z.from,z.to]);}
+function zoneSum(zones,fn,L){
+ const parts=[];for(let [a,b] of zones){a=((a%L)+L)%L;b=((b%L)+L)%L;if(a<=b)parts.push([a,b]);else{parts.push([a,L+40]);parts.push([-40,b]);}}
+ return parts.map(([a,b])=>`${fn}(s,${a.toFixed(1)},${b.toFixed(1)})`).join('+')||'0.0';
+}
 // Metres throughout: the road detail stays attached to the measured surface.
 // These wear patterns are game art, not surveyed marks of the real circuit.
 export async function createTrackSurface(renderer,data){
@@ -136,7 +147,7 @@ export async function createTrackSurface(renderer,data){
  for(const map of [texture,normalMap,roughnessMap]){
   map.wrapS=map.wrapT=THREE.RepeatWrapping;map.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());map.minFilter=THREE.LinearMipmapLinearFilter;
  }
- const material=new THREE.MeshStandardMaterial({name:'Asfalto_PBR_circuito_v4',map:texture,normalMap,normalScale:new THREE.Vector2(.8,.8),roughnessMap,roughness:1,metalness:0});
+ const L=data.meta.reconstructed_xy_m,material=new THREE.MeshStandardMaterial({name:'Asfalto_PBR_circuito_v4',map:texture,normalMap,normalScale:new THREE.Vector2(.8,.8),roughnessMap,roughness:1,metalness:0});
  // The shader sets the asphalt's tone from the scanned aggregate.
  material.color.setRGB(1,1,1);
  material.onBeforeCompile=shader=>{
@@ -147,6 +158,7 @@ varying vec4 vRoad;
 float roadHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float roadNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(roadHash(i),roadHash(i+vec2(1,0)),f.x),mix(roadHash(i+vec2(0,1)),roadHash(i+vec2(1,1)),f.x),f.y);}
 float brakeZone(float s,float a,float b){return smoothstep(a,a+25.0,s)*(1.0-smoothstep(b-15.0,b,s));}
+float slabZone(float s,float a,float b){return smoothstep(a,a+4.0,s)*(1.0-smoothstep(b-4.0,b,s));}
 `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
 // Scanned race-track asphalt (fresh, near black) weathered to the grey of a circuit in
@@ -162,7 +174,7 @@ float detailFade=1.0-smoothstep(.08,.45,length(fwidth(vMapUv*3.4)));
 // Lanes of different age along the lap (resurfacing), and gentle patchiness.
 float laneAge=roadNoise(vec2(s*.0032,d*.025+1.7));
 float wear=mix(.9,1.08,macro)*mix(.9,1.07,laneAge)*mix(1.0,.94+.12*roadNoise(vMapUv*3.4),detailFade);
-float brake=clamp(${data.meta.id==='curvelo'?'brakeZone(s,135.0,280.0)+brakeZone(s,760.0,960.0)':'brakeZone(s,160.0,345.0)+brakeZone(s,1380.0,1590.0)+brakeZone(s,2320.0,2460.0)+brakeZone(s,2950.0,3160.0)'},0.0,1.0);
+float brake=clamp(${zoneSum(brakeZones(data),'brakeZone',L)},0.0,1.0);
 float path=vRoad.w+(roadNoise(vec2(s*.012,5.3))-.5)*.8;
 float lateral=d-path;
 // Rubbered racing line, darkest where the cars brake.
@@ -190,15 +202,20 @@ float roadRepair=step(.79,roadHash(vec2(section,7.6)))*patchAlong*patchAcross;
 float patchBorder=roadRepair*(1.0-smoothstep(.0,.07,min(min(along-5.2,32.0-along),1.2-abs(d-patchCenter))));
 float seam=(1.0-smoothstep(.01,.045,abs(abs(d)-width*.24)))*(.4+.6*roadNoise(vec2(s*.13,d)));
 vec3 asphaltColor=aggregate*wear*(1.0-rubber)*(1.0-joint*.3)*(1.0-roadRepair*.24)*(1.0-seam*.12);
+// Concrete stretches (meta.surface_zones): pale slabs 5 m long with sawn joints, rubber still dark on the line.
+float concrete=clamp(${zoneSum(concreteZones(data),'slabZone',L)},0.0,1.0);
+float slabJoint=max(1.0-smoothstep(.02,.06,abs(fract(s/5.0+.5)-.5)*5.0),(1.0-smoothstep(.02,.06,abs(abs(d)-width*.25)))*step(.1,abs(d)));
+vec3 concreteColor=vec3(.235,.222,.2)*mix(.92,1.05,macro)*mix(.95,1.04,laneAge)*(1.0-rubber*.75)*(1.0-slabJoint*.45);
 asphaltColor=mix(asphaltColor,asphaltColor*vec3(1.1,1.07,1.0),offLine*.55);
 asphaltColor=mix(asphaltColor,asphaltColor*vec3(1.16,1.1,.98),edge*.6);
 asphaltColor=mix(asphaltColor,vec3(.012,.011,.01),max(max(tar,patchBorder)*.85,marble*.8));
+asphaltColor=mix(asphaltColor,concreteColor,concrete);
 diffuseColor.rgb*=asphaltColor;
 `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`
 // Rubber and fresh tar are smoother than the open aggregate: they catch the low sun.
 float fineRough=texture2D(roughnessMap,vRoughnessMapUv).g;
-float roughnessFactor=clamp(.62+.34*fineRough-rubber*.3-tar*.45-roadRepair*.08+edge*.05,.3,1.0);
+float roughnessFactor=clamp(.62+.34*fineRough-rubber*.3-tar*.45-roadRepair*.08+edge*.05+concrete*.08,.3,1.0);
 `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`
 vec3 asphaltN=texture2D(normalMap,vNormalMapUv).xyz*2.0-1.0;
@@ -206,7 +223,7 @@ asphaltN.xy*=normalScale*(1.0-.75*max(tar,rubber*.6));
 normal=normalize(tbn*asphaltN);
 `);
  };
- material.customProgramCacheKey=()=> 'opala-track-asphalt-circuit-v4-'+(data.meta.id||'interlagos');
+ material.customProgramCacheKey=()=> 'opala-track-asphalt-circuit-v5-'+(data.meta.id||'interlagos');
  const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
  const stats={texture:'assets/texturas/asfalto_diff_v3.jpg',normal:'assets/texturas/asfalto_nor_gl_v3.jpg',roughness:'assets/texturas/asfalto_rough_v3.jpg',resolution:2048,tileMetres:2,anisotropy:texture.anisotropy,vertices:0,wear:'decorative',pbr:true};
  function geometry(source){

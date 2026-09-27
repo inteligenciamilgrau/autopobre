@@ -29,19 +29,28 @@ function pitStation(pit,s){
 // The 2017 LiDAR shows the stand there as an ~8.5 m bank: 19 rows climb to its
 // top under a cantilever roof. l runs away from the track, a along it.
 export const STAND=Object.freeze({blocks:6,length:28,firstS:204,rows:19,tread:.85,rise:.42,first:.55,parapet:1.1,wall:.3,gap:12,apron:5.5,roofClear:3.9,roofSlope:.07,overhang:1.8});
-export function standLayout(data){
+// Circuits built from open data list their own stands (data.scenery.stands): how far
+// before the finish line the first block starts, how many blocks, the side (-1 right,
+// 1 left) and the gap from the road edge. Interlagos keeps its surveyed stand.
+function standSpecs(data){
+ if(data.scenery)return data.scenery.stands??[];
  if(data.meta?.id==='curvelo'||!data.pit)return [];
+ return [{first_s:STAND.firstS,blocks:STAND.blocks,side:-1,gap:STAND.gap}];
+}
+export function standLayout(data){
  const L=data.meta.reconstructed_xy_m,blocks=[],t=data.terrain;
  const lidar=(x,y)=>{const fx=Math.max(0,Math.min(t.nx-1.001,(x-t.x0)/t.step)),fy=Math.max(0,Math.min(t.ny-1.001,(y-t.y0)/t.step)),i=Math.floor(fx),j=Math.floor(fy),u=fx-i,v=fy-j,k=j*t.nx+i;return (t.z[k]*(1-u)+t.z[k+1]*u)*(1-v)+(t.z[k+t.nx]*(1-u)+t.z[k+t.nx+1]*u)*v;};
- for(let k=0;k<STAND.blocks;k++){
-  const p=station(data,L-STAND.firstS+k*STAND.length),hw=p.width/2,front=hw+STAND.gap,rows=[];
+ for(const spec of standSpecs(data))for(let k=0;k<spec.blocks;k++){
+  const side=spec.side<0?-1:1,p=station(data,L-spec.first_s+k*STAND.length),hw=p.width/2,front=hw+(spec.gap??STAND.gap),rows=[];
+  // Away from the track on that side; on the left the block runs against the lap so its frame stays right-handed.
+  const rx=side*p.lx,ry=side*p.ly,tx=-side*p.tx,ty=-side*p.ty;
   // Each block stands on the highest ground just behind the guardrail (never below the
   // road edge), so levelling its apron never digs under the rail.
-  const apron=[];for(let a=-STAND.length/2;a<=STAND.length/2;a+=2)apron.push(lidar(p.x+p.tx*a-p.lx*(hw+STAND.apron+.5),p.y+p.ty*a-p.ly*(hw+STAND.apron+.5)));
-  const base=Math.max(p.z-p.bank*hw+.3,...apron.map(z=>z+.05));
+  const apron=[];for(let a=-STAND.length/2;a<=STAND.length/2;a+=2)apron.push(lidar(p.x+tx*a+rx*(hw+STAND.apron+.5),p.y+ty*a+ry*(hw+STAND.apron+.5)));
+  const base=Math.max(p.z+side*p.bank*hw+.3,...apron.map(z=>z+.05));
   for(let r=0;r<STAND.rows;r++){const from=front+STAND.wall+r*STAND.tread;rows.push({from,to:from+STAND.tread,top:base+STAND.first+r*STAND.rise});}
   const back=rows.at(-1).to,top=rows.at(-1).top;
-  blocks.push({s:p.s,x:p.x,y:p.y,tx:p.tx,ty:p.ty,rx:-p.lx,ry:-p.ly,length:STAND.length,base,front,back,top,apron:hw+STAND.apron,rows,
+  blocks.push({s:p.s,x:p.x,y:p.y,tx,ty,rx,ry,length:STAND.length,base,front,back,top,apron:hw+STAND.apron,rows,
    roof:{from:front-STAND.overhang,to:back+STAND.wall+.3,backZ:top+STAND.roofClear,slope:STAND.roofSlope}});
  }
  return blocks;

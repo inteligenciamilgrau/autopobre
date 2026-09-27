@@ -22,10 +22,11 @@ const SPONSORS=[
  ['#e8702a','#1a1a1a','#f6f1e4','OFICINA DA BLAZER']
 ];
 const ROWS=SPONSORS.length,BANNER_TILE=7.5,BANNER_LOW=.37,BANNER_HIGH=.87,BANNER_FRONT=.118;
-function bannerAtlas(){
+// The Old Stock banner names the circuit it hangs at (meta.name, set by main.js).
+function bannerAtlas(circuit='INTERLAGOS'){
  return canvasTexture((ctx,w,h)=>{
   const rowH=h/ROWS;
-  SPONSORS.forEach(([bg,fg,accent,words],i)=>{
+  SPONSORS.forEach(([bg,fg,accent,words],i)=>{if(words==='OLD STOCK · INTERLAGOS')words=`OLD STOCK · ${circuit}`;
    const y=i*rowH;ctx.fillStyle=bg;ctx.fillRect(0,y,w,rowH);
    ctx.fillStyle=accent;ctx.fillRect(0,y+rowH*.08,w,rowH*.06);ctx.fillRect(0,y+rowH*.86,w,rowH*.06);
    ctx.font=`900 ${Math.round(rowH*.5)}px "Arial Black","Arial Bold",Arial,sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
@@ -112,7 +113,7 @@ export function createTrackside(data){
   }
  }
  const bannerGeometry=new THREE.BufferGeometry();bannerGeometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));bannerGeometry.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));bannerGeometry.setIndex(indices);bannerGeometry.computeVertexNormals();
- const atlas=bannerAtlas();atlas.wrapS=THREE.RepeatWrapping;
+ const atlas=bannerAtlas((data.meta.name??'Interlagos').toLocaleUpperCase('pt-BR'));atlas.wrapS=THREE.RepeatWrapping;
  const banners=new THREE.Mesh(bannerGeometry,new THREE.MeshStandardMaterial({name:'Faixas_patrocinio',map:atlas,roughness:.62,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1}));
  banners.name='Faixas_nos_guardrails';banners.receiveShadow=true;root.add(banners);
 

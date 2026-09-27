@@ -42,7 +42,7 @@ def wait_js(page, expression, timeout=120000, arg=None):
 
 
 def open_menu(page, url=GAME_URL, timeout=120000):
-    """Opening screen ready. Circuits, cars and the renderer load only after #start."""
+    """Opening screen ready. Circuits, cars and the renderer load only once a mode starts."""
     page.goto(url, wait_until='networkidle', timeout=timeout)
     wait_js(page, "window.interlagos&&!document.querySelector('#start').disabled", timeout=timeout)
 
@@ -64,14 +64,21 @@ def race_options(page, camera=None, livery=None, tap=False):
     press('#settingsClose')
 
 
-def enter_track(page, pilot='Piloto teste', timeout=120000, tap=False, story=False):
+def enter_track(page, pilot='Piloto teste', timeout=120000, tap=False, story=False, championship=False):
     """Start or resume a session. The first entry needs a pilot name.
 
-    On the opening menu #start is Modo Corrida (free race) and story=True clicks #storyStart
-    (Modo História). On a paused session #start resumes whichever mode is running."""
-    if pilot and page.is_visible('#pilotName') and not page.input_value('#pilotName'):
-        page.fill('#pilotName', pilot)
-    (page.tap if tap else page.click)('#storyStart' if story else '#start')
+    The opening asks for the pilot and #play (Jogar) opens the track screen, where #start is
+    Corrida única, story=True clicks #storyStart (Modo História) and championship=True
+    #championshipStart. On a paused session #resume goes back to the track."""
+    press = page.tap if tap else page.click
+    if page.is_visible('#resume'):
+        press('#resume')
+    else:
+        if pilot and page.is_visible('#pilotName') and not page.input_value('#pilotName'):
+            page.fill('#pilotName', pilot)
+        if page.is_visible('#play'):
+            press('#play')
+        press('#championshipStart' if championship else '#storyStart' if story else '#start')
     wait_js(page, 'window.interlagos?.ready&&!interlagos.state.paused', timeout=timeout)
 
 

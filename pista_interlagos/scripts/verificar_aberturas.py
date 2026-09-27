@@ -44,6 +44,7 @@ with sync_playwright() as p:
         page.goto(URL + '?circuito=curvelo', wait_until='domcontentloaded')
         wait_js(page, "!document.querySelector('#start').disabled")
         page.fill('#pilotName', 'Piloto aberturas')
+        page.click('#play')
         page.click('#start')
         wait_js(page, 'window.interlagos?.ready')
         wait_js(page, 'interlagos.car.clock>0')
@@ -139,8 +140,9 @@ with sync_playwright() as p:
         wait_js(page, "!document.querySelector('#start').disabled")
         page.fill('#pilotName', 'Piloto paddock')
         page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const info=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return info.call(this);};}""")
-        # The opening menu has its own "Modo História" button (older menus: the saved preference).
-        page.click('#storyStart' if page.locator('#storyStart').count() else '#start')
+        # Jogar opens the track screen, with its own "Modo História" button.
+        page.click('#play')
+        page.click('#storyStart')
         wait_js(page, 'window.interlagos?.ready')
         page.evaluate('interlagos.immersiveInfo()')
         wait_js(page, "fixtureMode.state.phase==='crowd'&&!!fixtureMode.visual.ownOpenings")

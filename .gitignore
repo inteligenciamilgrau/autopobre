@@ -48,6 +48,8 @@ desktop.ini
 /pista_interlagos/versoes_anteriores/
 /pista_interlagos/dados/*
 !/pista_interlagos/dados/pista.json
+!/pista_interlagos/dados/pista_cascavel.json
+!/pista_interlagos/dados/pista_piracicaba.json
 /pista_interlagos/fontes/
 /pista_interlagos/*.blend
 /pista_interlagos/exports/*

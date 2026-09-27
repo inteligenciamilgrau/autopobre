@@ -80,14 +80,15 @@ const INTERLAGOS_RAILS={
  '1':[[885,1200],[1950,2180],[3490,3900]]
 };
 const FULL_RAIL=[[0,Infinity]];
-export function guardrailSections(data,side){return data.meta.id==='curvelo'?FULL_RAIL:INTERLAGOS_RAILS[side<0?'-1':'1'];}
+// Circuits built from open data carry their own sections (meta.rails, by side).
+export function guardrailSections(data,side){const key=side<0?'-1':'1';return data.meta.rails?.[key]??(data.meta.id==='curvelo'?FULL_RAIL:INTERLAGOS_RAILS[key]);}
 export function guardrailPresent(data,s,side){const L=data.meta.reconstructed_xy_m,t=((s%L)+L)%L;return guardrailSections(data,side).some(([from,to])=>t>=from&&t<=to);}
 export function guardrailClearance(data,s,side){
  if(data.meta.id!=='curvelo'){
   const L=data.meta.reconstructed_xy_m,t=((s%L)+L)%L,section=guardrailSections(data,side).find(([from,to])=>t>=from&&t<=to);
   if(!section)return GUARDRAIL_CLEARANCE;
   // Flare exposed ends away from the driving line; the timing-line seam stays joined.
-  const edge=Math.min(section[0]===0?Infinity:t-section[0],section[1]>=L?Infinity:section[1]-t),u=clamp(edge/24,0,1);
+  const edge=Math.min(section[0]<=0?Infinity:t-section[0],section[1]>=L-1e-6?Infinity:section[1]-t),u=clamp(edge/24,0,1);
   return GUARDRAIL_CLEARANCE+5*(1-u*u*(3-2*u));
  }
  if(side>=0){const lane=pitLane(data,s);return lane?Math.max(5,lane.offset*1.8+lane.halfWidth+2-7):5;}

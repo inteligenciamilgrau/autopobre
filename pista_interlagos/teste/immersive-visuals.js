@@ -83,7 +83,7 @@ export class ImmersiveVisuals {
   // when he walks up (ImmersiveMode; state.offerCoffee). The pilot's own cup, in his right hand,
   // shows once he has taken it. Without that door (no pit block) he waits by the Tia's café.
   {const entry=RIVAL_ROSTER.find(r=>r.number==='19'),door=scene.getObjectByName('Porta_equipe_19');let pos,yaw;
-   if(door){door.updateWorldMatrix(true,false);pos=door.getWorldPosition(new THREE.Vector3()).sub(this.crowd.position);const f=new THREE.Vector3(1,0,0).applyQuaternion(door.getWorldQuaternion(new THREE.Quaternion()));yaw=Math.atan2(-f.z,f.x);this.leoDoor=door;}
+   if(door){pos=door.getWorldPosition(new THREE.Vector3()).sub(this.crowd.position);const f=new THREE.Vector3(1,0,0).applyQuaternion(door.getWorldQuaternion(new THREE.Quaternion()));yaw=Math.atan2(-f.z,f.x);this.leoDoor=door;}
    else{const front=pit?.box99?pit.box99.front:L.spotD+2.5;pos=L.point(-7.2,front-1.1);yaw=Math.atan2(-(this.heroStart.z-pos.z),this.heroStart.x-pos.x);}
    const person=this.people.person({top:entry.color,bottom:0x1b1d20,trim:entry.stripe,hat:'cap',hatColor:entry.stripe,skin:0xc68e6a});person.name='Leonardo_Martins_19';
    person.position.copy(pos);person.rotation.y=yaw;setPose(person,POSES.stand);this.crowd.add(person);
@@ -350,15 +350,22 @@ export class ImmersiveVisuals {
  crouch(){this.foot.crouch=!this.foot.crouch;}
  // Close enough to Leonardo for him to come over (and for the action key).
  nearLeo(radius=2.6){return !!this.leo&&!this.inCar&&this.hero.position.distanceTo(this.leo.pos)<radius;}
- // The way to him on foot (a tap on him): the cars parked nose in at the garages fill the working
- // lane, so the pilot steps out toward the pit wall, passes behind their tails and comes up to his
- // door (lane coordinates; blocked() keeps 2.7 m round a parked car's centre across the lane).
- leoRoute(){
-  if(!this.leo)return null;const L=this.lane,to=this.leo.pos,h=L.lane(this.hero.position),goal=L.lane(to);
-  const clear=Math.max(L.bounds.d0+.6,Math.min(L.spotD,...this.parked.map(p=>p.d-2.7))-.8),step=Math.sign(goal.x-h.x);
-  const at=(x,d)=>{const v=L.point(x,d);v.y=this.hero.position.y;return v;};
-  return Math.abs(goal.x-h.x)<2?[to.clone()]:[at(h.x+step,clear),at(goal.x,clear),to.clone()];
+ // The way on foot to a local point (a tap on someone): the cars parked nose in at the garages fill
+ // the working lane, so the pilot steps out toward the pit wall (first past the side of a car he
+ // stands behind, as the Opala in Box 99), passes behind their tails and comes up to it. direct:
+ // straight there whenever no car is in the way. Lane coordinates; blocked() keeps 1.3 m along and
+ // 2.7 m across the lane round a parked car's centre (0.3 m more here).
+ routeTo(to,{direct=false}={}){
+  const L=this.lane,h=L.lane(this.hero.position),goal=L.lane(to),cars=[...this.parked,...(this.ownSpot?[this.ownSpot]:[])];
+  // Whether the straight walk from a to b comes within reach of a car (slab test).
+  const hits=(a,b)=>cars.some(p=>{let t0=0,t1=1;for(const [from,delta,half] of [[a.x-p.x,b.x-a.x,1.6],[a.d-p.d,b.d-a.d,3]]){if(Math.abs(delta)<1e-9){if(Math.abs(from)>=half)return false;continue;}const u=(-half-from)/delta,v=(half-from)/delta;t0=Math.max(t0,Math.min(u,v));t1=Math.min(t1,Math.max(u,v));}return t0<t1;});
+  if((direct||Math.abs(goal.x-h.x)<2)&&!hits(h,goal))return [to.clone()];
+  const clear=Math.max(L.bounds.d0+.6,Math.min(L.spotD,...this.parked.map(p=>p.d-2.7))-.8),step=Math.sign(goal.x-h.x)||1,behind=cars.find(p=>Math.abs(h.x-p.x)<1.6&&h.d>p.d);
+  const at=(x,d)=>{const v=L.point(x,d);v.y=this.hero.position.y;return v;},route=[];
+  let x=h.x+step;if(behind){x=behind.x+(Math.sign(h.x-behind.x)||step)*2.2;route.push(at(x,h.d));}else if(hits(h,{x,d:clear}))x=h.x;
+  route.push(at(x,clear),at(goal.x,clear),to.clone());return route;
  }
+ leoRoute(){return this.leo?this.routeTo(this.leo.pos):null;}
  nearestFan(){let best=-1,d=2.5;this.fans.forEach((f,i)=>{const distance=this.hero.position.distanceTo(f.pos);if(distance<d){best=i;d=distance;}});this.nearSocial=best;return best;}
  showDonation(index){const f=this.fans[index];if(f){f.cheerUntil=this.time+2.3;f.dollar.visible=false;f.reaction.visible=true;}}
  drawCracks(value){

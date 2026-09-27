@@ -19,7 +19,7 @@
 #menu .choices{margin:18px 0}
 #menu .primary{background:#f4ce39;color:#171c15}
 #menu .primary:hover{background:#ffe574}
-/* Opening: Modo Corrida and Modo História, then Config and Recordes side by side. */
+/* Opening: Jogar (or, paused, Voltar / Recomeçar / Trocar de pista), then Config and Recordes. */
 #menu .story-start{background:#152d29eb;color:#f4ce39;border:1px solid #d9b93c;padding:16px;font-weight:700}
 #menu .story-start:hover{background:#21443ceb;color:#ffe574}
 #menu .story-start[hidden]{display:none}
@@ -59,8 +59,6 @@ body:not(.touch-device) #menu .menu-tool-icon{display:block;width:18px;height:18
 @media(orientation:landscape) and (max-height:500px){#menu.race-finished article{margin-top:0}#menu.race-finished article>h1{font-size:32px;margin-bottom:12px}#menu.race-finished #raceResult{font-size:16px;padding:12px;margin-bottom:12px}}
 
 #pilotPicker[hidden],#pilotPicker [hidden]{display:none!important}#pilotPicker{margin:0 0 14px}#pilotLabel{display:block;font-size:12px;font-weight:800;color:#e6cd72;margin-bottom:7px}.pilot-fields{display:flex;flex-wrap:wrap;gap:7px}#pilotName,#pilotSelect{width:100%;min-height:44px;box-sizing:border-box;border:1px solid #88978c80;border-radius:6px;padding:10px 12px;background:#102823;color:#f3efdf;font:inherit;font-size:14px}#pilotName::placeholder{color:#b7c2b2}#pilotName:focus-visible,#pilotSelect:focus-visible{outline:2px solid #f4ce39;outline-offset:2px}#pilotMessage{display:block;color:#ffca99;font-size:11px;margin-top:5px}#pilotMessage:empty{display:none}
-#circuitPicker[hidden]{display:none}#circuitPicker{padding:0;border:0;margin:0 0 14px;min-width:0}#circuitPicker legend{font-size:10px;letter-spacing:.16em;color:#e6cd72;font-weight:800;margin-bottom:8px}.circuit-options{display:grid;grid-template-columns:1fr 1fr;gap:10px}#menu .circuit-options button{margin:0;padding:10px;text-align:left;border:1px solid #88978c60;background:#102823e8;border-radius:7px;color:#dce6d7}#menu .circuit-options button[aria-pressed=true]{border-color:#f4ce39;background:#294438;box-shadow:inset 0 -3px #f4ce39}.circuit-options svg{width:90px;height:39px;display:block;margin-bottom:6px}.circuit-options path{fill:none;stroke:currentColor;stroke-width:3;stroke-linejoin:round}.circuit-options b{display:block;font-size:13px}.circuit-options span{display:block;font-size:10px;margin-top:4px;color:#c8cfbb}#circuitDescription{font-size:11px;margin:8px 0 0;color:#e0d5a2}
-@media(orientation:landscape) and (max-height:500px){#circuitPicker{margin-bottom:8px}.circuit-options svg{float:right;width:58px;height:30px;margin:0}.circuit-options b{font-size:11px}.circuit-options span{font-size:9px}#menu .circuit-options button{padding:7px}.circuit-options{gap:6px}#circuitDescription{font-size:10px}}
 
 #raceCountdown[hidden]{display:none!important}#raceCountdown{position:fixed;inset:0;z-index:65;display:flex;align-items:center;justify-content:center;flex-direction:column;pointer-events:none;color:#ffe265;text-shadow:0 5px 0 #193d30,0 8px 30px #000a}#countdownNumber{font-size:clamp(90px,18vh,180px);font-weight:950;line-height:1;letter-spacing:-.06em}#countdownCaption{margin-top:14px;font-size:clamp(12px,2.5vh,20px);font-weight:900;letter-spacing:.18em;color:white}
 .menu-tools{display:contents}.menu-tool-icon,.menu-tool-short{display:none}
@@ -70,17 +68,15 @@ body:not(.touch-device) #menu .menu-tool-icon{display:block;width:18px;height:18
  .touch-device #menu .opening-brand{position:relative;display:flex;align-items:center;gap:10px;width:100%;height:76px;margin:0 0 6px}
  .touch-device #menu .opening-brand>img:not(.old-stock-opening){position:absolute;left:0;top:-14px;width:calc(100% + 20px);max-width:none;height:104px;object-fit:cover;pointer-events:none}
  .touch-device #menu .old-stock-opening{position:absolute;left:calc(100% + 30px);top:23px;width:44px;height:30px;flex-shrink:0;margin:0;padding:2px;border-radius:3px}
- .touch-device #menu .opening-brand figcaption,.touch-device #circuitDescription{display:none}
+ .touch-device #menu .opening-brand figcaption{display:none}
  .touch-device #pilotPicker{display:grid;grid-template-columns:42px minmax(0,1fr);align-items:center;gap:4px 6px;margin:0 0 6px}
  .touch-device #pilotLabel{font-size:11px;margin:0}.touch-device .pilot-fields{flex-wrap:nowrap;gap:5px;min-width:0}
  .touch-device #pilotName,.touch-device #pilotSelect{min-width:0;flex:1;width:100%;min-height:36px;height:36px;padding:6px 8px;font-size:16px}
  .touch-device #pilotMessage{grid-column:2;font-size:9px;line-height:1.2;margin:0}
- .touch-device #circuitPicker{margin:0 0 6px}.touch-device #circuitPicker legend{font-size:9px;letter-spacing:.1em;margin-bottom:4px}
- .touch-device #menu .circuit-options{gap:6px}.touch-device #menu .circuit-options button{display:flex;align-items:center;gap:5px;min-height:44px;margin:0;padding:6px}
- .touch-device #menu .circuit-options svg{float:none;flex-shrink:0;width:24px;height:24px;margin:0}.touch-device #menu .circuit-options b{font-size:10px;line-height:1.15;white-space:normal}.touch-device #menu .circuit-options span{display:none}
  .touch-device #menu .menu-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:0 0 6px}
- .touch-device #menu #start,.touch-device #menu #storyStart,.touch-device #menu #restartRace{min-height:40px;padding:9px 6px;margin:0;font-size:12px}
- .touch-device #menu #start::before{content:'▶';margin-right:8px;font-size:11px}
+ .touch-device #menu .menu-modes button{min-height:40px;padding:9px 6px;margin:0;font-size:12px}
+ .touch-device #menu #play,.touch-device #menu #resume{grid-column:1/-1}
+ .touch-device #menu #play::before,.touch-device #menu #resume::before{content:'▶';margin-right:8px;font-size:11px}
  .touch-device #menu .menu-tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
  .touch-device #menu .menu-tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:44px;width:100%;margin:0;padding:4px 2px;font-size:9px;line-height:1.1;background:#102b27e8;border-color:#8eaa865c;border-radius:7px}
  .touch-device #menu .menu-tools .menu-tool-icon{display:block;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:#efd377}

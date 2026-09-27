@@ -1,3 +1,4 @@
+import {CIRCUITS} from '../teste/circuits.js';
 import assert from 'node:assert/strict';
 import {readAIRecords,AutomaticAIRecords} from '../teste/ai-records.js';
 import {AutomaticRecords,readRecords,readRecordView,RECORD_VIEW_KEY} from '../teste/lap-records.js';
@@ -26,7 +27,7 @@ assert(new PilotProfiles(storage).names.includes('Ana'));
 const legacy=new PilotProfiles({getItem:k=>k==='autopobre-record-name'?'Old Pilot':null});assert.equal(legacy.selected,'Old Pilot');
 let available=false;const recovery=new AutomaticRecords({getItem:storage.getItem,setItem(k,v){if(!available)throw Error('quota');storage.setItem(k,v);}});recovery.start('Retry');recovery.update(mode,100);assert(mode.recordSaveError);available=true;recovery.update(mode,5100);assert.equal(mode.recordSaveError,'');assert(readRecords(storage).some(r=>r.name==='Retry'));
 
-const humanCount=readRecords(storage).length,aiBefore=readAIRecords(storage);assert.equal(aiBefore.length,56);assert.equal(aiBefore.filter(r=>r.number==='70').length,4);
+const humanCount=readRecords(storage).length,aiBefore=readAIRecords(storage);const circuits=Object.keys(CIRCUITS).length;assert.equal(aiBefore.length,circuits*2*14);assert.equal(aiBefore.filter(r=>r.number==='70').length,circuits*2);
 const ai=new AutomaticAIRecords(storage);ai.update({data:{meta:{id:'curvelo'}},active:false,rivals:[{entry:{number:'70'},car:{best:37},finished:true,finishTime:120}]});
 assert.equal(readRecords(storage).length,humanCount,'AI never enters human storage');assert.equal(readAIRecords(storage).find(r=>r.circuit==='curvelo'&&r.mode==='normal'&&r.number==='70').bestLap,37);
 assert(!new PilotProfiles(storage).names.some(n=>n.includes('Kleber')),'AI is not a saved human pilot');

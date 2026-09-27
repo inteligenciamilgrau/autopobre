@@ -76,9 +76,9 @@ export class ImmersiveMode {
   // Leonardo: the pilot walks up to him, and he asks (again) once there.
   if(leo&&(hit.object===leo.label||hit.object===leo.person||hit.object.parent===leo.person)){this.state.fan=null;this.state.feedback='';this.walkToFan=this.walkToDesk=null;if(this.visual.nearLeo(2.4))this.action('leo');else this.walkToLeo=this.visual.leoRoute();this.ui();return;}
   // The registration circle or its sign: he walks there by the steps.
-  if(marker&&(hit.object===marker.sign||hit.object.parent===marker.marker)){this.state.fan=null;this.state.feedback='';this.walkToFan=null;this.walkToDesk=this.visual.deskRoute();this.state.touch();this.ui();return;}
+  if(marker&&(hit.object===marker.sign||hit.object.parent===marker.marker)){this.state.fan=null;this.state.feedback='';this.walkToFan=null;this.walkToLeo=false;this.walkToDesk=this.visual.deskRoute();this.state.touch();this.ui();return;}
   const index=this.visual.fans.findIndex(f=>{let obj=hit.object;while(obj){if(obj===f.person||obj===f.label||obj===f.dollar)return true;obj=obj.parent;}return false;});if(index<0)return;
-  this.state.fan=null;this.state.feedback='';this.state.touch();this.walkToFan=index;this.walkToDesk=null;
+  this.state.fan=null;this.state.feedback='';this.state.touch();this.walkToFan=index;this.walkToDesk=null;this.walkToLeo=false;this.fanRoute=this.visual.routeTo(this.visual.fans[index].pos,{direct:true});
   if(this.visual.hero.position.distanceTo(this.visual.fans[index].pos)<2.6){this.state.talk(index);this.walkToFan=null;}
   this.ui();
  }
@@ -117,7 +117,7 @@ export class ImmersiveMode {
  enterCar(){
   const pose=this.visual.ownPose();if(!pose||this.inCar)return false;
   const c=this.car;c.x=pose.x;c.y=pose.y;c.heading=pose.heading;c.vx=c.vy=c.yaw=0;c.surface=c.sample(c.x,c.y);c.index=c.surface.i;c.settle?.();
-  this.inCar=this.visual.inCar=true;this.walkToFan=null;this.viewBefore=this.getView?.()??'chase';this.visual.restoreCamera();this.setView?.('cockpit');this.state.emitSound('click');return true;
+  this.inCar=this.visual.inCar=true;this.walkToFan=this.walkToDesk=null;this.walkToLeo=false;this.viewBefore=this.getView?.()??'chase';this.visual.restoreCamera();this.setView?.('cockpit');this.state.emitSound('click');return true;
  }
  // The paddock hint by the Opala: what E does where the pilot stands.
  carHint(){
@@ -321,6 +321,13 @@ export class ImmersiveMode {
   return false;
  }
  beginCountdown(){this.freeCountdown=3;this.goTime=0;this.stop();this.state.emitSound('countdown');}
+ // Input along a walking route (local points; a tap on someone or the registration circle): points
+ // within `reach` are dropped (all but the last with keepLast) and the pilot heads for the next one;
+ // null once none is left.
+ follow(route,reach,keepLast){
+  const hero=this.visual.hero.position;while(route.length>(keepLast?1:0)&&Math.hypot(route[0].x-hero.x,route[0].z-hero.z)<reach)route.shift();
+  const target=route[0];return target?this.visual.toward(Math.atan2(-(target.z-hero.z),target.x-hero.x),touchScreen()):null;
+ }
  step(input,dt){
   const s=this.state,c=this.car;this.goTime=Math.max(0,(this.goTime||0)-dt);
   if(!s.active&&this.freeCountdown>0){this.stop();const before=Math.ceil(this.freeCountdown);this.freeCountdown=Math.max(0,this.freeCountdown-dt);if(this.freeCountdown===0){this.goTime=.85;s.emitSound('raceGo');}else if(Math.ceil(this.freeCountdown)<before)s.emitSound('countdown');return true;}
@@ -330,15 +337,14 @@ export class ImmersiveMode {
    // A click on a supporter (or the registration circle) walks the pilot there (any key
    // takes over); while talking he stands.
    const free=s.fan===null&&!s.desk&&!s.leo,steering=input.throttle||input.brake||input.left||input.right;let walking=free?input:still;
-   if(free&&this.walkToLeo){if(steering)this.walkToLeo=false;else{const hero=this.visual.hero.position,route=this.walkToLeo;while(route.length>1&&Math.hypot(route[0].x-hero.x,route[0].z-hero.z)<.6)route.shift();const target=route[0];walking=this.visual.toward(Math.atan2(-(target.z-hero.z),target.x-hero.x),touchScreen());}}
+   if(free&&this.walkToLeo){if(steering)this.walkToLeo=false;else walking=this.follow(this.walkToLeo,.6,true);}
    if(free&&this.walkToFan!==null&&this.walkToFan!==undefined){
     if(steering)this.walkToFan=null;
-    else{const hero=this.visual.hero.position,target=this.visual.fans[this.walkToFan].pos,dx=target.x-hero.x,dz=target.z-hero.z;if(Math.hypot(dx,dz)<2.4){s.talk(this.walkToFan);this.walkToFan=null;walking=still;}else walking=this.visual.toward(Math.atan2(-dz,dx),touchScreen());}
+    else{const hero=this.visual.hero.position,target=this.visual.fans[this.walkToFan].pos;if(Math.hypot(target.x-hero.x,target.z-hero.z)<2.4){s.talk(this.walkToFan);this.walkToFan=null;walking=still;}else walking=this.follow(this.fanRoute??[target.clone()],.6,true);}
    }
    if(free&&this.walkToDesk?.length){
     if(steering)this.walkToDesk=null;
-    else{const hero=this.visual.hero.position,reached=v=>Math.hypot(v.x-hero.x,v.z-hero.z)<.3;while(this.walkToDesk.length&&reached(this.walkToDesk[0]))this.walkToDesk.shift();
-     const target=this.walkToDesk[0];if(target)walking=this.visual.toward(Math.atan2(-(target.z-hero.z),target.x-hero.x),touchScreen());else{this.walkToDesk=null;walking=still;}}
+    else{walking=this.follow(this.walkToDesk,.3,false);if(!walking){this.walkToDesk=null;walking=still;}}
    }
    if(this.visual.walk(walking,dt,{shift:!!this.shift,touch:touchScreen(),ground:this.walkGround}))s.emitSound('footstep');
    // Stepping into the circle at the team stand opens the registration (once per visit).

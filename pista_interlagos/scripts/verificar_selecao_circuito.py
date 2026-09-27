@@ -1,13 +1,19 @@
-"""Circuit choices must not navigate, build WebGL, fetch race assets or restart music."""
+"""Opening -> track screen -> mode. Choosing a circuit must not navigate, build WebGL, fetch
+race assets or restart music; leaving a race comes back to the track screen."""
+import json
+import sys
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 from browser_config import browser_executable,browser_args,wait_js
-import json
+
+PORT=sys.argv[1] if len(sys.argv)>1 else '8799'
+URL=f'http://127.0.0.1:{PORT}/pista_interlagos/teste/'
+ROOT=Path(__file__).resolve().parents[1]
 errors=[]
 with sync_playwright() as p:
  browser=p.chromium.launch(executable_path=browser_executable(),headless=True,args=browser_args())
  context=browser.new_context(viewport={'width':844,'height':390},is_mobile=True,has_touch=True)
- context.add_init_script("""localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false}));
+ context.add_init_script("""localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false}));localStorage.removeItem('opala99-championship-v1');
  window.mediaPlayers=[];const NativeAudio=window.Audio;window.Audio=new Proxy(NativeAudio,{construct(target,args){const player=Reflect.construct(target,args);mediaPlayers.push(player);return player;}});
  window.gpuContexts=0;const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){if(type.startsWith('webgl'))gpuContexts++;return original.call(this,type,...args);};""")
  page=context.new_page();page.set_default_timeout(120000)
@@ -15,43 +21,59 @@ with sync_playwright() as p:
  requests=[];navigations=[]
  page.on('request',lambda r:requests.append(r.url))
  page.on('request',lambda r:navigations.append(r.url) if r.is_navigation_request() and r.resource_type=='document' else None)
- def heavy():return [u for u in requests if any(s in u for s in ['.glb','/dados/pista.json','asfalto_','cockpit_faixa','/piloto/'])]
- page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='domcontentloaded');wait_js(page,"window.interlagos&&!document.querySelector('#start').disabled")
+ def heavy():return [u for u in requests if any(s in u for s in ['.glb','/dados/pista','asfalto_','cockpit_faixa','/piloto/'])]
+ page.goto(URL,wait_until='domcontentloaded');wait_js(page,"window.interlagos&&!document.querySelector('#play').disabled")
+ assert page.is_visible('#play') and not page.is_visible('#tracks') and not page.is_visible('#start')
+ # Jogar needs the pilot; then the track screen shows the four circuits and the three ways to race.
+ page.click('#play');assert page.is_visible('#pilotMessage') and not page.is_visible('#tracks')
+ page.fill('#pilotName','Piloto selecao');page.click('#play');wait_js(page,"!document.querySelector('#tracks').classList.contains('hidden')")
+ assert page.locator('#tracks [data-circuit]').count()==4 and page.is_visible('#start') and page.is_visible('#storyStart') and page.is_visible('#championshipStart')
+ assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
+ page.screenshot(path=str(ROOT/'renders/pistas_celular.png'))
  assert not heavy(),heavy();assert page.evaluate('gpuContexts')==0
  page.click('[data-circuit="curvelo"]');wait_js(page,"interlagos.audioInfo().recordings?.playing")
  page.evaluate('window.song=mediaPlayers.find(p=>!p.paused);window.songTime=song.currentTime;window.songSrc=song.src')
- for circuit in ['interlagos','curvelo','interlagos','curvelo']:
+ for circuit in ['cascavel','piracicaba','interlagos','curvelo']:
   page.click('[data-circuit="'+circuit+'"]')
+  assert page.get_attribute(f'[data-circuit="{circuit}"]','aria-pressed')=='true'
  page.wait_for_timeout(500)
  assert len(navigations)==1,navigations
  assert page.evaluate('song===mediaPlayers.find(p=>!p.paused)&&song.src===songSrc&&song.currentTime>songTime')
  assert not heavy(),heavy();assert page.evaluate('gpuContexts')==0
  assert page.evaluate("JSON.parse(localStorage.getItem('opala99-preferences-v1')).circuit")=='curvelo'
+ # Back to the opening and forward again keeps the choice; the records dialog opens there.
+ page.click('#tracksBack');assert page.is_visible('#play') and not page.is_visible('#tracks')
  page.click('#recordsButton');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-pressed')=='true';page.click('#recordsClose')
- page.click('#settingsButton');page.select_option('#camera','hood');page.select_option('#livery','seiva_danilo');page.click('#settingsBack')
+ page.click('#settingsButton');page.select_option('#camera','hood');page.select_option('#livery','seiva_danilo');page.click('#settingsClose')
+ page.click('#play');assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
  assert not heavy(),heavy()
- print(json.dumps({'selectionNoReload':True,'sameSongContinues':True,'noRaceAssetsOrGPU':True,'settingsBeforeRace':True}),flush=True)
- page.fill('#pilotName','Piloto selecao');page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
+ print(json.dumps({'playNeedsPilot':True,'trackScreen':True,'selectionNoReload':True,'sameSongContinues':True,'noRaceAssetsOrGPU':True}),flush=True)
+ page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
  assert heavy();assert page.evaluate('gpuContexts')==1
  page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();fixture.onMainMenu();}""")
+ # Leaving the race lands on the track screen, not the opening.
+ assert page.is_visible('#tracks') and not page.is_visible('#play')
  count=len(heavy());page.click('[data-circuit="interlagos"]');page.wait_for_timeout(250)
  assert len(heavy())==count;assert page.evaluate("interlagos.circuit==='curvelo'")
- # Fail one load, keep the menu usable, then retry in the same audio session.
+ # Fail one load, keep the track screen usable, then retry in the same audio session.
  page.route('**/dados/pista.json',lambda r:r.fulfill(status=503,body='Unavailable'))
  page.click('#start');wait_js(page,"!document.querySelector('#start').disabled&&!interlagos.ready")
- assert page.is_visible('#circuitPicker');page.unroute('**/dados/pista.json')
+ assert page.is_visible('#tracks');page.unroute('**/dados/pista.json')
  page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='interlagos'&&!interlagos.state.paused")
  page.evaluate('interlagos.immersiveInfo();fixture.onMainMenu()')
- assert page.locator('#immersivePanel').count()==1;assert page.locator('#pitPanel').count()==0
- page.click('[data-circuit="curvelo"]');page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
+ assert page.locator('#immersivePanel').count()==1;assert page.locator('#pitPanel').count()<=1
+ page.click('[data-circuit="cascavel"]');page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='cascavel'&&!interlagos.state.paused")
  assert page.locator('#immersivePanel').count()==1;assert page.locator('#pitPanel').count()==1;assert page.locator('#gridRoster li').count()==15
  assert len(navigations)==1;assert page.evaluate('gpuContexts')==1
+ # The pause menu: back to the track, restart, change track (to the track screen).
+ page.tap('#touchMenu');page.tap('#settingsClose')
+ assert page.is_visible('#resume') and page.is_visible('#restartRace') and page.is_visible('#leaveRace') and not page.is_visible('#play')
+ page.click('#resume');wait_js(page,'!interlagos.state.paused')
  # Restart on the loaded circuit: no second world, model fetch or blocked skin control.
  page.evaluate('interlagos.immersiveInfo();fixture.onMainMenu();window.previousCar=interlagos.car')
  count=len(heavy());page.click('#start');wait_js(page,"interlagos.ready&&!interlagos.state.paused")
  assert page.evaluate('interlagos.car===previousCar');assert len(heavy())==count
  assert not page.is_disabled('#skinButton')
- print(json.dumps({'startsOnlyOnClick':True,'retryLoad':True,'switchesBothWays':True,'singleRenderer':True,'noDuplicateUI':True}),flush=True)
+ print(json.dumps({'startsOnlyOnClick':True,'retryLoad':True,'switchesBothWays':True,'singleRenderer':True,'noDuplicateUI':True,'pauseMenu':True}),flush=True)
  browser.close()
 assert not errors,errors
-

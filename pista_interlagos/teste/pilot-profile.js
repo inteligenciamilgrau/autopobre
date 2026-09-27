@@ -24,7 +24,7 @@ export class PilotPicker {
  constructor(profiles=new PilotProfiles()){
   this.profiles=profiles;this.root=document.createElement('section');this.root.id='pilotPicker';
   this.root.innerHTML='<label id="pilotLabel" for="pilotName">Piloto</label><div class="pilot-fields"><select id="pilotSelect" aria-labelledby="pilotLabel" hidden></select><input id="pilotName" aria-labelledby="pilotLabel" maxlength="32" autocomplete="nickname" placeholder="Digite seu nome" required></div><small id="pilotMessage" role="status"></small>';
-  document.getElementById('circuitPicker').before(this.root);this.input=this.root.querySelector('input');this.select=this.root.querySelector('select');this.message=this.root.querySelector('small');
+  document.querySelector('#menu .menu-modes').before(this.root);this.input=this.root.querySelector('input');this.select=this.root.querySelector('select');this.message=this.root.querySelector('small');
   this.select.onchange=()=>{if(this.select.value)this.profiles.remember(this.select.value);this.input.hidden=this.select.value!=='';this.input.value=this.select.value;this.message.textContent='';this.root.querySelector('label').htmlFor=this.input.hidden?'pilotSelect':'pilotName';if(!this.input.hidden)this.input.focus();};
   this.input.oninput=()=>{this.input.setCustomValidity('');this.message.textContent='';};this.render();
  }

@@ -16,7 +16,7 @@ with sync_playwright() as p:
   page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='domcontentloaded');wait_js(page,"!document.querySelector('#start').disabled")
   assert page.evaluate("!interlagos.ready")
   page.screenshot(path=str(ROOT/f'renders/curvelo_abertura_{mobile}.png'))
-  page.fill('#pilotName','Teste Curvelo');page.click('#start');wait_js(page,'window.interlagos?.ready');wait_js(page,'interlagos.car.clock>0')
+  page.fill('#pilotName','Teste Curvelo');page.click('#play');page.click('#start');wait_js(page,'window.interlagos?.ready');wait_js(page,'interlagos.car.clock>0')
   assert page.evaluate("interlagos.circuit==='curvelo'&&interlagos.car.data.meta.reconstructed_xy_m===1250")
   assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -32,7 +32,7 @@ with sync_playwright() as p:
   page.click('#resultsRecords');page.click('[data-records-source="human"]');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-pressed')=='true'
   assert page.locator('#lapRecords tbody tr').count()==1
   page.click('[data-records-circuit="interlagos"]');assert page.locator('#lapRecords tbody tr').count()==0
-  page.click('#recordsClose');page.click('#resultsMainMenu');assert page.is_visible('#circuitPicker')
+  page.click('#recordsClose');page.click('#resultsMainMenu');assert page.is_visible('#tracks')
   page.click('#storyStart')
   wait_js(page,"fixture.active&&fixture.state.phase==='crowd'")
   page.screenshot(path=str(ROOT/f'renders/curvelo_boxes_{mobile}.png'))

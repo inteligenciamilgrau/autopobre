@@ -9,8 +9,8 @@ GAME = 'pista_interlagos/teste/'
 MODULES = (
     'pilot-profile.js', 'ai-records.js', 'ai-record-references.js',
     'car-condition.js', 'pit-lane.js', 'interlagos-pit.js', 'pit-building.js', 'pit-box99.js', 'pit-crew.js', 'pit-textures.js', 'on-foot.js', 'pitstop.js', 'pitstop.css',
-    'circuits.js', 'curvelo-data.js', 'curvelo-scene.js', 'track-clearance.js', 'interlagos-stands.js',
-    'race-results.js', 'race-results.css', 'lap-records.js',
+    'circuits.js', 'curvelo-data.js', 'curvelo-scene.js', 'open-circuit.js', 'track-clearance.js', 'interlagos-stands.js',
+    'race-results.js', 'race-results.css', 'lap-records.js', 'championship.js', 'championship-board.js', 'pistas.css',
     'race-roster.js',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'car-openings.js', 'cockpit.js', 'cockpit-materials.js', 'cockpit-instruments.js', 'cockpit-rear.js', 'cockpit-equipment.js',
@@ -22,6 +22,7 @@ MODULES = (
 )
 ASSETS = (
     'branding/old_stock_preparada_v1.png',
+    'circuitos/cascavel_solo.jpg', 'circuitos/piracicaba_solo.jpg',
     'opala99_assinaturas_omp.glb', 'opala99_seiva_danilo.glb',
     'abertura/desclassificado_v1.png', 'abertura/abertura_stevan_opala99.png', 'abertura/logo_auto_pobre_racing.png',
     'piloto/capacete_publico.jpg', 'piloto/referencia_frente.png',
@@ -50,6 +51,8 @@ PUBLIC_FILES.update({'assets/' + name: GAME + 'assets/' + name for name in ASSET
 PUBLIC_FILES.update({'vendor/three/' + name: GAME + 'node_modules/three/' + name for name in THREE})
 PUBLIC_FILES.update({
     'dados/pista.json': 'pista_interlagos/dados/pista.json',
+    'dados/pista_cascavel.json': 'pista_interlagos/dados/pista_cascavel.json',
+    'dados/pista_piracicaba.json': 'pista_interlagos/dados/pista_piracicaba.json',
     'exports/interlagos_pista.glb': 'pista_interlagos/exports/interlagos_pista.glb',
 })
 AUDIO_NAMES = ('intro.mp3', 'race.mp3', 'patrocinio.mp3', 'turbo.mp3', 'hojenaodeu.mp3', 'energia.mp3')

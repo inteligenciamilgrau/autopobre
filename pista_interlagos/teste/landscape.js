@@ -441,15 +441,17 @@ function realisticLakes(field,bodies,shore,waves,{mobile=false}={}){
 
 // Shoreline of the current circuit's lakes, for the terrain's wet banks (set by createLandscape).
 const terrainShore={shoreMap:{value:null},shoreBounds:{value:new THREE.Vector4(0,0,1,1)},shoreOn:{value:0}};
-export function terrainMaterial(textures,field,{ortho=null,mobile=false}={}){
+// cover: land-cover texture (R woods, G paved/built, B bare soil) of circuits built from
+// open data; it replaces reading those classes from the colours of an aerial photograph.
+export function terrainMaterial(textures,field,{ortho=null,cover=null,mobile=false}={}){
  // Pushed back in depth: far away, roads and kerbs a few centimetres above it still win.
  const material=new THREE.MeshStandardMaterial({name:'Terreno_paisagem_v1',map:ortho,roughness:.95,metalness:0,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:2});
  material.onBeforeCompile=shader=>{
-  Object.assign(shader.uniforms,terrainShore,{grassMap:{value:textures.grass},wildMap:{value:textures.wild},concreteMap:{value:textures.concrete},grassNormalMap:{value:textures.grassNormal},
+  Object.assign(shader.uniforms,terrainShore,{coverMap:{value:cover},grassMap:{value:textures.grass},wildMap:{value:textures.wild},concreteMap:{value:textures.concrete},grassNormalMap:{value:textures.grassNormal},
    trackField:{value:field.texture},fieldBounds:{value:new THREE.Vector4(field.x0,field.y0,field.width,field.height)}});
   shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vLandWorld;').replace('#include <begin_vertex>','#include <begin_vertex>\nvLandWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
   shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-uniform sampler2D grassMap,wildMap,concreteMap,grassNormalMap,trackField,shoreMap;uniform vec4 fieldBounds,shoreBounds;uniform float shoreOn;varying vec3 vLandWorld;
+uniform sampler2D grassMap,wildMap,concreteMap,grassNormalMap,trackField,shoreMap,coverMap;uniform vec4 fieldBounds,shoreBounds;uniform float shoreOn;varying vec3 vLandWorld;
 float landHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float landNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(landHash(i),landHash(i+vec2(1,0)),f.x),mix(landHash(i+vec2(0,1)),landHash(i+vec2(1,1)),f.x),f.y);}
 `).replace('#include <map_fragment>',`
@@ -470,6 +472,11 @@ float macro=landNoise(w*.011)*.6+landNoise(w*.043)*.4;
  float lum=.45,treeM=0.0,roofM=0.0,pavedM=0.0,paintM=0.0;
  vec3 ortho=mix(vec3(.16,.15,.07),vec3(.11,.14,.05),macro);
  vec3 wildTint=mix(vec3(1.25,1.05,.8),vec3(.85,1.0,.75),landNoise(w*.006));
+#endif
+float bareM=0.0;
+#ifdef USE_COVER
+ vec4 landCover=texture2D(coverMap,vMapUv);
+ treeM=landCover.r;roofM=0.0;pavedM=landCover.g;paintM=0.0;bareM=landCover.b;
 #endif
 treeM*=1.0-waterBed;
 vec3 grass=mix(texture2D(grassMap,w/3.3).rgb,texture2D(grassMap,w/12.7+.31).rgb,.45);
@@ -499,6 +506,8 @@ vec3 paved=mix(concrete*clamp(lum*1.25,.45,1.2),asphalt,groomed);
 ground=mix(ground,paved,pavedM*(1.0-paintM));
 ground=mix(ground,mix(asphalt*1.15,vec3(.03,.1,.085),.5),paintM);
 ground=mix(ground,concrete*.55,roofM*(1.0-groomed));
+// Exposed soil keeps the colour seen from orbit (the red earth of western Paraná, dry fields).
+ground=mix(ground,mix(wild*vec3(.62,.45,.32),ortho*1.3,.6),bareM*(1.0-groomed*.8));
 // The aerial photograph reads correctly from afar and hides texture repetition.
 ground=mix(ground,ortho*vec3(.9,.94,.86),smoothstep(220.0,1100.0,viewDist)*.75);
 // Lake bed and a damp, darker bank along the smooth shoreline (the cell flags would show steps).
@@ -515,8 +524,8 @@ diffuseColor.rgb=ground;
  normal=normalize(normal+(viewMatrix*vec4(grassBump.x,0.0,-grassBump.y,0.0)).xyz*bumpAmount);
 #endif`);
  };
- if(mobile)material.defines={LAND_SIMPLE:''};
- material.customProgramCacheKey=()=>'terrain-landscape-v3-'+(ortho?'ortho':'cerrado')+(mobile?'-mobile':'');
+ material.defines={...(mobile?{LAND_SIMPLE:''}:{}),...(cover&&ortho?{USE_COVER:''}:{})};
+ material.customProgramCacheKey=()=>'terrain-landscape-v3-'+(ortho?'ortho':'cerrado')+(cover&&ortho?'-cover':'')+(mobile?'-mobile':'');
  return material;
 }
 
@@ -751,7 +760,10 @@ function treeColor(rand,dry=0){
  return [c[0]*k+dry*.05,c[1]*k+dry*.01,c[2]*k];
 }
 
-export function createLandscape({data,field,ortho=null,mobile=false,style='urban'}){
+// Circuits from open data pass cover (data.scenery.cover: a class per terrain cell) and
+// buildings (data.scenery.buildings: real footprints as oriented rectangles) instead of
+// an orthophoto; cityAngle points the distant skyline at the city (radians, track frame).
+export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban'}){
  const root=new THREE.Group();root.name='Paisagem';
  const rand=random(data.samples.length*7919+17),stats={trees:0,houses:0,water:0};
  const trees=[],tall=[],houses=[],flats=[],lajes=[];
@@ -802,6 +814,26 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
    const item={x:px,y:py,z:Math.min(...corner)-.15,w,d,h:floors*3+.4+rand()*.6,turn:-turn,color:tallBuilding?[.42,.43,.44]:[.42+rand()*.16,.11+rand()*.06,.04+rand()*.03]};
    if(!tallBuilding&&rand()<.4){item.color=[.47,.46,.44];lajes.push(item);}else (tallBuilding?flats:houses).push(item);
   }
+ }else if(cover){
+  // Woods and scrub where the land-cover grid (ESA WorldCover, OSM woods) says so.
+  const classAt=(x,y)=>{const i=Math.floor((x-cover.x0)/cover.step+.5),j=Math.floor((y-cover.y0)/cover.step+.5);return i<0||j<0||i>=cover.nx||j>=cover.ny?'0':cover.classes[j*cover.nx+i];};
+  const spacing=mobile?9:6.5;
+  for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
+   const px=x+(rand()-.5)*spacing*.9,py=y+(rand()-.5)*spacing*.9,cell=field.cell(px,py),kind=classAt(px,py);
+   if(cell<0||(kind!=='1'&&kind!=='2'))continue;const edge=field.edge[cell];
+   if(edge<=9||rand()>(kind==='1'?.72:.22))continue;
+   const h=kind==='1'?(edge<25?7:8.5)+rand()*7:3+rand()*3.5,list=kind==='1'&&rand()<.2?tall:trees;
+   const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.4:h,width:(list===tall?.75:.95)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand,kind==='2'?.7:0)};
+   if(edge>tree.width/2+2)list.push(tree);
+  }
+  // Real buildings: OSM and Microsoft footprints, each its own oriented rectangle.
+  const cols=Object.fromEntries((buildings?.columns??[]).map((k,i)=>[k,i]));
+  for(const b of buildings?.items??[]){
+   const x=b[cols.x],y=b[cols.y],w=b[cols.w],d=b[cols.d],turn=b[cols.heading],h=b[cols.h],shed=b[cols.kind]==='galpao',c=Math.cos(turn),sn=Math.sin(turn);
+   const corner=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([a,e])=>terrainHeight(data,x+c*a*w/2-sn*e*d/2,y+sn*a*w/2+c*e*d/2));
+   const item={x,y,z:Math.min(...corner)-.15,w,d,h,turn,color:shed?[.5+rand()*.12,.52+rand()*.1,.53+rand()*.1]:[.42+rand()*.16,.11+rand()*.06,.04+rand()*.03]};
+   if(shed)flats.push(item);else if(rand()<.35){item.color=[.47,.46,.44];lajes.push(item);}else houses.push(item);
+  }
  }else if(style==='cerrado'){
   // Sparse, low cerrado trees away from the oval and the service area.
   const spacing=mobile?16:11;
@@ -824,7 +856,7 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
  if(houses.length)root.add(chunked('Casas',houseGeometry(false),houseMaterial,houses,composeHouse,{size:450}));
  if(flats.length)root.add(chunked('Predios',houseGeometry(true),houseMaterial,flats,composeHouse,{size:900}));
  if(lajes.length)root.add(chunked('Casas_laje',houseGeometry('laje'),houseMaterial,lajes,composeHouse,{size:450}));
- const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado'});root.add(horizon.root);
+ const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado',cityAngle});root.add(horizon.root);
  Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
  let realistic=false;
  return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
@@ -867,7 +899,7 @@ export function createLandscape({data,field,ortho=null,mobile=false,style='urban
 
 // Ground continues past the surveyed terrain, rising into hazy hills and a
 // distant skyline so the world never ends at the edge of the LiDAR grid.
-function createHorizon(data,field,rand,{mobile,urban}){
+function createHorizon(data,field,rand,{mobile,urban,cityAngle=Math.PI/2}){
  const t=data.terrain,root=new THREE.Group();root.name='Horizonte';
  const border=[],x1=t.x0+(t.nx-1)*t.step,y1=t.y0+(t.ny-1)*t.step,cx=(t.x0+x1)/2,cy=(t.y0+y1)/2;
  for(let i=0;i<t.nx-1;i++)border.push([t.x0+i*t.step,t.y0,0,-1]);
@@ -891,7 +923,7 @@ function createHorizon(data,field,rand,{mobile,urban}){
  const ground=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({name:'Horizonte_solo',vertexColors:true,roughness:1}));ground.name='Horizonte_solo';ground.receiveShadow=false;root.add(ground);
  let buildings=0;
  if(urban){
-  // Neighbourhood rooftops and, farther out, taller towers toward the city centre (north).
+  // Neighbourhood rooftops and, farther out, taller towers toward the city centre (north at Interlagos).
   const items=[],towers=[],count=mobile?1400:3600;
   for(let i=0;i<count;i++){
    const b=border[Math.floor(rand()*N)],rx=b[0]-cx,ry=b[1]-cy,rl=Math.hypot(rx,ry),dx=b[2]*.4+rx/rl*.6,dy=b[3]*.4+ry/rl*.6,dl=Math.hypot(dx,dy);
@@ -901,7 +933,7 @@ function createHorizon(data,field,rand,{mobile,urban}){
    items.push({x,y,z:z-1.2,w:6+rand()*4,d:8+rand()*6,h:floors*3+1,turn:Math.round(rand()*4)*Math.PI/2+(rand()-.5)*.3,color:floors>2?[.4,.42,.44]:[.42+rand()*.14,.12+rand()*.05,.05]});
   }
   for(let i=0;i<(mobile?90:220);i++){
-   const angle=Math.PI/2+(rand()-.5)*2.4,dist=1700+rand()*2300,x=cx+Math.cos(angle)*dist,y=cy+Math.sin(angle)*dist+Math.max(0,dist-1500)*.2;
+   const angle=cityAngle+(rand()-.5)*2.4,dist=1700+rand()*2300,x=cx+Math.cos(angle)*dist,y=cy+Math.sin(angle)*dist+Math.max(0,dist-1500)*.2*Math.sin(cityAngle);
    towers.push({x,y,z:base+15+hill(x,y)*38+dist*.012,w:14+rand()*18,d:14+rand()*18,h:28+Math.pow(rand(),2)*110,turn:rand()*Math.PI,color:[.26+rand()*.12,.29+rand()*.12,.33+rand()*.12]});
   }
   const material=sceneryMaterial('house'),compose=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);};

@@ -30,7 +30,7 @@ with sync_playwright() as p:
   page.keyboard.up('KeyA');page.keyboard.press('Space');page.keyboard.press('KeyP')
   before=info();frame();frame();check('pause_keeps_phone_state',before==info())
   race_options(page,livery='seiva_danilo');check('skin_change_preserves_message',info()==before)
-  page.click('#start');page.keyboard.press('Space');page.screenshot(path=str(ROOT/'renders/celular_seiva.png'));page.keyboard.press('Space')
+  page.click('#resume');page.keyboard.press('Space');page.screenshot(path=str(ROOT/'renders/celular_seiva.png'));page.keyboard.press('Space')
   page.click('#cockpitButton');frame();before=info();frame();frame();check('external_view_preserves_schedule',before==info())
   page.evaluate('interlagos.reset()');check('reset_clears_phone',info()['count']==0 and info()['message'] is None)
   check('no_browser_errors',not report['errors']);report['passed']=True

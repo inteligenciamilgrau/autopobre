@@ -15,7 +15,8 @@ function geometryFrom(positions,uvs,indices,extra){
  for(const [name,values,size] of extra??[])g.setAttribute(name,new THREE.Float32BufferAttribute(values,size));
  if(indices)g.setIndex(indices);g.computeVertexNormals();return g;
 }
-export function createInterlagosPit(data,roadSurface,textures){
+// labels: the circuit's names on Box 99 (pit-box99.js); Interlagos keeps its own defaults.
+export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
  const pit=data.pit,c=Object.fromEntries(pit.columns.map((k,i)=>[k,i])),a=pit.samples,n=a.length;
  const root=new THREE.Group();root.name='Pit_lane_Interlagos';const obstacles=[];
  const at=(p,d,lift=0)=>new THREE.Vector3(p[c.x]+p[c.lx]*d,p[c.z]+p[c.bank]*d+lift,-(p[c.y]+p[c.ly]*d));
@@ -114,7 +115,7 @@ export function createInterlagosPit(data,roadSurface,textures){
  if(fenceParts.length){const f=new THREE.Mesh(mergeGeometries(fenceParts,false),fence);f.name='Alambrado_muro_boxes';root.add(f);}
  if(posts.length){const inst=new THREE.InstancedMesh(new THREE.BoxGeometry(.08,1,.08),metal,posts.length),m=new THREE.Matrix4();posts.forEach((p,i)=>{m.makeScale(1,p.h,1).setPosition(p.x,p.z,-p.y);inst.setMatrixAt(i,m);});inst.name='Postes_alambrado';inst.castShadow=true;inst.computeBoundingSphere();root.add(inst);}
  // --- Garage row, Box 99 with the Lanchonete da Tia, crew and people (pit-building.js).
- const {box}=createPitBuildings({pit,c,lerp,at,root,obstacles,textures});
+ const {box}=createPitBuildings({pit,c,lerp,at,root,obstacles,textures,labels});
  // --- Signs at the entry and on the pit wall.
  {
   const board=(text,sub,bg,fg)=>canvasTexture((ctx,w,h)=>{ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);ctx.fillStyle=fg;ctx.textAlign='center';ctx.font='bold 92px sans-serif';ctx.fillText(text,w/2,h*.47);ctx.font='bold 46px sans-serif';ctx.fillText(sub,w/2,h*.82);},512,256);
