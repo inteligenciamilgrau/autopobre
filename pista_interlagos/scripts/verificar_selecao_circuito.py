@@ -1,5 +1,6 @@
-"""Opening -> track screen -> mode. Choosing a circuit must not navigate, build WebGL, fetch
-race assets or restart music; leaving a race comes back to the track screen."""
+"""Opening (Modo Corrida / Modo História) -> track screen (circuit, Corrida única or
+Campeonato). Choosing a circuit must not navigate, build WebGL, fetch race assets or restart
+music; leaving a race comes back to the track screen of the same mode."""
 import json
 import sys
 from pathlib import Path
@@ -22,12 +23,16 @@ with sync_playwright() as p:
  page.on('request',lambda r:requests.append(r.url))
  page.on('request',lambda r:navigations.append(r.url) if r.is_navigation_request() and r.resource_type=='document' else None)
  def heavy():return [u for u in requests if any(s in u for s in ['.glb','/dados/pista','asfalto_','cockpit_faixa','/piloto/'])]
- page.goto(URL,wait_until='domcontentloaded');wait_js(page,"window.interlagos&&!document.querySelector('#play').disabled")
- assert page.is_visible('#play') and not page.is_visible('#tracks') and not page.is_visible('#start')
- # Jogar needs the pilot; then the track screen shows the four circuits and the three ways to race.
- page.click('#play');assert page.is_visible('#pilotMessage') and not page.is_visible('#tracks')
- page.fill('#pilotName','Piloto selecao');page.click('#play');wait_js(page,"!document.querySelector('#tracks').classList.contains('hidden')")
- assert page.locator('#tracks [data-circuit]').count()==4 and page.is_visible('#start') and page.is_visible('#storyStart') and page.is_visible('#championshipStart')
+ page.goto(URL,wait_until='domcontentloaded');wait_js(page,"window.interlagos&&!document.querySelector('#start').disabled")
+ assert page.is_visible('#start') and page.is_visible('#storyStart') and not page.is_visible('#tracks') and not page.is_visible('#singleRace')
+ assert page.inner_text('#start')=='Modo Corrida →' and page.inner_text('#storyStart')=='Modo História →'
+ # A mode needs the pilot; then the track screen shows the four circuits and the two ways to race.
+ page.click('#start');assert page.is_visible('#pilotMessage') and not page.is_visible('#tracks')
+ page.fill('#pilotName','Piloto selecao');page.click('#storyStart');wait_js(page,"!document.querySelector('#tracks').classList.contains('hidden')")
+ assert page.get_attribute('#tracks','data-mode')=='historia' and 'MODO HISTÓRIA' in page.inner_text('#tracksMode') and 'MODO HISTÓRIA' in page.inner_text('#championshipKicker')
+ page.screenshot(path=str(ROOT/'renders/pistas_celular_historia.png'))
+ page.click('#tracksBack');page.click('#start');assert page.get_attribute('#tracks','data-mode')=='corrida' and 'MODO CORRIDA' in page.inner_text('#championshipKicker')
+ assert page.locator('#tracks [data-circuit]').count()==4 and page.is_visible('#singleRace') and page.is_visible('#championshipStart') and not page.is_visible('#storyStart')
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
  page.screenshot(path=str(ROOT/'renders/pistas_celular.png'))
  assert not heavy(),heavy();assert page.evaluate('gpuContexts')==0
@@ -42,36 +47,36 @@ with sync_playwright() as p:
  assert not heavy(),heavy();assert page.evaluate('gpuContexts')==0
  assert page.evaluate("JSON.parse(localStorage.getItem('opala99-preferences-v1')).circuit")=='curvelo'
  # Back to the opening and forward again keeps the choice; the records dialog opens there.
- page.click('#tracksBack');assert page.is_visible('#play') and not page.is_visible('#tracks')
+ page.click('#tracksBack');assert page.is_visible('#start') and not page.is_visible('#tracks')
  page.click('#recordsButton');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-pressed')=='true';page.click('#recordsClose')
  page.click('#settingsButton');page.select_option('#camera','hood');page.select_option('#livery','seiva_danilo');page.click('#settingsClose')
- page.click('#play');assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
+ page.click('#start');assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
  assert not heavy(),heavy()
- print(json.dumps({'playNeedsPilot':True,'trackScreen':True,'selectionNoReload':True,'sameSongContinues':True,'noRaceAssetsOrGPU':True}),flush=True)
- page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
+ print(json.dumps({'modeNeedsPilot':True,'modeFirst':True,'trackScreen':True,'selectionNoReload':True,'sameSongContinues':True,'noRaceAssetsOrGPU':True}),flush=True)
+ page.click('#singleRace');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
  assert heavy();assert page.evaluate('gpuContexts')==1
  page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();fixture.onMainMenu();}""")
  # Leaving the race lands on the track screen, not the opening.
- assert page.is_visible('#tracks') and not page.is_visible('#play')
+ assert page.is_visible('#tracks') and not page.is_visible('#start') and page.get_attribute('#tracks','data-mode')=='corrida'
  count=len(heavy());page.click('[data-circuit="interlagos"]');page.wait_for_timeout(250)
  assert len(heavy())==count;assert page.evaluate("interlagos.circuit==='curvelo'")
  # Fail one load, keep the track screen usable, then retry in the same audio session.
  page.route('**/dados/pista.json',lambda r:r.fulfill(status=503,body='Unavailable'))
- page.click('#start');wait_js(page,"!document.querySelector('#start').disabled&&!interlagos.ready")
+ page.click('#singleRace');wait_js(page,"!document.querySelector('#singleRace').disabled&&!interlagos.ready")
  assert page.is_visible('#tracks');page.unroute('**/dados/pista.json')
- page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='interlagos'&&!interlagos.state.paused")
+ page.click('#singleRace');wait_js(page,"interlagos.ready&&interlagos.circuit==='interlagos'&&!interlagos.state.paused")
  page.evaluate('interlagos.immersiveInfo();fixture.onMainMenu()')
  assert page.locator('#immersivePanel').count()==1;assert page.locator('#pitPanel').count()<=1
- page.click('[data-circuit="cascavel"]');page.click('#start');wait_js(page,"interlagos.ready&&interlagos.circuit==='cascavel'&&!interlagos.state.paused")
+ page.click('[data-circuit="cascavel"]');page.click('#singleRace');wait_js(page,"interlagos.ready&&interlagos.circuit==='cascavel'&&!interlagos.state.paused")
  assert page.locator('#immersivePanel').count()==1;assert page.locator('#pitPanel').count()==1;assert page.locator('#gridRoster li').count()==15
  assert len(navigations)==1;assert page.evaluate('gpuContexts')==1
  # The pause menu: back to the track, restart, change track (to the track screen).
  page.tap('#touchMenu');page.tap('#settingsClose')
- assert page.is_visible('#resume') and page.is_visible('#restartRace') and page.is_visible('#leaveRace') and not page.is_visible('#play')
+ assert page.is_visible('#resume') and page.is_visible('#restartRace') and page.is_visible('#leaveRace') and not page.is_visible('#start') and not page.is_visible('#storyStart')
  page.click('#resume');wait_js(page,'!interlagos.state.paused')
  # Restart on the loaded circuit: no second world, model fetch or blocked skin control.
- page.evaluate('interlagos.immersiveInfo();fixture.onMainMenu();window.previousCar=interlagos.car')
- count=len(heavy());page.click('#start');wait_js(page,"interlagos.ready&&!interlagos.state.paused")
+ page.evaluate('interlagos.immersiveInfo();fixture.onMainMenu();window.previousCar=interlagos.car;true')  # not the car: serialising it takes minutes
+ count=len(heavy());page.click('#singleRace');wait_js(page,"interlagos.ready&&!interlagos.state.paused")
  assert page.evaluate('interlagos.car===previousCar');assert len(heavy())==count
  assert not page.is_disabled('#skinButton')
  print(json.dumps({'startsOnlyOnClick':True,'retryLoad':True,'switchesBothWays':True,'singleRenderer':True,'noDuplicateUI':True,'pauseMenu':True}),flush=True)

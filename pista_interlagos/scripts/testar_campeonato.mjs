@@ -1,6 +1,7 @@
-// Championship (teste/championship.js): points, round order, persistence and standings.
+// Championship (teste/championship.js): points, round order, persistence, standings, one
+// championship per mode, and the story's retirements and disqualifications.
 import assert from 'node:assert/strict';
-import {Championship,CHAMPIONSHIP_ROUNDS,CHAMPIONSHIP_POINTS,CHAMPIONSHIP_KEY,pointsFor,championshipStandings} from '../teste/championship.js';
+import {Championship,CHAMPIONSHIP_ROUNDS,CHAMPIONSHIP_POINTS,CHAMPIONSHIP_KEY,championshipKey,pointsFor,championshipStandings} from '../teste/championship.js';
 import {RIVAL_ROSTER} from '../teste/race-roster.js';
 
 const memory=()=>{const data=new Map();return {getItem:k=>data.has(k)?data.get(k):null,setItem:(k,v)=>data.set(k,String(v)),removeItem:k=>data.delete(k),data};};
@@ -45,5 +46,23 @@ const tie=championshipStandings({pilot:'X',results:[
  {circuit:'interlagos',rows:[{number:'73',name:'A',position:1,points:25},{number:'00',name:'B',position:2,points:20}]},
  {circuit:'cascavel',rows:[{number:'00',name:'B',position:6,points:10},{number:'73',name:'A',position:11,points:5}]}]});
 assert.equal(tie[0].points,30);assert.equal(tie[1].points,30);assert.equal(tie[0].number,'73','same points: more wins first');
+// Modo História keeps its own championship beside the Modo Corrida one.
+assert.equal(championshipKey('corrida'),CHAMPIONSHIP_KEY);assert.notEqual(championshipKey('historia'),CHAMPIONSHIP_KEY);
+const story=new Championship(storage,'historia');
+assert(!story.started&&again.finished,'the story championship starts empty; the race one is untouched');
+story.start('Ana',2);assert(new Championship(storage,'historia').active&&new Championship(storage).finished);
+{const s=memory();s.setItem(championshipKey('historia'),storage.getItem(CHAMPIONSHIP_KEY));assert.equal(new Championship(s,'historia').state,null,'a race save is not a story save');}
+// Towed in (dnf): last, no points, no finish for the tie-breaks.
+const retired=order(15);retired[14]={...retired[14],finished:false,dnf:true};
+const r1=story.record(0,'interlagos',retired,'Ana');
+assert.equal(r1.points.get('99'),0);assert.equal(r1.player.points,0);assert(r1.rows.at(-1).dnf&&r1.rows.at(-1).player);
+assert.equal(r1.player.best,Infinity,'a retirement is not a finish');assert(r1.player.rounds[0].dnf);
+// Disqualified after a win: the round's points go, once; the win and podium do not count.
+story.record(1,'cascavel',order(1),'Ana');assert.equal(story.summary(1).player.points,25);
+assert(story.disqualify(1));assert(!story.disqualify(1),'once');assert(!story.disqualify(2),'only a scored round');
+const dsq=new Championship(storage,'historia').standings().find(d=>d.player);
+assert.equal(dsq.points,0);assert.equal(dsq.wins,0);assert.equal(dsq.podiums,0);assert(dsq.rounds[1].dsq&&dsq.rounds[1].position===1);
+assert.equal(story.round,2,'a disqualification keeps the calendar going');
+story.reset();assert(new Championship(storage).finished,'resetting one mode keeps the other');
 again.reset();assert(!again.started);assert.equal(storage.getItem(CHAMPIONSHIP_KEY),null);
 console.log(JSON.stringify({passed:true,rounds:CHAMPIONSHIP_ROUNDS,points:CHAMPIONSHIP_POINTS,champion:last.champion.number,championPoints:last.player.points}));

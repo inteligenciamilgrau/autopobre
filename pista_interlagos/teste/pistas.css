@@ -1,4 +1,4 @@
-/* Track screen (after Jogar): the circuits, the modes on the chosen one and the championship. */
+/* Track screen (after Modo Corrida or Modo História): the circuits, a single race on the chosen one or the championship. */
 #tracks{z-index:30;align-items:stretch;justify-content:center;padding:26px 4vw;overflow:auto;backdrop-filter:none;
  background-color:#0b1716;background-image:linear-gradient(90deg,#081211f7 0,#081211ec 55%,#081211c4 100%),url('./assets/abertura/abertura_stevan_opala99.png');background-size:cover;background-position:center}
 #tracks.hidden{display:none!important}
@@ -36,6 +36,9 @@
 #tracks .story-start{background:#152d29eb;color:#f4ce39;border:1px solid #d9b93c}
 #tracks .story-start:hover:not(:disabled){background:#21443ceb;color:#ffe574}
 #tracks button:disabled{opacity:.6;cursor:progress}
+/* Modo História: the single race takes the story's green and gold. */
+#tracks[data-mode=historia] #singleRace{background:#152d29eb;color:#f4ce39;border:1px solid #d9b93c}
+#tracks[data-mode=historia] #singleRace:hover:not(:disabled){background:#21443ceb;color:#ffe574}
 .championship-panel{padding:14px 16px;border-radius:9px;border:1px solid #d9b93c80;background:linear-gradient(170deg,#1b3a53ee,#0f2433ee);box-shadow:inset 0 3px #f4ce39}
 .championship-panel h3{margin:3px 0 10px;font-size:18px;color:#fff6dc}
 #championshipCalendar{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:5px}
@@ -104,7 +107,7 @@
  .track-cards svg{grid-row:1/4;width:52px;height:34px;margin:0}
  .track-cards b{font-size:12px;line-height:1.1}.track-cards span{font-size:9px;margin:1px 0 0}.track-cards small{display:none}.track-cards em{font-size:9px;margin:1px 0 0;min-height:0}
  .track-detail{margin-top:6px;padding:6px 9px}.track-detail p{font-size:10px;margin:0 0 3px;line-height:1.35}#circuitIntro,#circuitSource{display:none}
- .tracks-side{gap:6px}.tracks-modes{grid-template-columns:1fr 1fr;gap:6px}
+ .tracks-side{gap:6px}.tracks-modes{gap:6px}
  .tracks-modes button,.championship-start{padding:8px 9px;font-size:12px;min-height:44px}.tracks-modes small{font-size:9px}
  .championship-panel{padding:8px 10px}.championship-panel h3{display:none}
  #championshipCalendar{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:4px 0 6px}

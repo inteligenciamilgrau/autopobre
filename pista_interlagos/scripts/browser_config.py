@@ -64,21 +64,32 @@ def race_options(page, camera=None, livery=None, tap=False):
     press('#settingsClose')
 
 
+def choose_race(page, story=False, championship=False, tap=False):
+    """From the opening or the track screen, start a race without waiting for it to load.
+
+    The opening picks the mode: #start (Modo Corrida) or #storyStart (Modo História); both open
+    the track screen, where #singleRace is Corrida única and #championshipStart the
+    championship of that mode. A track screen showing the other mode goes back to the opening
+    (#tracksBack) to choose again."""
+    press = page.tap if tap else page.click
+    if page.is_visible('#tracks') and page.get_attribute('#tracks', 'data-mode') != ('historia' if story else 'corrida'):
+        press('#tracksBack')
+    if not page.is_visible('#tracks'):
+        press('#storyStart' if story else '#start')
+    press('#championshipStart' if championship else '#singleRace')
+
+
 def enter_track(page, pilot='Piloto teste', timeout=120000, tap=False, story=False, championship=False):
     """Start or resume a session. The first entry needs a pilot name.
 
-    The opening asks for the pilot and #play (Jogar) opens the track screen, where #start is
-    Corrida única, story=True clicks #storyStart (Modo História) and championship=True
-    #championshipStart. On a paused session #resume goes back to the track."""
+    Mode and race are chosen by choose_race; on a paused session #resume goes back to the track."""
     press = page.tap if tap else page.click
     if page.is_visible('#resume'):
         press('#resume')
     else:
         if pilot and page.is_visible('#pilotName') and not page.input_value('#pilotName'):
             page.fill('#pilotName', pilot)
-        if page.is_visible('#play'):
-            press('#play')
-        press('#championshipStart' if championship else '#storyStart' if story else '#start')
+        choose_race(page, story=story, championship=championship, tap=tap)
     wait_js(page, 'window.interlagos?.ready&&!interlagos.state.paused', timeout=timeout)
 
 

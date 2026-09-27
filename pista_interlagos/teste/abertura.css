@@ -19,7 +19,7 @@
 #menu .choices{margin:18px 0}
 #menu .primary{background:#f4ce39;color:#171c15}
 #menu .primary:hover{background:#ffe574}
-/* Opening: Jogar (or, paused, Voltar / Recomeçar / Trocar de pista), then Config and Recordes. */
+/* Opening: Modo Corrida / Modo História (or, paused, Voltar / Recomeçar / Trocar de pista), then Config and Recordes. */
 #menu .story-start{background:#152d29eb;color:#f4ce39;border:1px solid #d9b93c;padding:16px;font-weight:700}
 #menu .story-start:hover{background:#21443ceb;color:#ffe574}
 #menu .story-start[hidden]{display:none}
@@ -75,8 +75,8 @@ body:not(.touch-device) #menu .menu-tool-icon{display:block;width:18px;height:18
  .touch-device #pilotMessage{grid-column:2;font-size:9px;line-height:1.2;margin:0}
  .touch-device #menu .menu-modes{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:6px;margin:0 0 6px}
  .touch-device #menu .menu-modes button{min-height:40px;padding:9px 6px;margin:0;font-size:12px}
- .touch-device #menu #play,.touch-device #menu #resume{grid-column:1/-1}
- .touch-device #menu #play::before,.touch-device #menu #resume::before{content:'▶';margin-right:8px;font-size:11px}
+ .touch-device #menu #resume{grid-column:1/-1}
+ .touch-device #menu #start::before,.touch-device #menu #resume::before{content:'▶';margin-right:8px;font-size:11px}
  .touch-device #menu .menu-tools{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:6px}
  .touch-device #menu .menu-tools button{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:4px;min-height:44px;width:100%;margin:0;padding:4px 2px;font-size:9px;line-height:1.1;background:#102b27e8;border-color:#8eaa865c;border-radius:7px}
  .touch-device #menu .menu-tools .menu-tool-icon{display:block;width:20px;height:20px;fill:none;stroke:currentColor;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round;color:#efd377}

@@ -1,7 +1,7 @@
 """Pilot identity, automatic records and visible race countdown in the real game."""
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable,browser_args,wait_js
+from browser_config import browser_executable,browser_args,wait_js,choose_race
 import json
 ROOT=Path(__file__).resolve().parents[1]
 errors=[]
@@ -13,9 +13,9 @@ with sync_playwright() as p:
   page=context.new_page();page.set_default_timeout(120000);page.on('pageerror',lambda e:(errors.append(str(e)),print(str(e),flush=True)))
   page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='domcontentloaded');wait_js(page,"window.interlagos&&!document.querySelector('#start').disabled")
   assert page.inner_text('#pilotLabel')=='Piloto';assert page.is_hidden('#pilotSelect')
-  page.click('#play');assert not page.evaluate('interlagos.ready');assert page.is_visible('#pilotMessage')
+  page.click('#start');assert not page.evaluate('interlagos.ready');assert page.is_visible('#pilotMessage') and not page.is_visible('#tracks')
   page.evaluate("window.countdownSeen=[];new MutationObserver(()=>{const t=document.querySelector('#countdownNumber').textContent;if(!countdownSeen.includes(t))countdownSeen.push(t)}).observe(document.querySelector('#countdownNumber'),{childList:true,subtree:true,characterData:true})")
-  page.fill('#pilotName','Ana <99>');page.screenshot(path=str(ROOT/f'renders/piloto_inicio_{mobile}.png'));page.click('#play');page.click('#start');wait_js(page,'interlagos.ready')
+  page.fill('#pilotName','Ana <99>');page.screenshot(path=str(ROOT/f'renders/piloto_inicio_{mobile}.png'));choose_race(page);wait_js(page,'interlagos.ready')
   wait_js(page,"!document.querySelector('#raceCountdown').hidden")
   page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js'),old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();}""")
   assert page.evaluate('interlagos.car.clock===0&&fixture.rivals.every(r=>r.car.clock===0)')
@@ -27,7 +27,7 @@ with sync_playwright() as p:
   wait_js(page,"JSON.parse(localStorage.getItem('autopobre-records-v1')||'[]').some(r=>r.name==='Ana <99>'&&r.bestLap===42&&r.bestRace===null)")
   # Leaving an incomplete race keeps the valid lap; a second pilot gets a separate record.
   # Leaving lands on the track screen; the pilot is changed back on the opening.
-  page.evaluate('fixture.onMainMenu()');page.click('#tracksBack');page.fill('#pilotName','Bruno');page.click('#play');page.click('#start');wait_js(page,'!interlagos.state.paused')
+  page.evaluate('fixture.onMainMenu()');page.click('#tracksBack');page.fill('#pilotName','Bruno');choose_race(page);wait_js(page,'!interlagos.state.paused')
   page.evaluate('fixture.freeCountdown=0;interlagos.car.best=40;interlagos.car.laps=3;interlagos.car.clock=129;fixture.stepFree(1/120,{})')
   wait_js(page,"JSON.parse(localStorage.getItem('autopobre-records-v1')).some(r=>r.name==='Bruno'&&r.bestRace===129)")
   page.evaluate('fixture.onMainMenu()');page.click('#tracksBack');assert page.is_visible('#pilotSelect');assert page.locator('#pilotSelect option').count()==3;assert page.input_value('#pilotSelect')=='Bruno'
@@ -39,7 +39,7 @@ with sync_playwright() as p:
   page.click('[data-records-circuit="curvelo"]');page.click('[data-records-mode="immersive"]');assert page.locator('#lapRecords tbody tr').count()==0
   page.click('[data-records-mode="normal"]');assert 'Ana <99>' in page.inner_text('#lapRecords tbody');page.screenshot(path=str(ROOT/f'renders/recordes_automaticos_{mobile}.png'));page.click('#recordsClose')
   page.reload(wait_until='domcontentloaded');wait_js(page,'window.interlagos');assert not page.evaluate('interlagos.ready');assert page.input_value('#pilotSelect')=='Bruno';assert page.is_hidden('#pilotName')
-  page.select_option('#pilotSelect','Ana <99>');page.click('#play');page.click('#storyStart');wait_js(page,'interlagos.ready')
+  page.select_option('#pilotSelect','Ana <99>');choose_race(page,story=True);wait_js(page,'interlagos.ready')
   page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js'),old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();fixture.state.phase='grid';fixture.state.countdown=3;fixture.sync();}""")
   wait_js(page,"!document.querySelector('#raceCountdown').hidden&&document.querySelector('#countdownNumber').textContent==='3'")
   assert page.evaluate('interlagos.car.clock===0')

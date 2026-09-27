@@ -1,5 +1,6 @@
 import {CIRCUITS,circuitId} from './circuits.js';
 import {PLAYER_ENTRY} from './race-roster.js';
+import {pointsText} from './championship.js';
 export const formatTime=value=>Number.isFinite(value)&&value>0?`${String(Math.floor(value/60)).padStart(2,'0')}:${(value%60).toFixed(3).padStart(6,'0')}`:'—';
 export function resultRows(mode){
  const rows=(mode.freeOrder??[]).map(entry=>({...entry}));
@@ -29,16 +30,17 @@ export class RaceResults {
   $('resultsPlace').textContent=`VOCÊ CHEGOU EM ${mode.finishPosition}º / ${rows.length}`;
   $('resultsTime').textContent=`TOTAL ${formatTime(mode.finishTime)}`;
   $('resultsFastest').textContent=best?`VOLTA MAIS RÁPIDA · #${best.number} · ${formatTime(best.bestLap)}`:'VOLTA MAIS RÁPIDA · —';
-  // A championship round: its points, the standings and the next round instead of a rerun.
-  const champ=!mode.active&&this.championship,points=champ?this.championship.points:null;
+  // A championship round: its points, the standings and the next round instead of a rerun
+  // (in Modo História the podium comes first, as in any story race).
+  const champ=this.championship,points=champ?this.championship.points:null;
   $('resultsContinue').textContent=mode.active?'Continuar para o pódio →':champ?(champ.final?'Ver a classificação final →':`Próxima etapa: ${champ.nextName} →`):'Correr novamente →';
   $('resultsChampionship').hidden=!champ;this.root.querySelector('th.results-points').hidden=!champ;$('resultsChampionshipLine').hidden=!champ;
   if(champ){const me=champ.player,mine=champ.rows.find(r=>r.player);
-   $('resultsMode').textContent=`/ CAMPEONATO · ETAPA ${champ.round} DE ${champ.total} · ${laps} VOLTA${laps>1?'S':''}`;
+   $('resultsMode').textContent=`/ ${mode.active?'HISTÓRIA · ':''}CAMPEONATO · ETAPA ${champ.round} DE ${champ.total} · ${laps} VOLTA${laps>1?'S':''}`;
    $('resultsChampionshipLine').textContent=champ.final
-    ?(me.position===1?`CAMPEÃO! +${mine?.points??0} pts nesta etapa e o título com ${me.points} pontos.`:`FIM DO CAMPEONATO · +${mine?.points??0} pts · você fechou em ${me.position}º com ${me.points} pontos · campeão: #${champ.champion.number} ${champ.champion.shortName}`)
-    :me.position===1?`CAMPEONATO · +${mine?.points??0} pts nesta etapa · você lidera com ${me.points} pontos · 2º: #${champ.standings[1].number} ${champ.standings[1].shortName} (${champ.standings[1].points})`
-    :`CAMPEONATO · +${mine?.points??0} pts nesta etapa · você é ${me.position}º no geral com ${me.points} pontos · líder: #${champ.standings[0].number} ${champ.standings[0].shortName} (${champ.standings[0].points})`;}
+    ?(me.position===1?`CAMPEÃO! +${mine?.points??0} pts nesta etapa e o título com ${pointsText(me.points)}.`:`FIM DO CAMPEONATO · +${mine?.points??0} pts · você fechou em ${me.position}º com ${pointsText(me.points)} · campeão: #${champ.champion.number} ${champ.champion.shortName}`)
+    :me.position===1?`CAMPEONATO · +${mine?.points??0} pts nesta etapa · você lidera com ${pointsText(me.points)} · 2º: #${champ.standings[1].number} ${champ.standings[1].shortName} (${champ.standings[1].points})`
+    :`CAMPEONATO · +${mine?.points??0} pts nesta etapa · você é ${me.position}º no geral com ${pointsText(me.points)} · líder: #${champ.standings[0].number} ${champ.standings[0].shortName} (${champ.standings[0].points})`;}
   const body=this.root.querySelector('tbody');body.replaceChildren();
   for(const row of rows){const tr=document.createElement('tr');if(row.player)tr.classList.add('results-player');
    const values=[`${row.position}º`,row.number,row.name+(row.player?' · VOCÊ':''),formatTime(row.bestLap),row.finished?formatTime(row.totalTime):'NA PISTA'];

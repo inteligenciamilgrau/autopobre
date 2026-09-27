@@ -1,7 +1,7 @@
 from pathlib import Path
 import json
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable,browser_args,wait_js,open_menu,enter_track
+from browser_config import browser_executable,browser_args,wait_js,open_menu,enter_track,choose_race
 ROOT=Path(__file__).resolve().parents[1];report={'checks':{},'errors':[]}
 def check(name,value):report['checks'][name]=bool(value);print(name,bool(value),flush=True);assert value,name
 with sync_playwright() as p:
@@ -57,7 +57,7 @@ with sync_playwright() as p:
   page.evaluate('interlagos.car.laps=3');wait_js(page,'interlagos.state.paused&&fixtureMode.freeFinished');check('third_lap_finishes_with_result',page.is_visible('#raceResult') and '3 voltas' in page.inner_text('#raceResult'))
   page.tap('#resultsContinue');wait_js(page,'!interlagos.state.paused');check('new_race_resets_laps',page.evaluate('interlagos.car.laps')==0 and not page.evaluate('fixtureMode.freeFinished'))
   page.evaluate('interlagos.car.laps=1');page.tap('#touchMenu');page.tap('#settingsClose');page.tap('#restartRace');check('explicit_restart_resets_race',page.evaluate("interlagos.car.laps===0&&interlagos.car.clock<.5&&interlagos.state.mode==='chase'"))
-  page.tap('#touchMenu');page.tap('#settingsBack');page.tap('#storyStart')
+  page.tap('#touchMenu');page.tap('#settingsBack');choose_race(page,story=True,tap=True)
   # Fuel and the windscreen film are chosen at the team's desk in the paddock (no separate purchase screen).
   page.evaluate("()=>{fixtureMode.state.cash=300;fixtureMode.action('desk')}");page.wait_for_selector('#immLitres');page.wait_for_timeout(250)
   page.locator('#immLitres').fill('8');check('fuel_slider_at_team_desk',page.evaluate('fixtureMode.prepLitres')==8 and '8 L' in page.inner_text('#deskFuel'));shot('compra_mesa_equipe')
@@ -67,7 +67,7 @@ with sync_playwright() as p:
    check_control_layout(width)
    check(f'tow_panel_leaves_center_visible_{width}',page.evaluate("()=>{const r=document.querySelector('#immersivePanel').getBoundingClientRect();return r.left>innerWidth*.5&&r.right<=innerWidth&&r.bottom<innerHeight-75}"))
    check(f'tow_panel_clear_of_pedals_{width}',page.evaluate("()=>{const panel=document.querySelector('#immersivePanel').getBoundingClientRect();return ['#touchPedals','#touchHandbrake'].every(s=>panel.bottom<document.querySelector(s).getBoundingClientRect().top)}"))
-  page.tap('#touchMenu');page.tap('#settingsBack');page.tap('#start');wait_js(page,'!interlagos.state.paused');check('return_to_normal_uses_rear_camera',page.evaluate("interlagos.state.mode==='chase'"))
+  page.tap('#touchMenu');page.tap('#settingsBack');choose_race(page,tap=True);wait_js(page,'!interlagos.state.paused');check('return_to_normal_uses_rear_camera',page.evaluate("interlagos.state.mode==='chase'"))
   check('no_browser_errors',not report['errors']);report['passed']=True
  finally:
   report.setdefault('passed',False);(ROOT/'dados/validacao_hud_corrida.json').write_text(json.dumps(report,indent=2),encoding='utf-8');print(json.dumps(report,indent=2),flush=True);browser.close()

@@ -84,6 +84,8 @@ class Handler(SimpleHTTPRequestHandler):
 
 class LocalServer(ThreadingHTTPServer):
     allow_reuse_address = False
+    # The page asks for dozens of ES modules at once; the default backlog (5) refused some.
+    request_queue_size = 128
 
     def server_bind(self):
         if hasattr(socket, 'SO_EXCLUSIVEADDRUSE'):

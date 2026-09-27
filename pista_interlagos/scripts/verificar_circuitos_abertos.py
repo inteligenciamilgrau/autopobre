@@ -12,7 +12,7 @@ from pathlib import Path
 
 from playwright.sync_api import sync_playwright
 
-from browser_config import browser_executable, browser_args, wait_js
+from browser_config import browser_executable, browser_args, wait_js, choose_race
 
 PORTA = sys.argv[1] if len(sys.argv) > 1 else '8799'
 SO = sys.argv[2] if len(sys.argv) > 2 else None
@@ -34,8 +34,7 @@ with sync_playwright() as p:
         wait_js(page, "window.interlagos&&!document.querySelector('#start').disabled")
         assert page.get_attribute(f'[data-circuit="{circuito}"]', 'aria-pressed') == 'true'
         page.fill('#pilotName', 'Piloto teste')
-        page.click('#play')
-        page.click('#start')
+        choose_race(page)
         wait_js(page, 'window.interlagos?.ready&&!interlagos.state.paused', timeout=240000)
         page.evaluate('interlagos.skipIntro?.()')
         page.wait_for_timeout(2500)

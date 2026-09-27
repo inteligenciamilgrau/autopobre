@@ -16,7 +16,7 @@ with sync_playwright() as p:
  def shot(name):frame();page.screenshot(path=str(ROOT/'renders'/('imersivo_'+name+'.png')))
  try:
   open_menu(page)
-  check('story_button_without_autostart',not page.evaluate('interlagos.ready') and page.is_visible('#play') and page.locator('#tracks #storyStart').count()==1)
+  check('story_button_without_autostart',not page.evaluate('interlagos.ready') and page.is_visible('#storyStart') and page.locator('#tracks #singleRace').count()==1)
   enter_track(page,story=True)
   # Capture the running instance for controlled incident fixtures, without shipping a debug mutation API.
   page.evaluate('''async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const original=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return original.call(this)};interlagos.immersiveInfo();}''')

@@ -16,7 +16,7 @@ import json
 import os
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable, browser_args, wait_js
+from browser_config import browser_executable, browser_args, wait_js, choose_race
 
 ROOT = Path(__file__).resolve().parents[1]
 URL = os.environ.get('INTERLAGOS_URL', 'http://127.0.0.1:8799/pista_interlagos/teste/')
@@ -44,8 +44,7 @@ with sync_playwright() as p:
         page.goto(URL + '?circuito=curvelo', wait_until='domcontentloaded')
         wait_js(page, "!document.querySelector('#start').disabled")
         page.fill('#pilotName', 'Piloto aberturas')
-        page.click('#play')
-        page.click('#start')
+        choose_race(page)
         wait_js(page, 'window.interlagos?.ready')
         wait_js(page, 'interlagos.car.clock>0')
         info = page.evaluate('interlagos.openingsInfo()')
@@ -140,9 +139,8 @@ with sync_playwright() as p:
         wait_js(page, "!document.querySelector('#start').disabled")
         page.fill('#pilotName', 'Piloto paddock')
         page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const info=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return info.call(this);};}""")
-        # Jogar opens the track screen, with its own "Modo História" button.
-        page.click('#play')
-        page.click('#storyStart')
+        # Modo História opens the track screen; Corrida única starts the story there.
+        choose_race(page, story=True)
         wait_js(page, 'window.interlagos?.ready')
         page.evaluate('interlagos.immersiveInfo()')
         wait_js(page, "fixtureMode.state.phase==='crowd'&&!!fixtureMode.visual.ownOpenings")

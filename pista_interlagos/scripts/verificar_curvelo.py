@@ -1,7 +1,7 @@
 """Browser QA: two circuit choices, banking, result/record isolation and mobile."""
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable,browser_args,wait_js
+from browser_config import browser_executable,browser_args,wait_js,choose_race
 import json
 import sys
 ROOT=Path(__file__).resolve().parents[1]
@@ -16,7 +16,7 @@ with sync_playwright() as p:
   page.goto('http://127.0.0.1:8799/pista_interlagos/teste/',wait_until='domcontentloaded');wait_js(page,"!document.querySelector('#start').disabled")
   assert page.evaluate("!interlagos.ready")
   page.screenshot(path=str(ROOT/f'renders/curvelo_abertura_{mobile}.png'))
-  page.fill('#pilotName','Teste Curvelo');page.click('#play');page.click('#start');wait_js(page,'window.interlagos?.ready');wait_js(page,'interlagos.car.clock>0')
+  page.fill('#pilotName','Teste Curvelo');choose_race(page);wait_js(page,'window.interlagos?.ready');wait_js(page,'interlagos.car.clock>0')
   assert page.evaluate("interlagos.circuit==='curvelo'&&interlagos.car.data.meta.reconstructed_xy_m===1250")
   assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
   assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
@@ -33,7 +33,7 @@ with sync_playwright() as p:
   assert page.locator('#lapRecords tbody tr').count()==1
   page.click('[data-records-circuit="interlagos"]');assert page.locator('#lapRecords tbody tr').count()==0
   page.click('#recordsClose');page.click('#resultsMainMenu');assert page.is_visible('#tracks')
-  page.click('#storyStart')
+  choose_race(page,story=True)
   wait_js(page,"fixture.active&&fixture.state.phase==='crowd'")
   page.screenshot(path=str(ROOT/f'renders/curvelo_boxes_{mobile}.png'))
   page.evaluate("fixture.state.cash=300;fixture.action('desk')")
@@ -42,7 +42,7 @@ with sync_playwright() as p:
   page.screenshot(path=str(ROOT/f'renders/curvelo_preparacao_{mobile}.png'))
   page.evaluate('fixture.onMainMenu()');page.click('[data-circuit="interlagos"]')
   page.wait_for_url('**/*circuito=interlagos');assert page.evaluate("interlagos.circuit==='curvelo'")
-  page.click('#start');wait_js(page,"window.interlagos?.ready&&interlagos.circuit==='interlagos'")
+  choose_race(page);wait_js(page,"window.interlagos?.ready&&interlagos.circuit==='interlagos'")
   assert page.evaluate("interlagos.circuit==='interlagos'&&interlagos.car.data.meta.reconstructed_xy_m>4300")
   assert page.get_attribute('[data-circuit="interlagos"]','aria-pressed')=='true'
   page.screenshot(path=str(ROOT/f'renders/curvelo_volta_interlagos_{mobile}.png'))

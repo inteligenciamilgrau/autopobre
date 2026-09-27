@@ -1,6 +1,6 @@
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable,wait_js
+from browser_config import browser_executable,wait_js,choose_race
 import json
 ROOT=Path(__file__).resolve().parents[1]
 errors=[]
@@ -13,7 +13,7 @@ with sync_playwright() as p:
   page=context.new_page();page.set_default_timeout(120000);page.on('pageerror',lambda e:(errors.append(str(e)),print(str(e),flush=True)))
   page.on('console',lambda m:errors.append(m.text) if m.type=='error' else None)
   page.goto('http://127.0.0.1:8799/pista_interlagos/teste/?circuito=curvelo',wait_until='domcontentloaded');wait_js(page,"!document.querySelector('#start').disabled")
-  print({'stage':'menu'},flush=True);page.fill('#pilotName','Piloto pitstop');page.click('#play');page.click('#start');wait_js(page,'window.interlagos?.ready');wait_js(page,'interlagos.car.clock>0');print({'stage':'loaded'},flush=True)
+  print({'stage':'menu'},flush=True);page.fill('#pilotName','Piloto pitstop');choose_race(page);wait_js(page,'window.interlagos?.ready');wait_js(page,'interlagos.car.clock>0');print({'stage':'loaded'},flush=True)
   page.evaluate("""async()=>{const {PitStop}=await import('./pitstop.js');const old=PitStop.prototype.info;PitStop.prototype.info=function(){window.pit=this;return old.call(this)};interlagos.pitInfo();pit.setDamage(true);window.park=()=>{const c=interlagos.car;const i=c.a.findIndex(p=>p[0]>=20),p=c.a[i];c.reset(i);c.x=p[1]+p[9]*21.65;c.y=p[2]+p[10]*21.65;c.surface=c.sample(c.x,c.y);};park();pit.condition.damage('motor',.6);pit.condition.damage('freios',.5);pit.condition.damage('suspensao',.6);window.advance=n=>{for(let i=0;i<n;i++)pit.beforeStep({throttle:0,brake:0,left:0,right:0},1/120);};}""")
   wait_js(page,'pit.opened');wait_js(page,"!document.querySelector('#pitPanel').hidden")
   assert page.locator('.pit-parts article').count()==6
@@ -81,7 +81,7 @@ with sync_playwright() as p:
   page.click('[data-repair="freios"][data-kind="patch"]');page.evaluate('advance(1200)');assert .5<page.evaluate('pit.condition.quality.freios')<1
   # Immersive cash/profile accounting is independent of the free-race team budget.
   page.evaluate("pit.mode.onMainMenu()")
-  page.click('#storyStart')
+  choose_race(page,story=True)
   page.evaluate("pit.mode.state.phase='race';pit.mode.state.cash=120;pit.mode.state.profile.fund=200;pit.mode.state.fuel=4;pit.mode.raceProgress=0;pit.mode.previousS=20;pit.mode.sync();park();pit.departing=false;pit.condition.damage('tanque',.8);advance(100)")
   wait_js(page,'pit.opened');page.click('[data-repair="tanque"][data-kind="proper"]');assert page.evaluate('pit.mode.state.cash')<120;assert page.evaluate('pit.mode.state.profile.fund')==200
   page.evaluate('advance(2000)');assert page.evaluate('pit.condition.quality.tanque')==1
