@@ -25,7 +25,7 @@ import rasterio
 from PIL import Image
 from pyproj import Transformer
 from rasterio.warp import reproject, Resampling
-from scipy.ndimage import gaussian_filter1d, map_coordinates, uniform_filter1d
+from scipy.ndimage import gaussian_filter1d, map_coordinates, minimum_filter1d, uniform_filter1d
 from scipy.optimize import brentq
 from scipy.spatial import cKDTree
 
@@ -301,6 +301,16 @@ def main():
                 lado_viz[1 if e > 0 else -1][i] = True
     largura = np.minimum(largura, np.maximum(8.0, vizinho - 2.0))
     largura = np.minimum(largura, gaussian_filter1d(largura, 3, mode='wrap'))
+    # Curvas muito fechadas: a zebra de dentro (1 m alem da borda) fica a pelo menos 3,5 m do
+    # centro da curva. A entrada do miolo do ECPA sai do anel externo por um entroncamento:
+    # a largura medida ali (16 m) somava o asfalto do anel que segue reto, e o raio de 10 m
+    # deixava a borda de dentro a 2 m do centro (a imagem mostra ~12 m de asfalto na perna).
+    # O raio e o das tangentes finais, estacao a estacao (o que o carro sente).
+    rumo_t = np.arctan2(T[:, 1], T[:, 0])
+    giro_t = (np.roll(rumo_t, -1) - rumo_t + np.pi) % (2 * np.pi) - np.pi
+    raio_loc = 1 / np.maximum(np.abs(gaussian_filter1d(giro_t / ds, 1, mode='wrap')), 1e-6)
+    teto_largura = gaussian_filter1d(minimum_filter1d(2 * (raio_loc - 1.0 - 3.5), 15, mode='wrap'), 3, mode='wrap')
+    largura = np.minimum(largura, np.maximum(8.0, teto_largura))
     # O DEM de 30 m nao separa dois asfaltos a poucos metros um do outro: entre trechos lado
     # a lado a diferenca de altura fica limitada a um talude de 25% no canteiro; cada perfil
     # cede metade do excesso, com a correcao espalhada suavemente ao longo da volta.

@@ -150,10 +150,15 @@ export class TestCar {
   return (t.z[k]*(1-u)+t.z[k+1]*u)*(1-v)+(t.z[k+t.nx]*(1-u)+t.z[k+t.nx+1]*u)*v;
  }
  sample(x,y,hint=null){
-  const q=this.nearest(x,y,false,hint),a=this.a[q.i],b=this.a[(q.i+1)%this.n],mix=k=>a[k]+(b[k]-a[k])*q.u;
+  // Fraction along the segment from the stations' normal lines (0 on a's, 1 on b's). The foot
+  // of the perpendicular stalls on the inside of a bend and then jumps a whole station at the
+  // next segment, so each station's rise came as a ledge under the wheels (0.37 m at ECPA's
+  // tight Anel Externo corner). On a straight this is the same as the foot.
+  const q=this.nearest(x,y,false,hint),a=this.a[q.i],b=this.a[(q.i+1)%this.n];
+  const fa=(x-a[1])*a[7]+(y-a[2])*a[8],fb=(x-b[1])*b[7]+(y-b[2])*b[8],w=fa<=0?0:fb>=0?1:fa/(fa-fb),mix=k=>a[k]+(b[k]-a[k])*w;
   const tx=mix(7),ty=mix(8),lx=-ty,ly=tx,d=q.ex*lx+q.ey*ly,width=mix(4),L=this.data.meta.reconstructed_xy_m;
   let bank=mix(5),grade=mix(6),gx=tx*grade+lx*bank,gy=ty*grade+ly*bank,roadz=mix(3)+bank*d,outside=Math.abs(d)-width/2;
-  let s=(a[0]+q.u*Math.hypot(b[1]-a[1],b[2]-a[2]))%L,pit=false,pitS=null,pitD=null;
+  let s=(a[0]+w*Math.hypot(b[1]-a[1],b[2]-a[2]))%L,pit=false,pitS=null,pitD=null;
   // The surveyed pit lane has its own profile; off both roads the nearer one blends into the terrain.
   const lane=this.pitGeo?locatePit(this.pitGeo,x,y):null;
   if(lane){
@@ -173,7 +178,7 @@ export class TestCar {
   const service=pitLane(this.data,s);
   if(service&&d>=service.offset-service.halfWidth&&d<=service.reach&&d>width/2){pit=true;bank=grade=gx=gy=0;}
   const z=service&&pit?3.055:roadz*(1-blend)+this.terrain(x,y)*blend+.055;
-  return {i:q.i,u:q.u,s:s>L-.01?0:s,d,z,width,bank,grade,gx,gy,tx,ty,lx,ly,pit,pitS,pitD,onRoad:pit||Math.abs(d)<width/2};
+  return {i:q.i,u:w,s:s>L-.01?0:s,d,z,width,bank,grade,gx,gy,tx,ty,lx,ly,pit,pitS,pitD,onRoad:pit||Math.abs(d)<width/2};
  }
  // Ground height and slope under one contact point near the car.
  ground(x,y){return this.sample(x,y,this.index);}

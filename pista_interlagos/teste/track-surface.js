@@ -5,19 +5,22 @@ import {sceneryBands,bandClearance} from './track-clearance.js';
 
 // Billboards stand this far (metres) from roads, garages and the grandstands' margin.
 export const BOARD_CLEARANCE=6.5;
-// Sixteen boards facing the approaching drivers, alternating sides. Each keeps off
-// every road, out of the garages and out of the grandstands' view: it tries the
-// other side, then slides along the track.
+// Sixteen slots for boards facing the approaching drivers, alternating sides. Each board
+// keeps off every road (the other straights too), out of the garages, out of the
+// grandstands' view and away from the other boards: it tries the other side, then slides
+// along the track up to 150 m. A slot with no clear place gets no board (slot keeps the
+// artwork alternating).
 export function billboardSpots(data){
- const length=data.meta.reconstructed_xy_m,bands=sceneryBands(data),spots=[];
- for(let i=0;i<16;i++){
-  const start=i===0?length-30:i===1?70:230+(i-2)*(length-480)/14;let spot=null;
-  search:for(const shift of [0,12,-12,24,-24,36,-36,48,-48,60,-60])for(const side of [i%2?1:-1,i%2?-1:1]){
+ const length=data.meta.reconstructed_xy_m,bands=sceneryBands(data),spots=[],shifts=[0];
+ for(let d=12;d<=150;d+=12)shifts.push(d,-d);
+ for(let slot=0;slot<16;slot++){
+  const start=slot===0?length-30:slot===1?70:230+(slot-2)*(length-480)/14;
+  search:for(const shift of shifts)for(const side of [slot%2?1:-1,slot%2?-1:1]){
    const s=((start+shift)%length+length)%length,index=Math.max(0,data.samples.findIndex(q=>q[0]>=s)),p=data.samples[index];
    const offset=side*(p[4]/2+guardrailClearance(data,p[0],side)+5),x=p[1]-p[8]*offset,y=p[2]+p[7]*offset;
-   spot={index,p,side,x,y,clearance:bandClearance(bands,x,y).distance};if(spot.clearance>BOARD_CLEARANCE)break search;
+   const clearance=bandClearance(bands,x,y).distance;
+   if(clearance>BOARD_CLEARANCE&&spots.every(b=>Math.hypot(b.x-x,b.y-y)>25)){spots.push({slot,index,p,side,x,y,clearance});break search;}
   }
-  spots.push(spot);
  }
  return spots;
 }
@@ -33,7 +36,7 @@ export async function createTrackBranding(data){
  const artwork=[new THREE.MeshBasicMaterial({map:oldStock}),new THREE.MeshBasicMaterial({map:game,transparent:true})];
  for(const material of [white,dark,...artwork]){material.polygonOffset=true;material.polygonOffsetFactor=artwork.includes(material)?-4:-2;material.polygonOffsetUnits=artwork.includes(material)?-4:-2;}
  const probe=new TestCar(data),spots=billboardSpots(data);
- for(const [i,{index,p,side,x,y}] of spots.entries()){
+ for(const {slot:i,index,p,side,x,y} of spots){
   probe.index=index;const ground=probe.sample(x,y).z;
   const board=new THREE.Group();board.name=i%2?'Outdoor_AutoPobre':'Outdoor_OldStock';board.position.set(x,ground,-y);
   // Face the approaching driver, rather than presenting the edge of the sign.
@@ -44,7 +47,8 @@ export async function createTrackBranding(data){
   const width=i%2?10.6:7.8,height=i%2?5.3:5.2;
   const logo=new THREE.Mesh(new THREE.PlaneGeometry(width,height),artwork[i%2]);logo.position.set(0,4.8,.15);board.add(logo);root.add(board);
  }
- return {root,oldStock,stats:{billboards:16,oldStock:8,autoPobre:8}};
+ const autoPobre=spots.filter(b=>b.slot%2).length;
+ return {root,oldStock,stats:{billboards:spots.length,oldStock:spots.length-autoPobre,autoPobre}};
 }
 
 // Painted kerb: 1.2 m blocks (Interlagos yellow/green; circuits from open data give their

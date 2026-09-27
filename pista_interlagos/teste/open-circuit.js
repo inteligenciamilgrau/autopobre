@@ -60,7 +60,8 @@ export async function createOpenCircuit(data,roadSurface,{heights,textures,field
  // Timing line: two rows of checks across the asphalt at s = 0.
  const check=canvasTexture((ctx,w,h)=>{const cells=16;for(let r=0;r<2;r++)for(let c=0;c<cells;c++){ctx.fillStyle=(r+c)%2?'#141414':'#f1eee4';ctx.fillRect(c*w/cells,r*h/2,w/cells,h/2);}},512,64);
  const p0=a[0],w0=p0[4],line=new THREE.Mesh(new THREE.PlaneGeometry(w0-.4,1.3),new THREE.MeshStandardMaterial({name:'Linha_chegada',map:check,roughness:.7,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3}));
- line.rotation.order='YXZ';line.rotation.y=Math.atan2(p0[8],p0[7]);line.rotation.x=-Math.PI/2;line.position.set(p0[1],road(p0[1],p0[2],0)+.008,-p0[2]);line.name='Linha_chegada';line.receiveShadow=true;root.add(line);
+ // The plane's width (x) lies across the track: a quarter turn from the gantry, whose span is along z.
+ line.rotation.order='YXZ';line.rotation.y=Math.atan2(p0[8],p0[7])-Math.PI/2;line.rotation.x=-Math.PI/2;line.position.set(p0[1],road(p0[1],p0[2],0)+.008,-p0[2]);line.name='Linha_chegada';line.receiveShadow=true;root.add(line);
  // Grid slots behind the line: the player's box and the fourteen rivals', staggered.
  const slots=[{s:L-GRID_START_BACK,d:0}];
  for(let slot=0;slot<RIVAL_ROSTER.length;slot++)slots.push({s:L-GRID_START_BACK+(Math.ceil(RIVAL_ROSTER.length/2)-Math.floor(slot/2))*GRID_ROW_SPACING+8-(slot%2)*2,d:slot%2?2.2:-2.2});

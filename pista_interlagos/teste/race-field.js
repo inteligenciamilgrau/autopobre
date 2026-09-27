@@ -320,7 +320,10 @@ export class RaceField {
      let chased=false;for(const o of bodies){if(o===c||driverOf.get(o)?.finished)continue;const gap=trackGap(c,o,L);if(gap<-3&&gap>-70&&Math.abs(o.surface.d-d)<12)chased=true;}
      if(chased&&!r.yieldSide){let sum=0;for(let j=0;j<40;j++)sum+=line.off[(i+j)%n];r.yieldSide=Math.abs(sum)>24?-Math.sign(sum):Math.sign(d)||1;}
      r.yieldTime=chased?2.5:Math.max(0,r.yieldTime-dt);if(!r.yieldTime)r.yieldSide=0;
-     r.lane=r.yieldSide*99;r.blendTarget=r.yieldSide?1:0;
+     // A metre inside the lane limit on that side: on the main straight the pit wall and its
+     // ends stand right at the edge, and a car easing over at an angle would clip them.
+     let limit=Infinity;if(r.yieldSide)for(let j=0;j<30;j++){const q=(i+j)%n;limit=Math.min(limit,r.yieldSide>0?line.laneHi[q]:-line.laneLo[q]);}
+     r.lane=r.yieldSide?r.yieldSide*Math.max(0,limit-1):0;r.blendTarget=r.yieldSide?1:0;
     }
    }
    else{

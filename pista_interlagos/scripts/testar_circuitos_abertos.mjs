@@ -8,6 +8,7 @@ import {TestCar,recognitionInput,guardrailSections} from '../teste/physics.js';
 import {RaceField,pitRoute} from '../teste/race-field.js';
 import {pitGeometry,locatePit,serviceSpot,garageBays} from '../teste/pit-lane.js';
 import {standLayout,fitGround,sceneryBands,bandClearance} from '../teste/track-clearance.js';
+import {billboardSpots,BOARD_CLEARANCE} from '../teste/track-surface.js';
 
 const only=process.argv[2];
 const report={};
@@ -61,6 +62,12 @@ for(const id of ['cascavel','piracicaba']){
  const bands=sceneryBands(data),cols=Object.fromEntries(data.scenery.buildings.columns.map((k,i)=>[k,i]));
  for(const b of data.scenery.buildings.items){const c=bandClearance(bands,b[cols.x],b[cols.y]);assert(c.distance>Math.hypot(b[cols.w],b[cols.d])/2,`${id}: building ${b[cols.x]},${b[cols.y]} too close to ${c.band}`);}
  out.buildings=data.scenery.buildings.items.length;out.stands=stands.length;
+ // Billboards: all sixteen placed, off every road (ECPA's side-by-side straights, the pit
+ // entry) and apart from each other; none is left where its search failed.
+ const boards=billboardSpots(data);assert.equal(boards.length,16,`${id}: sixteen billboards`);
+ for(const b of boards){const c=bandClearance(bands,b.x,b.y);assert(c.distance>BOARD_CLEARANCE,`${id}: billboard ${b.slot} ${c.distance.toFixed(1)} m from ${c.band}`);}
+ assert(boards.every(b=>boards.every(o=>o===b||Math.hypot(o.x-b.x,o.y-b.y)>25)),`${id}: billboards apart`);
+ out.billboards=+Math.min(...boards.map(b=>b.clearance)).toFixed(1);
  // --- Ground fitting under asphalt, kerbs, pit and stands converges.
  const fit=fitGround(data);assert(fit.stats.residual<.01,`${id}: ground fit residual ${fit.stats.residual}`);out.groundFit=fit.stats;
  // --- The recognition driver and the 14 rivals race three laps on the real geometry.
