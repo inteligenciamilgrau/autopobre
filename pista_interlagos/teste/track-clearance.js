@@ -1,5 +1,5 @@
 import {TestCar} from './physics.js';
-import {pitGeometry,locatePit} from './pit-lane.js';
+import {pitGeometry,locatePit,wallsNear} from './pit-lane.js';
 
 // What has to stay clear on the surveyed circuit: the ground below everything
 // paved or built, and the scenery off the roads, garages and grandstands.
@@ -93,6 +93,20 @@ export function bandClearance(bands,x,y){
   }
  }
  return {distance:best,band:name};
+}
+// --- Start gantry posts on the open-data circuits (open-circuit.js): 2.2 m off the
+// asphalt at the timing line, moved further out while the spot is on paving, in a stand
+// or against a pit wall. ECPA's pit lane is still opening at the line, so that post
+// stands behind the lane's outer wall and the beam reaches over the lane.
+export const POST_CLEARANCE=1;
+export function gantryPosts(data){
+ const p=data.samples[0],base=p[4]/2+2.2,bands=sceneryBands(data).map(b=>({...b,margin:0})),geo=pitGeometry(data);
+ return [1,-1].map(side=>{
+  const at=d=>[p[1]+p[9]*side*d,p[2]+p[10]*side*d];
+  const blocked=d=>{const [x,y]=at(d);return bandClearance(bands,x,y).distance<POST_CLEARANCE||!!geo&&wallsNear(geo,x,y,POST_CLEARANCE).length>0;};
+  let d=base;while(blocked(d)&&d<base+40)d+=.25;if(blocked(d))d=base;
+  const [x,y]=at(d);return {side,d,x,y};
+ });
 }
 
 // --- Ceilings for the ground: where the terrain must stay below z. Each paved or

@@ -6,8 +6,8 @@ import {readFileSync} from 'node:fs';
 import {CIRCUITS} from '../teste/circuits.js';
 import {TestCar,recognitionInput,guardrailSections} from '../teste/physics.js';
 import {RaceField,pitRoute} from '../teste/race-field.js';
-import {pitGeometry,locatePit,serviceSpot,garageBays} from '../teste/pit-lane.js';
-import {standLayout,fitGround,sceneryBands,bandClearance} from '../teste/track-clearance.js';
+import {pitGeometry,locatePit,serviceSpot,garageBays,wallsNear} from '../teste/pit-lane.js';
+import {standLayout,fitGround,sceneryBands,bandClearance,gantryPosts,POST_CLEARANCE} from '../teste/track-clearance.js';
 import {billboardSpots,BOARD_CLEARANCE} from '../teste/track-surface.js';
 
 const only=process.argv[2];
@@ -68,6 +68,16 @@ for(const id of ['cascavel','piracicaba']){
  for(const b of boards){const c=bandClearance(bands,b.x,b.y);assert(c.distance>BOARD_CLEARANCE,`${id}: billboard ${b.slot} ${c.distance.toFixed(1)} m from ${c.band}`);}
  assert(boards.every(b=>boards.every(o=>o===b||Math.hypot(o.x-b.x,o.y-b.y)>25)),`${id}: billboards apart`);
  out.billboards=+Math.min(...boards.map(b=>b.clearance)).toFixed(1);
+ // Start gantry: neither post on the track or pit lane asphalt nor against a pit wall
+ // (ECPA's pit lane is still opening at the timing line).
+ const posts=gantryPosts(data);
+ for(const post of posts){
+  car.index=car.nearest(post.x,post.y,true).i;const onTrack=car.sample(post.x,post.y),lane=locatePit(geo,post.x,post.y);
+  assert(Math.abs(onTrack.d)>onTrack.width/2+POST_CLEARANCE,`${id}: gantry post ${post.side} off the track`);
+  assert(!lane||lane.d<lane.lo-POST_CLEARANCE||lane.d>lane.hi+POST_CLEARANCE,`${id}: gantry post ${post.side} on the pit lane (d ${lane?.d.toFixed(1)})`);
+  assert.equal(wallsNear(geo,post.x,post.y,POST_CLEARANCE).length,0,`${id}: gantry post ${post.side} against a pit wall`);
+ }
+ out.gantry=posts.map(p=>+p.d.toFixed(1));
  // --- Ground fitting under asphalt, kerbs, pit and stands converges.
  const fit=fitGround(data);assert(fit.stats.residual<.01,`${id}: ground fit residual ${fit.stats.residual}`);out.groundFit=fit.stats;
  // --- The recognition driver and the 14 rivals race three laps on the real geometry.

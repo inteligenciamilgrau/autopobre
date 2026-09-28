@@ -4,6 +4,7 @@ import {TestCar} from './physics.js';
 import {terrainMaterial} from './landscape.js';
 import {RIVAL_ROSTER,GRID_ROW_SPACING,GRID_START_BACK} from './race-roster.js';
 import {canvasTexture} from './pit-textures.js';
+import {gantryPosts,groundHeight} from './track-clearance.js';
 
 // Circuits rebuilt from open data (Cascavel, ECPA): data/pista_<id>.json carries the
 // centre line and widths measured on 2025 aerial imagery over the OSM trace, the ANADEM
@@ -74,12 +75,18 @@ export async function createOpenCircuit(data,roadSurface,{heights,textures,field
   }
  }
  const grid=new THREE.Mesh(mergeGeometries(gridParts,false),mark);grid.name='Marcas_grid';grid.receiveShadow=true;root.add(grid);gridParts.forEach(g=>g.dispose());
- // Start gantry over the timing line with the circuit's name.
+ // Start gantry over the timing line with the circuit's name. Its posts keep off the pit
+ // lane and its walls (gantryPosts), so on the pit side the beam may reach over the lane;
+ // the sign stays centred over the track. The gantry's +z is the track's right.
  const steel=new THREE.MeshStandardMaterial({name:'Portico_metal',color:0x2b3034,metalness:.5,roughness:.5});
  const gantry=new THREE.Group();gantry.name='Portico_largada';gantry.position.set(p0[1],road(p0[1],p0[2],0),-p0[2]);gantry.rotation.y=Math.atan2(p0[8],p0[7]);root.add(gantry);
- const span=w0/2+2.2;
- for(const side of [-1,1]){const post=new THREE.Mesh(new THREE.BoxGeometry(.35,7.4,.35),steel);post.position.set(0,3.7,side*span);post.castShadow=true;post.name='Portico_poste';gantry.add(post);}
- const beam=new THREE.Mesh(new THREE.BoxGeometry(.5,1.5,span*2+.4),steel);beam.position.y=7.2;beam.castShadow=true;beam.name='Portico_viga';gantry.add(beam);
+ const span=w0/2+2.2,[left,right]=gantryPosts(data);
+ for(const {side,d,x,y} of [left,right]){
+  // Down into the ground where it falls away from the road (behind ECPA's pit wall).
+  const foot=Math.min(0,(groundHeight(data.terrain,heights,x,y)??gantry.position.y)-gantry.position.y)-.3;
+  const post=new THREE.Mesh(new THREE.BoxGeometry(.35,7.4-foot,.35),steel);post.position.set(0,(7.4+foot)/2,-side*d);post.castShadow=true;post.name='Portico_poste';gantry.add(post);
+ }
+ const beam=new THREE.Mesh(new THREE.BoxGeometry(.5,1.5,left.d+right.d+.4),steel);beam.position.set(0,7.2,(right.d-left.d)/2);beam.castShadow=true;beam.name='Portico_viga';gantry.add(beam);
  const sign=canvasTexture((ctx,w,h)=>{ctx.fillStyle='#172b27';ctx.fillRect(0,0,w,h);ctx.fillStyle='#ffdb32';ctx.font='bold 66px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,w/2,h/2,w*.94);},1024,128);
  for(const side of [-1,1]){const face=new THREE.Mesh(new THREE.PlaneGeometry(span*2,1.25),new THREE.MeshBasicMaterial({map:sign}));face.rotation.y=side*Math.PI/2;face.position.set(side*.26,7.2,0);gantry.add(face);}
  // Camera proxies in world space (the root stays at the origin).
