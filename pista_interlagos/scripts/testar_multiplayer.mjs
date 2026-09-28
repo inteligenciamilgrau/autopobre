@@ -77,7 +77,17 @@ const report={};
  A.openRace(race);await wait();
  assert.equal(race.state,'waiting','the start waits for the guest');assert.deepEqual(events,['B race interlagos']);assert.equal(B.race.id,race.id);assert.equal(B.race.level,'medio');
  B.sendReady();await wait();await wait();
- assert.equal(race.state,'racing');assert(events.includes('B go 2'));
+ assert.equal(race.state,'waiting','ready is not the start: the host gives it');assert(A.ready.has(B.id));
+ // A third window arrives while the start waits: it is seated and gets the race too.
+ const C=new Room({room:name,name:'Caio',clock}),late=[];let seatsA=0,seatsB=0;
+ A.on('seats',()=>seatsA++);B.on('seats',()=>seatsB++);C.on('race',race=>{late.push('race '+race.id);return true;}).on('go',race=>late.push('go '+race.seats.length));
+ C.start();await wait();await wait();await wait();
+ assert.deepEqual(race.seats.map(s=>s.number),['99','19','73']);assert(seatsA>0&&seatsB>0,'host and guests hear the new seat');
+ assert.deepEqual(late,['race '+race.id]);assert.deepEqual(B.race.seats.map(s=>s.number),['99','19','73']);
+ // Lights out before Caio has the track loaded: he races the next one; Bia and the host go.
+ A.lightsOut();await wait();await wait();
+ assert.equal(race.state,'racing');assert(events.includes('B go 2'));assert.deepEqual(race.seats.map(s=>s.number),['99','19']);
+ assert.deepEqual(late,['race '+race.id,'go 2'],'Caio hears the start without a seat in it');
  const car=new TestCar(data);car.reset(10);
  B.sendState(packCar(car),1);A.sendSnapshot([[HOST_NUMBER,0,packCar(car)],['19',.05,packCar(car)]],1);await wait();
  assert(events.includes('A state true 1')&&events.includes('B snap 2'));
@@ -96,11 +106,11 @@ const report={};
  await wait(60);assert(seen>0&&seen<=240,`rate limit: ${seen}`);raw.close();
  assert.equal(validMessage({t:'hello',from:A.id,name:'x',want:'42'}),true);assert.equal(validMessage({t:'hello',from:A.id,name:'x',want:'999'}),false);
  // A frozen host (a track loading) holds nobody's silence against them...
- now=3.5;A.tick();assert.equal(A.members.length,2,'a freeze is not silence');
+ now=3.5;A.tick();assert.equal(A.members.length,3,'a freeze is not silence');
  // ...but a guest silent for longer than 3 s is let go (its car becomes a bot in the game).
  advance([A],7);assert(events.includes('A leave 19'));assert.equal(A.members.length,1);assert.deepEqual(race.seats.map(s=>s.number),['99']);
  // The host leaves: the guest finds no host and hosts the room itself.
- A.leave();await wait();B.tick();assert.equal(B.role,null,'host gone: a new election');advance([B],8.1);assert.equal(B.role,'host');B.leave();
+ A.leave();C.leave();await wait();B.tick();assert.equal(B.role,null,'host gone: a new election');advance([B],8.1);assert.equal(B.role,'host');B.leave();
  report.room=events.slice(0,6);
 }
 // Two windows opened at once: both host for a moment, then the smaller id keeps the room.

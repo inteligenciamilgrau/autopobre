@@ -1,7 +1,9 @@
-"""Multiplayer test version (teste/multiplayer.js) in the browser. Two windows of one browser join
-the room of index.html#sala=..., race one lap of Interlagos together on the automatic pilot, and
-each must show the other's car where it really is; both result sheets list both pilots. A window
-opened without #sala shows nothing of it and does not even load the module.
+"""Multiplayer test version (teste/multiplayer.js) in the browser. Three windows of one browser join
+the room of index.html#sala=...: the host picks Corrida única, which waits on the grid; one guest was
+in the room already, the other arrives during that wait and is seated too; the host gives the start
+(the Largar button). They race one lap of Interlagos on the automatic pilot, every window shows the
+others' cars where they really are, and every result sheet lists all three pilots. A window opened
+without #sala shows nothing of it and does not even load the module.
 
 Usage: verificar_multiplayer.py [porta]  (INTERLAGOS_SHOTS=pasta keeps the screenshots there)."""
 import json
@@ -19,9 +21,12 @@ URL = f'http://127.0.0.1:{PORT}/pista_interlagos/teste/'
 SHOTS = Path(os.environ.get('INTERLAGOS_SHOTS') or tempfile.gettempdir()) / 'verificar_multiplayer'
 SHOTS.mkdir(parents=True, exist_ok=True)
 ROOM = f'verif{random.randrange(10**6)}'
-GUEST_CAR = '64'
-HOST_NAME, GUEST_NAME = 'Ana Anfitriã', 'Bia Convidada'
+# Who races which car: the host always the 99; the first guest asks for the 64, the late one gets
+# the first free car (the 73).
+PILOTS = {'host': ('Ana Anfitriã', '99'), 'guest': ('Bia Convidada', '64'), 'late': ('Caio Atrasado', '73')}
+OPENING = "window.interlagos&&!document.querySelector('#start').disabled&&!document.querySelector('#pilotName').hidden"
 PROBE = "()=>{const s=interlagosSala.info();return {t:performance.timeOrigin+performance.now(),me:s.me,cars:s.cars};}"
+FPS = "new Promise(done=>{let n=0;const t=performance.now();const f=()=>{n++;if(performance.now()-t<1000)requestAnimationFrame(f);else done(n);};requestAnimationFrame(f);})"
 MODULES = ('multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js')
 errors, requests = [], {}
 
@@ -39,70 +44,98 @@ def seen(probe, number):
 
 def gap(view, before, after, t):
     """Distance between where one window shows a car and where its owner had it at that instant
-    (the owner's two probes around it, interpolated)."""
+    (the owner's two probes around it, interpolated; carried on when the instant is just past them)."""
     k = (t - before['t']) / max(1e-6, after['t'] - before['t'])
     x = before['me']['x'] + (after['me']['x'] - before['me']['x']) * k
     y = before['me']['y'] + (after['me']['y'] - before['me']['y']) * k
     return ((view['x'] - x) ** 2 + (view['y'] - y) ** 2) ** .5
 
 
-def two_windows(context, host, pages):
-    OPENING = "window.interlagos&&!document.querySelector('#start').disabled&&!document.querySelector('#pilotName').hidden"
+def guest_window(context, host, pages, name, car=None):
+    """A guest is another window (a popup), not a tab: a headless browser draws its background tabs
+    at a couple of frames a second, which would run that window's race in slow motion. The windows
+    share one browser's storage, so each opens with its own pilot saved as the last one used (a
+    guest seated while the start waits is pulled into the race before anyone could type)."""
+    host.evaluate("name=>localStorage.setItem('autopobre-pilots-v1',JSON.stringify({selected:name,names:[name]}))", PILOTS[name][0])
+    with context.expect_page() as popup:
+        host.evaluate("url=>window.open(url,'_blank','popup,width=800,height=450')", f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1' + (f'&carro={car}' if car else ''))
+    page = pages[name] = popup.value
+    watch(page, name)
+    page.wait_for_load_state('load', timeout=120000)
+    wait_js(page, f"window.interlagosSala?.info().role==='guest'&&interlagosSala.info().number==={PILOTS[name][1]!r}", timeout=60000)
+    return page
+
+
+def race_room(context, host, pages):
     host.goto(f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1', wait_until='load', timeout=120000)
     wait_js(host, "window.interlagosSala?.info().role==='host'&&" + OPENING, timeout=60000)
-    # The guest is a second window (a popup), not a tab: a headless browser draws its background
-    # tabs at a couple of frames a second, which would run that window's race in slow motion.
-    with context.expect_page() as popup:
-        host.evaluate("url=>window.open(url,'convidado','popup,width=800,height=450')", f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1&carro={GUEST_CAR}')
-    guest = pages['guest'] = popup.value
-    watch(guest, 'guest')
-    guest.wait_for_load_state('load', timeout=120000)
-    wait_js(guest, f"window.interlagosSala?.info().role==='guest'&&interlagosSala.info().number==='{GUEST_CAR}'&&" + OPENING, timeout=60000)
-    host.fill('#pilotName', HOST_NAME)
-    guest.fill('#pilotName', GUEST_NAME)
-    wait_js(host, f"interlagosSala.info().members.some(m=>m.name==={GUEST_NAME!r})", timeout=10000)
+    host.fill('#pilotName', PILOTS['host'][0])
+    guest = guest_window(context, host, pages, 'guest', PILOTS['guest'][1])
+    wait_js(host, f"interlagosSala.info().members.some(m=>m.name==={PILOTS['guest'][0]!r})", timeout=10000)
     host.click('#start')
     host.screenshot(path=str(SHOTS / '1_anfitriao_pistas.png'))
     guest.screenshot(path=str(SHOTS / '1_convidado_espera.png'))
     host.click('#singleRace')
 
-    # The guest loads the track by itself; the lights go out once both are ready.
-    for page in (host, guest):
-        wait_js(page, "interlagosSala.info().phase==='racing'", timeout=240000)
-    for page in (host, guest):
-        wait_js(page, "window.interlagos?.ready&&document.querySelector('#raceCountdown').hidden", timeout=30000)
-    host_info, guest_info = host.evaluate('interlagosSala.info()'), guest.evaluate('interlagosSala.info()')
-    assert host_info['raceId'] == guest_info['raceId']
-    assert [s['number'] for s in host_info['race']['seats']] == ['99', GUEST_CAR]
-    # Host: only the guest's seat comes over the network. Guest: every other car does.
-    assert [c['number'] for c in host_info['cars'] if c['remote']] == [GUEST_CAR], host_info['cars']
-    assert all(c['remote'] for c in guest_info['cars']) and '99' in [c['number'] for c in guest_info['cars']]
-    assert seen(host_info, GUEST_CAR)['name'] == GUEST_NAME and seen(guest_info, '99')['name'] == HOST_NAME
-    assert host_info['me']['ghost'] and guest_info['me']['ghost']
-    fps = {name: page.evaluate("new Promise(done=>{let n=0;const t=performance.now();const f=()=>{n++;if(performance.now()-t<1000)requestAnimationFrame(f);else done(n);};requestAnimationFrame(f);})") for name, page in (('host', host), ('guest', guest))}
+    # Corrida única waits on the grid, the Largar button showing, until the host gives the start.
+    wait_js(host, "interlagosSala.info().phase==='waiting'&&!document.querySelector('#mpStart').hidden", timeout=240000)
+    # A third window arrives during that wait: it is seated and loads the race by itself.
+    late = guest_window(context, host, pages, 'late')
+    ids = {name: page.evaluate('interlagosSala.info().id') for name, page in pages.items()}
+    wait_js(host, f"(()=>{{const s=interlagosSala.info();return s.race?.seats.length===3&&[{ids['guest']!r},{ids['late']!r}].every(id=>s.ready.includes(id));}})()", timeout=240000)
+    host.wait_for_timeout(500)
+    assert host.evaluate("interlagosSala.info().phase") == 'waiting', 'nobody starts before the host says so'
+    host.screenshot(path=str(SHOTS / '2_anfitriao_espera.png'))
+    late.screenshot(path=str(SHOTS / '2_atrasado_espera.png'))
+    host.click('#mpStart')
 
-    # Mid-race: where each window shows the other's car, against where it really was.
-    gaps = {'host_sees_guest': [], 'guest_sees_host': []}
-    for sample in range(14):
+    for page in pages.values():
+        wait_js(page, "interlagosSala.info().phase==='racing'", timeout=60000)
+    for page in pages.values():
+        wait_js(page, "window.interlagos?.ready&&document.querySelector('#raceCountdown').hidden", timeout=60000)
+    info = {name: page.evaluate('interlagosSala.info()') for name, page in pages.items()}
+    assert len({i['raceId'] for i in info.values()}) == 1
+    assert [s['number'] for s in info['host']['race']['seats']] == ['99', '64', '73'], info['host']['race']['seats']
+    # Host: only the guests' seats come over the network. Guests: every other car does.
+    assert sorted(c['number'] for c in info['host']['cars'] if c['remote']) == ['64', '73'], info['host']['cars']
+    for name in ('guest', 'late'):
+        assert all(c['remote'] for c in info[name]['cars']) and '99' in [c['number'] for c in info[name]['cars']]
+    # Every window shows the other two humans, named, drawn and passing through (ghosts).
+    for name, own in info.items():
+        for other, (pilot, number) in PILOTS.items():
+            if other == name:
+                continue
+            car = seen(own, number)
+            assert car['name'] == pilot and car['shown'] and car['ghost'], (name, other, car)
+        assert own['me']['ghost']
+    fps = {name: page.evaluate(FPS) for name, page in pages.items()}
+
+    # Mid-race: where each window shows the others' cars, against where they really were.
+    gaps = {f'{a}_sees_{b}': [] for a in PILOTS for b in PILOTS if a != b}
+    order = ('guest', 'late', 'host')
+    for sample in range(12):
         host.wait_for_timeout(1800)
-        g1, h1, g2, h2 = guest.evaluate(PROBE), host.evaluate(PROBE), guest.evaluate(PROBE), host.evaluate(PROBE)
-        gaps['host_sees_guest'].append(gap(seen(h1, GUEST_CAR), g1, g2, h1['t']))
-        gaps['guest_sees_host'].append(gap(seen(g2, '99'), h1, h2, g2['t']))
-        if sample == 6:
-            host.screenshot(path=str(SHOTS / '2_anfitriao_corrida.png'))
-            guest.screenshot(path=str(SHOTS / '2_convidado_corrida.png'))
-    speed = guest.evaluate("Math.hypot(interlagos.car.vx,interlagos.car.vy)*3.6")
+        first = {name: pages[name].evaluate(PROBE) for name in order}
+        second = {name: pages[name].evaluate(PROBE) for name in order}
+        for viewer in order:
+            view = second[viewer] if viewer != 'host' else first['host']
+            for owner in order:
+                if owner != viewer:
+                    gaps[f'{viewer}_sees_{owner}'].append(gap(seen(view, PILOTS[owner][1]), first[owner], second[owner], view['t']))
+        if sample == 5:
+            for name, page in pages.items():
+                page.screenshot(path=str(SHOTS / f'3_{name}_corrida.png'))
+    speed = pages['guest'].evaluate("Math.hypot(interlagos.car.vx,interlagos.car.vy)*3.6")
     for key, values in gaps.items():
         assert statistics.median(values) < 3 and max(values) < 8, (key, values)
 
-    # The flag: the result waits for the other human, then both sheets list both pilots.
-    for page in (host, guest):
+    # The flag: the result waits for the other humans, then every sheet lists all three pilots.
+    for page in pages.values():
         wait_js(page, "!document.querySelector('#raceResults').hidden", timeout=480000)
-    host.screenshot(path=str(SHOTS / '3_anfitriao_resultado.png'))
-    guest.screenshot(path=str(SHOTS / '3_convidado_resultado.png'))
-    results = {name: page.evaluate("document.querySelector('#raceResults').innerText") for name, page in (('host', host), ('guest', guest))}
-    for name, text in results.items():
-        assert HOST_NAME in text and GUEST_NAME in text, (name, text[:600])
+    for name, page in pages.items():
+        page.screenshot(path=str(SHOTS / f'4_{name}_resultado.png'))
+        text = page.evaluate("document.querySelector('#raceResults').innerText")
+        assert all(pilot in text for pilot, _ in PILOTS.values()), (name, text[:600])
     assert not errors, errors
     return fps, speed, gaps
 
@@ -126,7 +159,7 @@ with sync_playwright() as p:
     watch(host, 'host')
     pages = {'host': host}
     try:
-        fps, speed, gaps = two_windows(context, host, pages)
+        fps, speed, gaps = race_room(context, host, pages)
     except Exception:
         # What each window was doing, for the next look.
         for name, page in pages.items():

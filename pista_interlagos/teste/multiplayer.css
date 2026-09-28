@@ -11,6 +11,10 @@
 #mpRoom .mp-auto input{accent-color:var(--lime)}
 #mpRoom .mp-net{display:block;margin-top:6px;font-size:10px;opacity:.6}
 #mpRoom[hidden]{display:none}
+/* The host's start while its race waits: lime once every guest has the race loaded. */
+#mpRoom .mp-start{display:block;width:100%;margin:0 0 8px;padding:8px 10px;border:1px solid #fff4;border-radius:6px;background:#ffffff14;color:#f5f6ed;font:700 12px Inter,"Segoe UI",Arial,sans-serif;cursor:pointer}
+#mpRoom .mp-start.mp-go{background:var(--lime);border-color:var(--lime);color:var(--ink)}
+#mpRoom .mp-start[hidden]{display:none}
 /* One line: on track under the lap banner; on the track screen along the free bottom edge. */
 #mpRoom.mp-racing,#mpRoom.mp-tracks{left:50%;right:auto;transform:translateX(-50%);display:flex;align-items:center;gap:12px;width:auto;max-width:min(680px,80vw);padding:6px 13px;border-radius:20px}
 #mpRoom.mp-racing{top:74px;bottom:auto}
@@ -18,4 +22,5 @@
 #mpRoom:is(.mp-racing,.mp-tracks) .mp-status{margin:0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mpRoom:is(.mp-racing,.mp-tracks) :is(.mp-players,.mp-net){display:none}
 #mpRoom:is(.mp-racing,.mp-tracks) :is(.mp-head,.mp-auto){white-space:nowrap}
+#mpRoom:is(.mp-racing,.mp-tracks) .mp-start{width:auto;margin:0;padding:5px 10px;white-space:nowrap}
 @media(max-width:850px){#mpRoom{right:12px;bottom:12px;width:210px}#mpRoom.mp-racing{top:60px}#mpRoom:is(.mp-racing,.mp-tracks) .mp-auto{display:none}}

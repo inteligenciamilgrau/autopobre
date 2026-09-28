@@ -2,15 +2,16 @@
 // through a BroadcastChannel: no server and no network, so a race can be tried in two windows side
 // by side. A WebRTC transport would take the channel's place and keep these messages.
 // The first window in a room hosts it: it gives out the seats (the host races the Opala 99, each
-// guest a rival's car), announces each race and waits for every guest to load it before the
-// start, then relays the whole field. Everything received is checked before use, and a sender
+// guest a rival's car), announces each race and holds its start until the host gives it: whoever
+// joins meanwhile is seated too, and whoever is still loading then races the next one. During the
+// race the host relays the whole field. Everything received is checked before use, and a sender
 // that floods is cut off. No DOM here: testar_multiplayer.mjs runs two rooms in Node.
 import {RIVAL_ROSTER} from './race-roster.js';
 import {readCar} from './net-cars.js';
 export const HOST_NUMBER='99';
 export const SEATS=Object.freeze([HOST_NUMBER,...RIVAL_ROSTER.map(e=>e.number)]);
 // Seconds: a silent player (or host) is gone after SILENT; a window hosts once ELECTION passes
-// with no host heard; guests that are not ready after READY_WAIT race another time; a gap
+// with no host heard; a guest loading a race it was seated in may stay silent up to READY_WAIT; a gap
 // longer than FROZEN between two ticks is this window's own freeze; two hosts whose ages differ
 // by less than TIE began together.
 const SILENT=3,ELECTION=.9,READY_WAIT=60,FROZEN=.25,TIE=.5,BEACON=1,PING=1,HELLO=2,RATE=240;
@@ -19,6 +20,7 @@ const isId=v=>typeof v==='string'&&/^[0-9a-f]{8}$/.test(v);
 const isInt=(v,lo,hi)=>Number.isInteger(v)&&v>=lo&&v<=hi;
 const isNum=(v,lo,hi)=>typeof v==='number'&&Number.isFinite(v)&&v>=lo&&v<=hi;
 const isCar=v=>readCar(v)!==null;
+const seatKey=seats=>seats.map(s=>s.number+':'+s.name).join('|');
 const randomId=random=>Array.from({length:8},()=>Math.floor(random()*16).toString(16)).join('');
 // Room names: lowercase letters, digits and dashes; the address carries the whole key.
 export function roomName(value){
@@ -64,7 +66,7 @@ export class Room {
   this.players=new Map();  // host: everyone in the room, the host too: id -> {id,name,number,seen}
   this.lobby=null;         // guest: the host's last word on the room
   this.race=null;          // host: the race announced; guest: the race joined (or waiting to start)
-  this.ready=new Set();this.readySince=0;this.latency=0;this.pings=new Map();this.pingN=0;
+  this.ready=new Set();this.latency=0;this.pings=new Map();this.pingN=0;
   this.nextPing=0;this.nextBeacon=0;this.nextHello=0;this.hostSeen=0;this.electUntil=0;this.rates=new Map();this.events={};
   this.channel=channel??new BroadcastChannel('autopobre-sala-'+room);
   this.channel.onmessage=e=>this.arrive(e.data);
@@ -94,7 +96,7 @@ export class Room {
    case 'hello':if(host)this.join(m.from,m.name,m.want,now);break;
    case 'bye':if(host)this.drop(m.from);else if(fromHost)this.hostSeen=-Infinity;break;
    case 'lobby':this.heardHost(m,now);break;
-   case 'ready':if(host&&this.race?.id===m.race&&this.race.state==='waiting'&&this.race.seats.some(s=>s.id===m.from)){this.touch(m.from,now);this.ready.add(m.from);this.maybeGo(now);}break;
+   case 'ready':if(host&&this.race?.id===m.race&&this.race.state==='waiting'&&this.race.seats.some(s=>s.id===m.from)&&!this.ready.has(m.from)){this.touch(m.from,now);this.ready.add(m.from);this.emit('change');}break;
    case 'go':if(fromHost&&this.race?.id===m.race&&this.race.state==='waiting'){this.hostSeen=now;this.race={...this.race,state:'racing',seats:m.seats};this.emit('go',this.race);this.emit('change');}break;
    case 'ping':if(host){this.touch(m.from,now);this.send({t:'pong',to:m.from,n:m.n});}break;
    case 'pong':if(m.to===this.id&&this.pings.has(m.n)){const half=(now-this.pings.get(m.n))/2;this.pings.delete(m.n);this.latency=this.latency?this.latency*.8+half*.2:half;}break;
@@ -123,8 +125,10 @@ export class Room {
   // A new race with a seat for us: the game loads it (false: not now, asked again next lobby).
   if(race&&seated&&race.state==='waiting'&&this.race?.id!==race.id){const previous=this.race;this.race=race;if(this.emit('race',race)===false)this.race=previous;}
   else if(race&&this.race?.id===race.id){
-   // The lobby also carries the start, in case the go itself went missing.
-   const went=this.race.state==='waiting'&&race.state==='racing';this.race={...this.race,state:race.state,seats:race.seats};if(went)this.emit('go',this.race);
+   // The lobby also carries the start, in case the go itself went missing, and the seats taken
+   // while the start waits.
+   const went=this.race.state==='waiting'&&race.state==='racing',moved=seatKey(this.race.seats)!==seatKey(race.seats);
+   this.race={...this.race,state:race.state,seats:race.seats};if(moved)this.emit('seats',this.race);if(went)this.emit('go',this.race);
   }
   this.emit('change');
  }
@@ -136,7 +140,14 @@ export class Room {
   const p=this.players.get(id);
   if(p){p.name=playerName(name)||p.name;p.seen=now;}
   else this.players.set(id,{id,name:playerName(name)||'Piloto',number:this.freeSeat(want),seen:now});
-  this.beacon(now);this.emit('change');
+  this.seatEveryone();this.beacon(now);this.emit('change');
+ }
+ // While a race waits for its start, everyone in the room has a seat in it, under their current name.
+ seatEveryone(){
+  const r=this.race;if(this.role!=='host'||r?.state!=='waiting')return;
+  const before=seatKey(r.seats);
+  for(const p of this.players.values()){if(!p.number)continue;const seat=r.seats.find(s=>s.id===p.id);if(seat)seat.name=p.name;else r.seats.push({id:p.id,name:p.name,number:p.number});}
+  if(seatKey(r.seats)!==before)this.emit('seats',r);
  }
  // The seat asked for when free, else the first free rival's car; null when all 15 are taken.
  freeSeat(want){const taken=new Set([...this.players.values()].map(p=>p.number));return want&&!taken.has(want)?want:SEATS.find(n=>!taken.has(n))??null;}
@@ -158,14 +169,13 @@ export class Room {
   const seats=[...this.players.values()].filter(p=>p.number).map(({id,name,number})=>({id,name,number}));
   return {id:randomId(this.random),circuit,laps,ace:!!ace,level:level??null,retirements:!!retirements,seed:Math.floor(this.random()*4294967296),seats,state:'waiting'};
  }
- openRace(race){if(this.role!=='host')return;const now=this.clock();this.race=race;this.ready=new Set([this.id]);this.readySince=now;this.beacon(now);this.maybeGo(now);this.emit('change');}
+ openRace(race){if(this.role!=='host')return;this.race=race;this.ready=new Set([this.id]);this.seatEveryone();this.beacon();this.emit('change');}
  closeRace(){if(this.role!=='host'||!this.race)return;this.race=null;this.beacon();this.emit('change');}
- // Everyone loaded (or the wait ran out: whoever is not ready leaves this race): lights out.
- maybeGo(now){
-  const r=this.race;if(this.role!=='host'||!r||r.state!=='waiting')return;
-  if(r.seats.some(s=>!this.ready.has(s.id))&&now-this.readySince<READY_WAIT)return;
+ // Host: lights out. Whoever has not loaded the race yet leaves it (and races the next one).
+ lightsOut(){
+  const r=this.race;if(this.role!=='host'||r?.state!=='waiting')return;
   r.seats=r.seats.filter(s=>this.ready.has(s.id));r.state='racing';
-  this.send({t:'go',race:r.id,seats:r.seats});this.beacon(now);this.emit('go',r);this.emit('change');
+  this.send({t:'go',race:r.id,seats:r.seats});this.beacon();this.emit('go',r);this.emit('change');
  }
  sendReady(){if(this.role==='guest'&&this.race)this.send({t:'ready',race:this.race.id});}
  sendState(car,seq){if(this.role==='guest'&&this.race)this.send({t:'state',race:this.race.id,seq,lat:clamp(this.latency,0,5),car});}
@@ -183,11 +193,11 @@ export class Room {
    // A guest still loading the race it was seated in freezes too: it has until READY_WAIT.
    const loading=p=>this.race?.state==='waiting'&&!this.ready.has(p.id)&&this.race.seats.some(s=>s.id===p.id);
    for(const p of [...this.players.values()])if(p.id!==this.id&&now-p.seen>(loading(p)?READY_WAIT:silent))this.drop(p.id);
-   this.maybeGo(now);return;
+   return;
   }
   if(now-this.hostSeen>silent){this.elect();return;}
   if(now>=this.nextPing){this.nextPing=now+PING;this.pings.set(++this.pingN,now);if(this.pings.size>8)this.pings.delete(this.pings.keys().next().value);this.send({t:'ping',n:this.pingN});}
   if(now>=this.nextHello)this.hello();
  }
- info(){return {room:this.room,id:this.id,role:this.role,number:this.number,name:this.name,latency:this.latency,members:this.members.map(({id,name,number})=>({id,name,number})),race:this.race&&{...this.race,seats:this.race.seats.map(s=>({...s}))}};}
+ info(){return {room:this.room,id:this.id,role:this.role,number:this.number,name:this.name,latency:this.latency,ready:[...this.ready],members:this.members.map(({id,name,number})=>({id,name,number})),race:this.race&&{...this.race,seats:this.race.seats.map(s=>({...s}))}};}
 }
