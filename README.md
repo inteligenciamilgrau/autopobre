@@ -72,6 +72,12 @@ python pista_interlagos/scripts/servidor.py
 
 No Windows, também é possível executar `pista_interlagos/INICIAR_TESTE.cmd`. Ele usa `python` do PATH, ou o executável definido por você em `INTERLAGOS_PYTHON`. O servidor de prévia atende somente no loopback e só entrega os arquivos permitidos. Não use esse servidor Python como serviço público de produção.
 
+### Multiplayer (versão de teste)
+
+Não há botão no jogo: a sala abre só pelo endereço. Abra duas janelas do mesmo navegador, lado a lado, em `…/index.html#sala=teste`. A primeira janela hospeda a sala e corre com o Opala 99; a segunda pega o carro de um rival. Quem hospeda escolhe a pista e clica em **Corrida única**, e as duas janelas largam juntas. As janelas conversam pelo próprio navegador (`BroadcastChannel`), sem servidor nem rede.
+
+Opções no endereço: `&carro=73` escolhe o carro do convidado, `&auto=1` liga o piloto automático daquela janela, e `&lag=150&perda=5` simulam 150 ms de atraso e 5% de mensagens perdidas. O código fica em `teste/multiplayer.js`, `teste/net-room.js` e `teste/net-cars.js`. Os testes são `scripts/testar_multiplayer.mjs` (Node) e `scripts/verificar_multiplayer.py` (navegador).
+
 ## O que entra no Git
 
 Código do jogo e scripts, documentação, `package.json`/`package-lock.json`, as imagens em `teste/assets/`, a pista em `dados/pista.json` e `exports/interlagos_pista.glb`.

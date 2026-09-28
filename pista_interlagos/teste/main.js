@@ -203,6 +203,8 @@ document.addEventListener('click',e=>{if(e.target.closest('button')&&!e.target.c
 $('volume').oninput=e=>{carAudio.setVolume(Number(e.target.value)/100);audioControls();};
 $('mute').onclick=()=>{carAudio.toggleMute();carAudio.unlock();audioControls();};
 let sessionStarted=false,loading=false,loadedCircuit=null;
+// Multiplayer test room (multiplayer.js): loaded only for an address with #sala=NOME; no menu leads there.
+const roomWanted=new URLSearchParams(window.location.hash.slice(1)).has('sala');let multiplayer=null;
 let pitstop,immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
 // The story's grid countdown is shown from behind the car; the engine start before it
 // ('starting') is played in the cockpit (ImmersiveMode switches the view).
@@ -554,7 +556,8 @@ function hud(){
  else if(mobile.handbrake)$('surface').textContent=touchDevice?'FREIO DE MÃO PUXADO':'FREIO DE MÃO PUXADO · ESPAÇO SOLTA';
 }
 // Automated browsers (the checks) skip it unless the page asks with ?intro=1; ?intro=0 turns it off.
-function introWanted(){const asked=new URLSearchParams(window.location.search).get('intro');return asked==='1'||(asked!=='0'&&!navigator.webdriver);}
+// A multiplayer room skips it: every window must reach the 3-2-1 together.
+function introWanted(){const asked=new URLSearchParams(window.location.search).get('intro');return !roomWanted&&(asked==='1'||(asked!=='0'&&!navigator.webdriver));}
 function introContext(){
  if(!ready||!car)return null;
  const s=car.surface.s,a=data.samples,L=data.meta.reconstructed_xy_m,probe=new TestCar(data);
@@ -612,15 +615,16 @@ function lapBanner(dt){
  bestBefore=car.best;
  if(lapShown>0){lapShown-=dt;if(lapShown<=0)banner.hidden=true;}
 }
-function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
+function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);multiplayer?.frame(dt);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(intro.active&&automatic)intro.stop();
  if(intro.active&&!immersive.active&&immersive.freeCountdown>0){immersive.freeCountdown=3;$('raceCountdown').hidden=true;}
- if(!immersive.active&&immersive.freeResultReady&&!paused){accumulator=0;recordChampionshipRound();menu(true);}
+ // In a multiplayer race the result waits while other humans still race (multiplayer.js holdResults).
+ if(!immersive.active&&immersive.freeResultReady&&!paused&&!multiplayer?.holdResults()){accumulator=0;recordChampionshipRound();menu(true);}
  // The sound is heard from the rival the recon lap watches (N), otherwise from the player's car.
  const heard=watchedRival()?.car??car;
  if(automatic&&!paused&&(mobile?.throttle||mobile?.brake||mobile?.steering))takeWheel();
- if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady){menu(true);break;}}}
+ if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
  tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[1.2,5.5]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
@@ -680,8 +684,9 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
 }
 function renderClassification(){
  const rows=[...(immersive.freeOrder??[])];
- rows.splice(immersive.freePosition-1,0,PLAYER_ENTRY);const list=$('finishingOrder');list.replaceChildren();
- rows.forEach((entry,i)=>{const row=document.createElement('li');row.classList.toggle('player-row',entry.number==='99');row.textContent=`${i+1}º · #${entry.number} ${entry.shortName}`;list.append(row);});
+ // A multiplayer guest races a rival's car (immersive.playerEntry); otherwise the Opala 99.
+ const me=immersive.playerEntry??PLAYER_ENTRY;rows.splice(immersive.freePosition-1,0,me);const list=$('finishingOrder');list.replaceChildren();
+ rows.forEach((entry,i)=>{const row=document.createElement('li');row.classList.toggle('player-row',entry===me);row.textContent=`${i+1}º · #${entry.number} ${entry.shortName}`;list.append(row);});
 }
 // A paused session that #resume can go back to (a finished free race can only be run again).
 function resumable(){return sessionStarted&&(immersive?.active||!immersive?.freeResultReady);}
@@ -716,8 +721,9 @@ let held=false;
 // Taking the wheel ends the recon lap: the cameras come back to the player's car.
 function takeWheel(){automatic=false;if(watched){watched=0;followInitialized=false;tvCamera?.reset();}}
 // The recon lap (automatic) is never paused by the window losing focus: it may be a demonstration.
+// Nor is a multiplayer race: the others race on (two windows side by side share one focus).
 function hold(on){
- if(!ready||on===held||on&&paused)return;
+ if(!ready||on===held||on&&paused||on&&roomWanted)return;
  held=on;paused=on;carAudio.setPaused(on);if(!on)carAudio.unlock();
  if(on&&document.pointerLockElement===$('view'))document.exitPointerLock();
  keys.clear();mobile?.clear();cameraReturn.reset(performance.now());$('pauseBadge').hidden=!on;
@@ -949,6 +955,7 @@ async function loadCircuit(){
  immersive.beginCountdown=()=>{beginCountdown();if(paused&&!automatic&&introWanted()){immersive.state.sounds=immersive.state.sounds.filter(sound=>sound.name!=='countdown');intro.play('race',introContext);}};
  immersive.start=()=>{startStory();if(paused&&introWanted())intro.play('story',introContext);};
  const disableStory=immersive.disable.bind(immersive);immersive.disable=()=>{intro.stop();disableStory();};
+ multiplayer?.attach(immersive);
  // Box 99: Curvelo's service lane, or the surveyed garage at Interlagos.
  if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,openings,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
  pitstop?.setDamage(preferences.values.damage);
@@ -1002,4 +1009,21 @@ async function loadCircuit(){
 }
 $('start').disabled=false;$('storyStart').disabled=false;$('singleRace').disabled=false;$('championshipStart').disabled=false;status('');updateMenuLabels();updateScreens();
 window.interlagos={ready:false,audioInfo:()=>carAudio.info()};
+// The multiplayer room reaches into the game only through these hooks.
+if(roomWanted)import('./multiplayer.js').then(({startMultiplayer})=>{multiplayer=startMultiplayer({
+ session:()=>({started:sessionStarted,paused,loading,circuit:circuit.id}),
+ immersive:()=>immersive,template:()=>model,
+ pilotName:()=>(pilotPicker.input.hidden?pilotPicker.select.value:pilotPicker.input.value.trim())||pilotPicker.profiles.selected||'',
+ command:()=>automatic?pilot():input(),
+ autopilot:on=>{if(on!==undefined&&ready&&sessionStarted&&!immersive.active){if(on)automatic=true;else takeWheel();}return automatic;},
+ hasCircuit:id=>Object.hasOwn(CIRCUITS,id),
+ // A race the host announced: its track as a single race, from whatever screen or race this window is on.
+ startRace:id=>{
+  if(loading||!Object.hasOwn(CIRCUITS,id))return false;
+  if(!pilotPicker.input.value.trim()&&!pilotPicker.select.value)pilotPicker.input.value='Convidado';
+  if(sessionStarted&&circuit.id!==id)returnToMainMenu();
+  if(circuit.id!==id)selectCircuit(id);
+  $('settings').close();lapRecords.dialog.close();championshipDialog.close();
+  championshipRace=null;menuMode='corrida';pendingMode='single';beginRace(true,false,false);return true;
+ }});}).catch(err=>console.error(err));
 frame();

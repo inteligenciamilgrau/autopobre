@@ -148,6 +148,9 @@ export function pitRoute(data){
 // Seeded (mulberry32) so a check or a reference run can replay one race exactly.
 function random(seed){let t=seed>>>0;return ()=>{t=t+0x6D2B79F5>>>0;let r=Math.imul(t^t>>>15,1|t);r=r+Math.imul(r^r>>>7,61|r)^r;return ((r^r>>>14)>>>0)/4294967296;};}
 const trackGap=(from,to,L)=>{let gap=to.surface.s-from.surface.s;if(gap>L/2)gap-=L;if(gap<-L/2)gap+=L;return gap;};
+// Multiplayer (multiplayer.js): a remote car is placed from its owner's messages, so two of them
+// never push each other here, and the humans' cars (ghost) pass through one another.
+const apart=(a,b)=>a.remote&&b.remote||a.ghost&&b.ghost;
 export class RaceField {
  // ace: Koyzinho drives as the ace from the next reset (the race option, main.js).
  constructor(data,{onStep,onReset,seed,ace=false}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.ace=ace;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
@@ -194,9 +197,10 @@ export class RaceField {
   }
   // One physics step for a rival, then its race distance and the flag.
   const drive=(r,input)=>{const c=r.car;r.tow=c.draft;c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&!r.finished&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}};
-  for(const r of this.rivals)drive(r,r.pit?this.pitInput(r,bodies,dt):this.decide(r,bodies,driverOf,player,dt,totalLaps));
+  // A seat raced over the network (r.puppet, multiplayer.js) is placed, not driven: it returns the pedals.
+  for(const r of this.rivals){if(r.puppet){commands.push(r.puppet(r,dt));continue;}drive(r,r.pit?this.pitInput(r,bodies,dt):this.decide(r,bodies,driverOf,player,dt,totalLaps));}
   for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
-   if(Math.abs((bodies[i].z??bodies[i].surface.z)-(bodies[j].z??bodies[j].surface.z))>1.6)continue;
+   if(Math.abs((bodies[i].z??bodies[i].surface.z)-(bodies[j].z??bodies[j].surface.z))>1.6||apart(bodies[i],bodies[j]))continue;
    const hit=resolveContact(bodies[i],bodies[j]);if(!hit)continue;
    if(hit.speed>1.6&&this.time-(this.cooldowns.get(`${i}:${j}`)??-10)>.35){this.cooldowns.set(`${i}:${j}`,this.time);this.collisions++;impacts.push({...hit,player:i===0});for(const k of [i,j])if(k>0&&!this.rivals[k-1].style.ace)this.rivals[k-1].stun=Math.min(1.5,hit.speed*.06);}
   }

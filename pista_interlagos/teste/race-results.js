@@ -2,9 +2,10 @@ import {CIRCUITS,circuitId} from './circuits.js';
 import {PLAYER_ENTRY} from './race-roster.js';
 import {pointsText} from './championship.js';
 export const formatTime=value=>Number.isFinite(value)&&value>0?`${String(Math.floor(value/60)).padStart(2,'0')}:${(value%60).toFixed(3).padStart(6,'0')}`:'—';
+// mode.playerEntry: the car a multiplayer guest races (multiplayer.js); otherwise the Opala 99.
 export function resultRows(mode){
- const rows=(mode.freeOrder??[]).map(entry=>({...entry}));
- rows.splice(Math.max(0,(mode.finishPosition??mode.freePosition)-1),0,{...PLAYER_ENTRY,name:mode.pilotName||PLAYER_ENTRY.name,bestLap:mode.finishBest,totalTime:mode.finishTime,finished:true,player:true});
+ const rows=(mode.freeOrder??[]).map(entry=>({...entry})),me=mode.playerEntry??PLAYER_ENTRY;
+ rows.splice(Math.max(0,(mode.finishPosition??mode.freePosition)-1),0,{...me,name:mode.pilotName||me.name,bestLap:mode.finishBest,totalTime:mode.finishTime,finished:true,player:true});
  return rows.map((row,index)=>({...row,position:index+1}));
 }
 export class RaceResults {
