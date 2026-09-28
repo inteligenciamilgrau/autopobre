@@ -22,8 +22,9 @@ export class AutomaticAIRecords {
   let changed=false;const rows=this.rows.map(r=>({...r}));
   for(const rival of mode.rivals){
    // Koyzinho Indestrutível is a test setting and the board is the Fácil field's: the ace's times and
-   // those of the harder levels stay off it.
-   const lap=rival.car.best;if(!valid(lap)||rival.style?.ace||(rival.level??'facil')!=='facil')continue;
+   // those of the harder levels stay off it. So do the cars of a multiplayer room that come over the
+   // network (car.remote, multiplayer.js): a human in a rival's seat, or times this window never timed.
+   const lap=rival.car.best;if(!valid(lap)||rival.car.remote||rival.style?.ace||(rival.level??'facil')!=='facil')continue;
    const row=rows.find(r=>r.circuit===circuit&&r.mode===category&&r.number===rival.entry.number);if(!row)continue;
    const race=standard&&rival.finished&&valid(rival.finishTime)?rival.finishTime:null;
    const bestLap=Math.min(row.bestLap,lap),bestRace=best(row.bestRace,race);

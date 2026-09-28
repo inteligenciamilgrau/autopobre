@@ -2,8 +2,10 @@
 the room of index.html#sala=...: the host picks Corrida única, which waits on the grid; one guest was
 in the room already, the other arrives during that wait and is seated too; the host gives the start
 (the Largar button). They race one lap of Interlagos on the automatic pilot, every window shows the
-others' cars where they really are, and every result sheet lists all three pilots. A window opened
-without #sala shows nothing of it and does not even load the module.
+others' cars where they really are (solid: humans collide unless the host asks for ghosts), and every
+result sheet lists all three pilots. Then the host reloads (F5): it hosts again under the same
+identity and the guests keep their cars. A window opened without #sala shows nothing of it and does
+not even load the module.
 
 Usage: verificar_multiplayer.py [porta]  (INTERLAGOS_SHOTS=pasta keeps the screenshots there)."""
 import json
@@ -53,12 +55,14 @@ def gap(view, before, after, t):
 
 def guest_window(context, host, pages, name, car=None):
     """A guest is another window (a popup), not a tab: a headless browser draws its background tabs
-    at a couple of frames a second, which would run that window's race in slow motion. The windows
-    share one browser's storage, so each opens with its own pilot saved as the last one used (a
-    guest seated while the start waits is pulled into the race before anyone could type)."""
+    at a couple of frames a second, which would run that window's race in slow motion. noopener: a
+    popup would otherwise start with a copy of the host tab's sessionStorage, the room identity
+    included, as a duplicated tab does. The windows share one browser's localStorage, so each opens
+    with its own pilot saved as the last one used (a guest seated while the start waits is pulled
+    into the race before anyone could type)."""
     host.evaluate("name=>localStorage.setItem('autopobre-pilots-v1',JSON.stringify({selected:name,names:[name]}))", PILOTS[name][0])
     with context.expect_page() as popup:
-        host.evaluate("url=>window.open(url,'_blank','popup,width=800,height=450')", f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1' + (f'&carro={car}' if car else ''))
+        host.evaluate("url=>{window.open(url,'_blank','popup,noopener,width=800,height=450');}", f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1' + (f'&carro={car}' if car else ''))
     page = pages[name] = popup.value
     watch(page, name)
     page.wait_for_load_state('load', timeout=120000)
@@ -100,14 +104,14 @@ def race_room(context, host, pages):
     assert sorted(c['number'] for c in info['host']['cars'] if c['remote']) == ['64', '73'], info['host']['cars']
     for name in ('guest', 'late'):
         assert all(c['remote'] for c in info[name]['cars']) and '99' in [c['number'] for c in info[name]['cars']]
-    # Every window shows the other two humans, named, drawn and passing through (ghosts).
+    # Every window shows the other two humans, named, drawn and solid (humans collide by default).
     for name, own in info.items():
         for other, (pilot, number) in PILOTS.items():
             if other == name:
                 continue
             car = seen(own, number)
-            assert car['name'] == pilot and car['shown'] and car['ghost'], (name, other, car)
-        assert own['me']['ghost']
+            assert car['name'] == pilot and car['shown'] and not car['ghost'], (name, other, car)
+        assert not own['me']['ghost']
     fps = {name: page.evaluate(FPS) for name, page in pages.items()}
 
     # Mid-race: where each window shows the others' cars, against where they really were.
@@ -136,6 +140,15 @@ def race_room(context, host, pages):
         page.screenshot(path=str(SHOTS / f'4_{name}_resultado.png'))
         text = page.evaluate("document.querySelector('#raceResults').innerText")
         assert all(pilot in text for pilot, _ in PILOTS.values()), (name, text[:600])
+
+    # F5 on the host: the same identity hosts again at once, and each guest keeps its car.
+    before = {name: page.evaluate('interlagosSala.info()') for name, page in pages.items()}
+    host.reload(wait_until='load', timeout=120000)
+    wait_js(host, f"window.interlagosSala?.info().role==='host'&&interlagosSala.info().id==={before['host']['id']!r}", timeout=60000)
+    for name in ('guest', 'late'):
+        wait_js(pages[name], f"(()=>{{const s=interlagosSala.info();return s.role==='guest'&&s.number==={PILOTS[name][1]!r};}})()", timeout=30000)
+        assert pages[name].evaluate('interlagosSala.info().id') == before[name]['id']
+    wait_js(host, "interlagosSala.info().members.length===3", timeout=30000)
     assert not errors, errors
     return fps, speed, gaps
 
@@ -143,7 +156,8 @@ def race_room(context, host, pages):
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=browser_executable(), headless=True, args=browser_args())
     context = browser.new_context(viewport={'width': 800, 'height': 450})
-    context.add_init_script("localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false,laps:1,camera:'chase'}));")
+    # (try: a noopener popup first opens about:blank, whose opaque origin has no localStorage)
+    context.add_init_script("try{localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false,laps:1,camera:'chase'}));}catch{}")
 
     # The normal game: no card, no room, no multiplayer file requested.
     plain = context.new_page()

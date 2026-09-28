@@ -183,7 +183,7 @@ export function pitRoute(data){
 function random(seed){let t=seed>>>0;return ()=>{t=t+0x6D2B79F5>>>0;let r=Math.imul(t^t>>>15,1|t);r=r+Math.imul(r^r>>>7,61|r)^r;return ((r^r>>>14)>>>0)/4294967296;};}
 const trackGap=(from,to,L)=>{let gap=to.surface.s-from.surface.s;if(gap>L/2)gap-=L;if(gap<-L/2)gap+=L;return gap;};
 // Multiplayer (multiplayer.js): a remote car is placed from its owner's messages, so two of them
-// never push each other here, and the humans' cars (ghost) pass through one another.
+// never push each other here; in a room raced with ghosts the humans' cars pass through one another.
 const apart=(a,b)=>a.remote&&b.remote||a.ghost&&b.ghost;
 export class RaceField {
  // ace: Koyzinho drives as the ace from the next reset (the race option, main.js); level: the rivals'

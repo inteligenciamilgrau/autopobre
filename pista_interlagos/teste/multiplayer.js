@@ -4,12 +4,14 @@
 //   index.html#sala=NOME     the first window in a room hosts it and races the Opala 99; the next
 //                            ones take the first free rival's car (or the one in &carro=73)
 //   &auto=1                  the automatic pilot drives this window's car from the start
+//   &fantasmas=1             (host) humans pass through each other instead of colliding
 //   &lag=150&perda=5         simulate 150 ms of network delay and 5% of lost car messages
 // The host picks the track and presses Corrida única: the grid waits on 3, every guest in the room
 // (and whoever joins meanwhile) loads it, and the lights go out for everyone when the host presses
 // Largar. The host's game drives the bots and passes every car on; each window
 // drives its own car and places the others where their owners say they are (RaceField's remote
-// cars). Humans pass through each other but hit the bots. Modo Corrida only.
+// cars). Every window resolves a contact for its own car only, against where it shows the other
+// one; the other window does the same from its side. Modo Corrida only.
 import {Room,roomParams,HOST_NUMBER} from './net-room.js';
 import {RemoteCar,packCar,readCar} from './net-cars.js';
 import {RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
@@ -63,7 +65,7 @@ class Multiplayer {
   this.phase='lobby';this.holding=false;this.finishedAt=null;this.autopilotOn=false;
   const room=this.room,circuit=this.game.session().circuit,grid=immersive.lineup==null;
   const field=immersive.field;
-  this.race=room.role==='host'?grid?room.planRace({circuit,laps:immersive.laps,ace:!!field.ace,level:field.level,retirements:field.retirements!==false}):null
+  this.race=room.role==='host'?grid?room.planRace({circuit,laps:immersive.laps,ace:!!field.ace,level:field.level,retirements:field.retirements!==false,ghosts:this.params.ghosts}):null
    :room.role==='guest'&&room.race?.state==='waiting'&&room.race.circuit===circuit?room.race:null;
   field.seed=this.race?.seed;
   if(this.race){immersive.laps=this.race.laps;field.ace=this.race.ace;if(this.race.level)field.level=this.race.level;field.retirements=this.race.retirements;}
@@ -74,7 +76,7 @@ class Multiplayer {
   this.remotes.clear();car.ghost=false;immersive.playerEntry=undefined;
   visual.rivals.splice(0,visual.rivals.length,...this.originals);for(const obj of this.originals){obj.userData.entry=RIVAL_ROSTER[this.originals.indexOf(obj)];this.label(obj,null);}
   const me=this.myNumber();if(!me)return;
-  car.ghost=true;
+  car.ghost=!!race.ghosts;
   if(me===HOST_NUMBER){this.seatHumans();return;}
   const i=seatIndex(me),slot=field.rivals[i],back={x:car.x,y:car.y,heading:car.heading},name=race.seats.find(s=>s.number===me).name;
   // This window's car takes its own seat on the grid...
@@ -89,14 +91,14 @@ class Multiplayer {
  }
  // Which of the other cars humans drive, and their names: at the reset, and again whenever a seat
  // is taken or left while the start waits. The host turns a guest's seat into a remote car (and a
- // seat left back into a bot); every guest sees the humans as ghosts with a name tag.
+ // seat left back into a bot); every window names the humans (ghosts in a race without contact).
  seatHumans(){
   const immersive=this.immersive,field=immersive.field,visual=immersive.visual,race=this.race,me=this.myNumber();if(!race||!me)return;
   const humans=new Map(race.seats.map(s=>[s.number,s])),mine=me===HOST_NUMBER?-1:seatIndex(me);
   field.rivals.forEach((r,k)=>{
    const number=k===mine?HOST_NUMBER:RIVAL_ROSTER[k].number,seat=humans.get(number),obj=visual.rivals[k];
    if(me===HOST_NUMBER){if(seat&&!r.puppet)this.remote(r,number,true);else if(!seat&&r.puppet)this.release(r);}
-   r.car.ghost=!!seat;
+   r.car.ghost=!!seat&&!!race.ghosts;
    r.entry=!seat?RIVAL_ROSTER[k]:number===HOST_NUMBER?hostEntry(seat.name):{...RIVAL_ROSTER[k],name:seat.name,shortName:seat.name,human:true};
    obj.userData.entry=r.entry;this.label(obj,seat?.name??null);
   });
@@ -111,10 +113,11 @@ class Multiplayer {
    return input;
   };
  }
- // Host: a guest gone (or never ready) leaves a bot in its seat, from where the car is.
+ // Host: a guest gone (or never ready) leaves a bot in its seat, from where the car is. The human's
+ // best lap goes with them: only the bot's own full laps may reach the AI records (ai-records.js).
  release(r){
   const i=this.immersive.field.rivals.indexOf(r),obj=this.immersive.visual.rivals[i];
-  this.remotes.delete(r.seat);r.puppet=null;r.seat=null;r.car.remote=r.car.ghost=false;r.lastS=r.car.surface.s;r.entry=RIVAL_ROSTER[i];
+  this.remotes.delete(r.seat);r.puppet=null;r.seat=null;r.car.remote=r.car.ghost=false;r.car.best=null;r.lastS=r.car.surface.s;r.entry=RIVAL_ROSTER[i];
   obj.userData.entry=r.entry;this.label(obj,null);
  }
  // Name tags: a human's name in lime over the car; null puts the driver's own tag back.
@@ -217,6 +220,8 @@ class Multiplayer {
  statusText(s){
   const room=this.room,me=room.number;
   if(!room.role)return 'Procurando a sala…';
+  // The host said goodbye (a reload, most likely): its guests wait for it before electing another.
+  if(room.hostAway)return 'O anfitrião saiu · esperando ele voltar…';
   if(this.immersive?.active)return 'A sala corre só no Modo Corrida.';
   if(room.role==='guest'&&!me)return 'Sala cheia: os 15 carros estão ocupados.';
   if(this.phase==='waiting'){
@@ -228,7 +233,7 @@ class Multiplayer {
   }
   if(this.phase==='racing'){
    if(this.immersive?.freeFinished){const left=this.stillRacing(),wait=Math.max(0,Math.ceil(RESULTS_WAIT-(clock()-(this.finishedAt??clock()))));return `Você terminou! Esperando ${left} piloto${left>1?'s':''} · ${wait} s`;}
-   if(room.role==='guest'&&room.race?.id!==this.race?.id)return 'O anfitrião saiu desta corrida.';
+   if(room.role==='guest'&&room.lobby?.race?.id!==this.race?.id)return 'O anfitrião saiu desta corrida.';
    const humans=this.race?.seats.length??1;return `Corrida com ${humans} piloto${humans>1?'s':''} ${humans>1?'humanos':'humano'}.`;
   }
   if(this.phase==='finished')return 'Fim de corrida.';

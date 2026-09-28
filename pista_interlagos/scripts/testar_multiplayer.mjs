@@ -5,6 +5,7 @@ import fs from 'node:fs';
 import {Room,roomParams,roomName,playerName,validMessage,SEATS,HOST_NUMBER} from '../teste/net-room.js';
 import {RemoteCar,packCar,readCar,CAR_FIELDS} from '../teste/net-cars.js';
 import {RaceField} from '../teste/race-field.js';
+import {AutomaticAIRecords,readAIRecords} from '../teste/ai-records.js';
 import {TestCar,recognitionInput} from '../teste/physics.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));
 const wait=(ms=15)=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -13,7 +14,8 @@ const report={};
 // --- The address: #sala=NOME and its options.
 {
  const p=roomParams('#sala=Teste Óla&carro=73&auto=1&lag=150&perda=5');
- assert.deepEqual(p,{room:'testeola',car:'73',auto:true,lag:150,loss:.05});
+ assert.deepEqual(p,{room:'testeola',car:'73',auto:true,ghosts:false,lag:150,loss:.05});
+ assert.equal(roomParams('#sala=a&fantasmas=1').ghosts,true,'humans pass through each other only when asked');
  assert.equal(roomParams('#carro=73'),null,'no room without sala');
  assert.equal(roomParams('#sala=%20%20'),null);
  assert.equal(roomParams('#sala=a&carro=99').car,null,'the 99 is always the host');
@@ -110,7 +112,9 @@ const report={};
  // ...but a guest silent for longer than 3 s is let go (its car becomes a bot in the game).
  advance([A],7);assert(events.includes('A leave 19'));assert.equal(A.members.length,1);assert.deepEqual(race.seats.map(s=>s.number),['99']);
  // The host leaves: the guest finds no host and hosts the room itself.
- A.leave();C.leave();await wait();B.tick();assert.equal(B.role,null,'host gone: a new election');advance([B],8.1);assert.equal(B.role,'host');B.leave();
+ // The host says goodbye: the guest waits for it (a reload says goodbye too), then elects.
+ A.leave();C.leave();await wait();B.tick();assert(B.hostAway&&B.role==='guest','host gone: the guest waits for it first');
+ const heard=B.hostSeen;advance([B],heard+10.5);assert.equal(B.role,null,'10 s after the goodbye: a new election');advance([B],heard+11.5);assert.equal(B.role,'host','nobody came back: the guest hosts');B.leave();
  report.room=events.slice(0,6);
 }
 // Two windows opened at once: both host for a moment, then the smaller id keeps the room.
@@ -130,6 +134,37 @@ for(let trial=0;trial<6;trial++){
  await wait();await wait();await wait();
  assert.equal(G.role,'host',`the first host keeps the room (trial ${trial})`);assert.equal(H.role,'guest');assert.equal(H.hostId,G.id);
  G.leave();H.leave();
+}
+// A lying host: names with bidi overrides and zero-width characters reach a guest cleaned all the same.
+{
+ let now=0;const clock=()=>now,name='nomes-'+Math.random().toString(36).slice(2,8),H=new Room({room:name,name:'H',clock}),G=new Room({room:name,name:'G',clock});
+ G.on('race',()=>true);H.start();now=1;H.tick();G.start();await wait();await wait();assert.equal(G.role,'guest');
+ const raw=new BroadcastChannel('autopobre-sala-'+name),dirty='A​na‮ ',seats=[{id:H.id,name:dirty,number:'99'},{id:G.id,name:'G⁦',number:'73'}];
+ raw.postMessage({t:'lobby',from:H.id,name:'Ho‮st',age:9,players:seats,race:{id:'0000abcd',circuit:'interlagos',laps:1,seed:1,ace:false,retirements:true,ghosts:false,level:null,seats,state:'waiting'}});
+ await wait(30);
+ assert.equal(G.lobby.name,'Host');assert.deepEqual(G.lobby.players.map(p=>p.name),['Ana','G']);assert.deepEqual(G.race.seats.map(s=>s.name),['Ana','G']);
+ raw.postMessage({t:'go',from:H.id,race:'0000abcd',seats});await wait(30);assert.deepEqual(G.race.seats.map(s=>s.name),['Ana','G']);
+ raw.close();H.leave();G.leave();
+}
+// F5 on the host: its tab keeps the identity, it takes the room back at once and the guest keeps its car.
+// A duplicated tab (sessionStorage copied) notices the live twin and takes an identity of its own.
+{
+ let now=0;const clock=()=>now,name='f5-'+Math.random().toString(36).slice(2,8),advance=(rooms,to)=>{while(now<to-1e-9){now=Math.min(to,now+.1);for(const r of rooms)r.tick();}};
+ const tab=()=>{const store=new Map();return {getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v)),copy(){const t=tab();for(const [k,v] of store)t.setItem(k,v);return t;}};};
+ const hostTab=tab(),A=new Room({room:name,name:'Ana',clock,storage:hostTab}),B=new Room({room:name,name:'Bia',want:'19',clock,storage:tab()});
+ A.start();advance([A],1);B.start();await wait();await wait();assert.equal(B.number,'19');
+ advance([A,B],5);const id=A.id,epoch=A.hostEpoch;
+ A.leave();await wait();B.tick();assert(B.hostAway);
+ const A2=new Room({room:name,name:'Ana',clock,storage:hostTab});A2.start();
+ assert.equal(A2.id,id,'the reloaded tab is the same host');assert.equal(A2.role,'host','it hosts again without an election');
+ for(let i=0;i<8;i++){await wait();advance([A2,B],now+.25);}
+ assert.equal(B.role,'guest');assert.equal(B.hostId,id);assert(!B.hostAway);assert.equal(B.number,'19','the guest keeps its car');
+ assert.equal(A2.hostEpoch,epoch,'the room is as old as before the reload (its age decides a clash of hosts)');
+ advance([A2,B],now+4);
+ const T=new Room({room:name,name:'Tia',clock,storage:hostTab.copy()});T.start();assert.equal(T.id,id);
+ for(let i=0;i<6;i++){await wait();advance([A2,B,T],now+.3);}
+ assert.notEqual(T.id,id,'the copy took a new identity');assert.equal(T.role,'guest');assert.equal(A2.role,'host');assert.equal(A2.id,id);assert.equal(B.hostId,id);
+ A2.leave();B.leave();T.leave();
 }
 // A simulated delay only postpones delivery.
 {
@@ -163,6 +198,16 @@ for(let trial=0;trial<6;trial++){
  const q=field.rivals[4],other=new RemoteCar(q.car),X=r.car.x+.3;q.puppet=(rival,dt)=>other.drive(rival.car,dt);q.car.remote=true;other.receive({...s,vx:0,vy:0,x:X,y:r.car.y},{seq:1});
  field.step(player,1/120);assert(Math.abs(q.car.x-X)<1e-9,'no contact between two remote cars');
  report.field={collisions:field.collisions};
+}
+// The AI records (ai-records.js) never take a lap from a car driven over the network: a human in a
+// rival's seat, or times relayed by the host. A car this window drives still counts.
+{
+ const store=new Map(),storage={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v))};
+ const records=new AutomaticAIRecords(storage),reference=n=>readAIRecords(storage).find(r=>r.circuit==='interlagos'&&r.mode==='normal'&&r.number===n).bestLap;
+ const before73=reference('73'),before00=reference('00');
+ const rival=(number,best,remote)=>({entry:{number},car:{best,remote},finished:false,style:{}});
+ records.update({data:{meta:{id:'interlagos'}},active:false,freeTotalLaps:3,fullGrid:true,rivals:[rival('73',60,true),rival('00',61,false)]});
+ assert.equal(reference('73'),before73,'a remote car is no AI record');assert.equal(reference('00'),61,'a bot this window drives is');assert(before00>61);
 }
 console.log(JSON.stringify(report,null,1));
 console.log('testar_multiplayer: ok');

@@ -76,7 +76,9 @@ No Windows, também é possível executar `pista_interlagos/INICIAR_TESTE.cmd`. 
 
 Não há botão no jogo: a sala abre só pelo endereço. Abra duas janelas do mesmo navegador, lado a lado, em `…/index.html#sala=teste`. A primeira janela hospeda a sala e corre com o Opala 99; a segunda pega o carro de um rival. Quem hospeda escolhe a pista e clica em **Corrida única**: o grid espera no "3", quem entrar na sala nesse meio-tempo também ganha um carro, e a largada sai quando o anfitrião clica em **Largar** (ou aperta Enter). As janelas conversam pelo próprio navegador (`BroadcastChannel`), sem servidor nem rede.
 
-Opções no endereço: `&carro=73` escolhe o carro do convidado, `&auto=1` liga o piloto automático daquela janela, e `&lag=150&perda=5` simulam 150 ms de atraso e 5% de mensagens perdidas. O código fica em `teste/multiplayer.js`, `teste/net-room.js` e `teste/net-cars.js`. Os testes são `scripts/testar_multiplayer.mjs` (Node) e `scripts/verificar_multiplayer.py` (navegador).
+Os carros dos humanos batem entre si e nos bots. Se o anfitrião der F5, ele volta como anfitrião, e os convidados mantêm os carros.
+
+Opções no endereço: `&carro=73` escolhe o carro do convidado, `&auto=1` liga o piloto automático daquela janela, `&fantasmas=1` (no anfitrião) faz os humanos passarem uns pelos outros, e `&lag=150&perda=5` simulam 150 ms de atraso e 5% de mensagens perdidas. O código fica em `teste/multiplayer.js`, `teste/net-room.js` e `teste/net-cars.js`. Os testes são `scripts/testar_multiplayer.mjs` (Node) e `scripts/verificar_multiplayer.py` (navegador).
 
 ## O que entra no Git
 
