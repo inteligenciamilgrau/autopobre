@@ -27,7 +27,7 @@ export class RaceResults {
   const rows=resultRows(mode),best=rows.filter(r=>Number.isFinite(r.bestLap)&&r.bestLap>0).sort((a,b)=>a.bestLap-b.bestLap)[0];this.rows=rows;
   const $=id=>this.root.querySelector('#'+id);
   $('resultsCircuit').textContent=CIRCUITS[circuitId(mode.data?.meta.id)].name.toUpperCase();
-  const laps=(mode.active?mode.storyLaps:mode.freeTotalLaps)??3;$('resultsMode').textContent=`/ ${mode.active?'IMERSIVA':'CORRIDA'} · ${laps} VOLTA${laps>1?'S':''}`;
+  const laps=(mode.active?mode.storyLaps:mode.freeTotalLaps)??3;$('resultsMode').textContent=`/ ${mode.active?'IMERSIVA':mode.freeLineup?.length===1?'CORRIDA 1x1':'CORRIDA'} · ${laps} VOLTA${laps>1?'S':''}`;
   $('resultsPlace').textContent=`VOCÊ CHEGOU EM ${mode.finishPosition}º / ${rows.length}`;
   $('resultsTime').textContent=`TOTAL ${formatTime(mode.finishTime)}`;
   $('resultsFastest').textContent=best?`VOLTA MAIS RÁPIDA · #${best.number} · ${formatTime(best.bestLap)}`:'VOLTA MAIS RÁPIDA · —';
@@ -44,7 +44,8 @@ export class RaceResults {
     :`CAMPEONATO · +${mine?.points??0} pts nesta etapa · você é ${me.position}º no geral com ${pointsText(me.points)} · líder: #${champ.standings[0].number} ${champ.standings[0].shortName} (${champ.standings[0].points})`;}
   const body=this.root.querySelector('tbody');body.replaceChildren();
   for(const row of rows){const tr=document.createElement('tr');if(row.player)tr.classList.add('results-player');
-   const values=[`${row.position}º`,row.number,row.name+(row.player?' · VOCÊ':''),formatTime(row.bestLap),row.finished?formatTime(row.totalTime):'NA PISTA'];
+   // A retirement (race-field.js breakdowns, or the story's tow) is classified AB, with what broke.
+   const values=[row.dnf?'AB':`${row.position}º`,row.number,row.name+(row.player?' · VOCÊ':''),formatTime(row.bestLap),row.finished?formatTime(row.totalTime):row.dnf?`ABANDONOU${row.breakdown?' · '+row.breakdown:''}`:'NA PISTA'];
    if(points)values.push(`+${points.get(String(row.number))??0}`);
    values.forEach((value,i)=>{const cell=document.createElement(i===2?'th':'td');if(i===2)cell.scope='row';cell.textContent=value;if(i===3&&best&&row.number===best.number)cell.className='results-best';if(i===5)cell.className='results-points';tr.append(cell);});body.append(tr);
   }

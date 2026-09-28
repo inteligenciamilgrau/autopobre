@@ -2,8 +2,9 @@
 import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {TestCar} from '../teste/physics.js';
-import {RaceField,racingLine,ACE_STYLE} from '../teste/race-field.js';
-import {RIVAL_ROSTER,ACE_NUMBER} from '../teste/race-roster.js';
+import {RaceField,racingLine,ACE_STYLE,styleForDriver} from '../teste/race-field.js';
+import {RIVAL_ROSTER,ACE_NUMBER,AI_LEVELS} from '../teste/race-roster.js';
+import {AI_REFERENCE_TIMES} from '../teste/ai-record-references.js';
 import {pitGeometry,wallContact} from '../teste/pit-lane.js';
 import {createCurveloData} from '../teste/curvelo-data.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));data.meta.id='interlagos';
@@ -75,20 +76,24 @@ assert(hero.passes>=3&&hero.walls===0&&hero.offroad<.005,'the recon driver passe
 assert(hero.best<122,'the recon driver laps near the front-runners\' pace');
 // "Koyzinho Indestrutível" (the race option, RaceField ace): off by default, Koyzinho keeps his own
 // style. On, he is the ace: last rival slot on every grid, just ahead of the player; alone at
-// Interlagos well under the player's well-driven 1:53, with no unforced errors; from the back he
-// wins a seeded race cleanly, and contacts never stun him.
+// Interlagos his best lap is a 1:50, the others swing between 1:51 and 1:53 (the pilots' ask), with
+// no unforced errors; from the back he wins a seeded race cleanly, and contacts never stun him.
 assert.equal(RIVAL_ROSTER.find(e=>e.number===ACE_NUMBER)?.shortName,'Koyzinho Bechtold');
 assert(new RaceField(data,{seed:1}).rivals.every(r=>!r.style.ace),'off by default: no ace in the field');
 const aceOf=f=>f.rivals.find(q=>q.entry.number===ACE_NUMBER);
 for(const seed of [1,2,3,4,5]){const f=new RaceField(data,{seed,ace:true});f.reset(0,{grid:true});const r=aceOf(f);assert.equal(r.slot,RIVAL_ROSTER.length-1,'the ace starts from the last rival slot');assert.equal(r.style,ACE_STYLE);assert.equal(Math.min(...f.rivals.map(q=>q.progress)),r.progress,'nobody but the player starts behind the ace');}
-function aceSolo(){
- const player=new TestCar(data);player.resetGrid();const f=new RaceField(data,{seed:1,ace:true});f.reset(player.surface.s,{grid:true});player.x=player.y=10000;player.surface=player.sample(player.x,player.y);
- const r=aceOf(f);f.rivals=[r];let offroad=0,steps=0;
- while(!r.finished&&steps<120*300){f.step(player,1/120,2);steps++;if(!r.car.surface.onRoad)offroad++;}
- return {best:r.car.best,offroad,mistakes:r.mistakes};
+// One driver alone for some laps: every lap time, the best and the mean of the flying laps.
+function solo(number,laps,options){
+ const player=new TestCar(data);player.resetGrid();const f=new RaceField(data,{seed:1,...options});f.reset(player.surface.s,{grid:true});player.x=player.y=10000;player.surface=player.sample(player.x,player.y);
+ const r=f.rivals.find(q=>q.entry.number===number);f.rivals=[r];let offroad=0,steps=0,last=null;const times=[];
+ while(!r.finished&&steps<120*150*laps){f.step(player,1/120,laps);steps++;if(!r.car.surface.onRoad)offroad++;if(r.car.lastLap!==last){last=r.car.lastLap;if(last)times.push(last);}}
+ const flying=times.slice(1);
+ return {times,best:Math.min(...times),mean:flying.reduce((s,t)=>s+t,0)/flying.length,spread:Math.max(...flying)-Math.min(...flying),offroad,mistakes:r.mistakes};
 }
-const aceAlone=aceSolo();
-assert(aceAlone.best<112.5&&aceAlone.offroad===0&&aceAlone.mistakes===0,'the ace laps Interlagos alone under 1:52.5, on the asphalt, without errors');
+const aceAlone=solo(ACE_NUMBER,7,{ace:true});
+assert(aceAlone.offroad===0&&aceAlone.mistakes===0,'the ace laps alone on the asphalt, without errors');
+assert(aceAlone.best<111.2,'the ace\'s best lap alone at Interlagos is a 1:50');
+assert(aceAlone.mean>aceAlone.best+.4&&aceAlone.mean<112.5&&aceAlone.spread>1,'his laps swing: the best now and then, the mean a little slower, under 1:52.5');
 function aceRace(seed){
  const player=new TestCar(data);player.resetGrid();const f=new RaceField(data,{seed,ace:true});f.reset(player.surface.s,{grid:true});player.x=player.y=10000;player.surface=player.sample(player.x,player.y);
  const r=aceOf(f);let offroad=0,walls=0,stun=0,steps=0;
@@ -99,4 +104,61 @@ function aceRace(seed){
 const ace=aceRace(4);
 assert(ace.position===1&&ace.offroad===0&&ace.walls===0,'from the back of the grid the ace wins, on the asphalt and off the walls');
 assert.equal(ace.stun,0,'contacts never stun the ace');
-console.log(JSON.stringify({passed:true,interlagos,curvelo,hero,aceAlone,ace},null,1));
+// Rivals' levels (the race setting, race-roster.js AI_LEVELS). Fácil is the original field: the
+// default, every style as before (its seeded races match ai-record-references.js). Above it the
+// pace comes from the pilots' table: in each level the table's best (Koyzinho, 10) stay well ahead
+// of its weakest (Aluisio, 5), and each level is faster than the one below; Médio's best already
+// beats Fácil's best reference lap, and at Impossível skill 10 is Koyzinho Indestrutível's pace.
+assert.deepEqual(AI_LEVELS,['facil','medio','alto','impossivel']);
+assert(RIVAL_ROSTER.every(e=>Number.isInteger(e.skill)&&e.skill>=1&&e.skill<=10&&Number.isInteger(e.errors)&&e.errors>=1&&e.errors<=10),'every driver has the pilots\' skill and mistake scores');
+assert(new RaceField(data,{seed:1}).rivals.every((r,i)=>r.level==='facil'&&JSON.stringify(r.style)===JSON.stringify(styleForDriver(RIVAL_ROSTER[i]))),'Fácil by default, with the original styles');
+const levels={};
+for(const level of ['medio','alto','impossivel']){
+ const top=solo(ACE_NUMBER,4,{level}),low=solo('312',4,{level});levels[level]={top:+top.mean.toFixed(2),low:+low.mean.toFixed(2)};
+ assert(top.offroad===0&&low.offroad===0,level+': on the asphalt');
+ assert(low.mean-top.mean>4,level+': the table\'s best well ahead of its weakest');
+}
+const fastestReference=Math.min(...AI_REFERENCE_TIMES.filter(r=>r.circuit==='interlagos').map(r=>r.bestLap));
+assert(levels.medio.top<fastestReference-2,'Médio\'s best beats Fácil\'s fastest reference lap');
+assert(levels.alto.top<levels.medio.top-2&&levels.impossivel.top<levels.alto.top-1.2,'each level is faster than the one below');
+assert(levels.alto.low<levels.medio.low-2&&levels.impossivel.low<levels.alto.low-2,'the weakest get faster with the level too');
+assert(Math.abs(levels.impossivel.top-aceAlone.mean)<1,'Impossível\'s skill 10 runs at Koyzinho Indestrutível\'s pace');
+// A race at each level: everyone finishes on the asphalt, contact stays rare, and the drivers the
+// pilots rate highest win (Koyzinho, Kleber, Konrad, Pedro, Felipe: 9 or 10).
+function levelRace(level,seed){
+ const player=new TestCar(data);player.resetGrid();const f=new RaceField(data,{seed,level});f.reset(player.surface.s,{grid:true});player.x=player.y=10000;player.surface=player.sample(player.x,player.y);
+ let steps=0,offroad=0;while(f.rivals.some(q=>!q.finished)&&steps<120*900){f.step(player,1/120,3);steps++;for(const q of f.rivals)if(!q.car.surface.onRoad)offroad++;}
+ const order=f.rivals.filter(q=>q.finished).sort((a,b)=>a.finishTime-b.finishTime);
+ return {finished:order.length,winner:order[0]?.entry.skill,top:order.slice(0,4).map(q=>q.entry.skill),offroad:offroad/(steps*f.rivals.length),collisions:f.collisions};
+}
+for(const level of ['medio','alto','impossivel']){
+ const race=levelRace(level,1);levels[level].race=race;
+ assert.equal(race.finished,RIVAL_ROSTER.length,level+': all fourteen finish');
+ assert(race.offroad<.005&&race.collisions<30,level+': on the asphalt, contact rare');
+ assert(race.winner>=9,level+': a driver the pilots rate 9 or 10 wins');
+}
+// Breakdowns (the race option "Abandonos", RaceField retirements): off by default here; on, one to
+// four cars break down in every race (each count turns up), never the ace. A broken car pulls off
+// onto the grass beside the road, stops there and never takes the flag; everyone else finishes.
+assert(new RaceField(data,{seed:1}).rivals.every(r=>!r.breakdown),'no breakdowns unless asked');
+const counts=new Set();
+for(let seed=1;seed<=40;seed++){
+ const f=new RaceField(data,{seed,retirements:true,ace:seed%2===0}),broken=f.rivals.filter(r=>r.breakdown);counts.add(broken.length);
+ assert(broken.length>=1&&broken.length<=4,'one to four breakdowns a race');
+ assert(broken.every(r=>!r.style.ace&&r.breakdown.at>.05&&r.breakdown.at<.97),'the ace never breaks; breakdowns come during the race');
+}
+assert.deepEqual([...counts].sort(),[1,2,3,4],'every count from one to four turns up');
+function breakdownRace(level,seed){
+ const player=new TestCar(data);player.resetGrid();const f=new RaceField(data,{seed,level,retirements:true});f.reset(player.surface.s,{grid:true});player.x=player.y=10000;player.surface=player.sample(player.x,player.y);
+ let steps=0;while((f.rivals.some(r=>!r.finished&&!r.retired)||f.rivals.some(r=>r.breakdown&&!r.broken))&&steps<120*900){f.step(player,1/120,3);steps++;}
+ for(let k=0;k<120*20;k++)f.step(player,1/120,3);
+ const out=f.rivals.filter(r=>r.retired);
+ return {planned:f.rivals.filter(r=>r.breakdown).length,retired:out.length,finished:f.rivals.filter(r=>r.finished).length,collisions:f.collisions,
+  parked:out.map(r=>({number:r.entry.number,kind:r.broken.kind,off:+(Math.abs(r.car.surface.d)-r.car.surface.width/2).toFixed(1),onRoad:r.car.surface.onRoad,speed:Math.hypot(r.car.vx,r.car.vy),finished:r.finished}))};
+}
+const breakdowns=breakdownRace('impossivel',5);
+assert(breakdowns.retired===breakdowns.planned&&breakdowns.planned===4,'all four planned breakdowns happen');
+assert.equal(breakdowns.finished,RIVAL_ROSTER.length-breakdowns.retired,'everyone else finishes');
+assert(breakdowns.parked.every(p=>!p.onRoad&&p.off>1.5&&p.off<8&&p.speed<.3&&!p.finished),'a broken car stops on the grass beside the road and never takes the flag');
+assert(breakdowns.collisions<30,'the others get round the broken cars');
+console.log(JSON.stringify({passed:true,interlagos,curvelo,hero,aceAlone,ace,levels,breakdowns},null,1));

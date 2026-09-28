@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import {PlayerPreferences,PREFERENCES_KEY} from '../teste/player-preferences.js';
 const data=new Map(),storage={getItem:key=>data.get(key),setItem:(key,value)=>data.set(key,value)};
 let preferences=new PlayerPreferences(storage);
-assert.deepEqual(preferences.values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,realisticWater:false,classicInterior:false,cinematic:'auto',laps:3});
+assert.deepEqual(preferences.values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,realisticWater:false,classicInterior:false,cinematic:'auto',duelRival:'73',laps:3});
 preferences.update({immersive:false,livery:'seiva_danilo',camera:'cockpit'});
 preferences=new PlayerPreferences(storage);
-assert.deepEqual(preferences.values,{immersive:false,livery:'seiva_danilo',camera:'cockpit',circuit:'interlagos',damage:false,aceKoyzinho:false,realisticWater:false,classicInterior:false,cinematic:'auto',laps:3});
+assert.deepEqual(preferences.values,{immersive:false,livery:'seiva_danilo',camera:'cockpit',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,realisticWater:false,classicInterior:false,cinematic:'auto',duelRival:'73',laps:3});
 preferences.update({circuit:'curvelo'});
 assert.equal(new PlayerPreferences(storage).values.circuit,'curvelo');
 preferences.update({circuit:'../../private'});
@@ -23,12 +23,18 @@ preferences.update({realisticWater:'on'});assert.equal(new PlayerPreferences(sto
 // Koyzinho Indestrutível is opt-in and kept after a reload; anything but a boolean falls back to off.
 preferences.update({aceKoyzinho:true});assert.equal(new PlayerPreferences(storage).values.aceKoyzinho,true);
 preferences.update({aceKoyzinho:'yes'});assert.equal(new PlayerPreferences(storage).values.aceKoyzinho,false);
+// Rivals' level: Fácil (the original field) unless the player picks Médio, Alto or Impossível.
+for(const level of ['medio','alto','impossivel','facil']){preferences.update({aiLevel:level});assert.equal(new PlayerPreferences(storage).values.aiLevel,level);}
+for(const bad of ['dificil','IMPOSSIVEL',3,null])assert.equal((preferences.update({aiLevel:bad}),new PlayerPreferences(storage).values.aiLevel),'facil',`aiLevel ${bad} falls back to facil`);
+// Breakdowns (Abandonos) are on unless turned off; anything but a boolean falls back to on.
+preferences.update({retirements:false});assert.equal(new PlayerPreferences(storage).values.retirements,false);
+preferences.update({retirements:'no'});assert.equal(new PlayerPreferences(storage).values.retirements,true);
 // The classic cockpit interior is opt-in: the V06 body round the controls is the default.
 preferences.update({classicInterior:true});assert.equal(new PlayerPreferences(storage).values.classicInterior,true);
 preferences.update({classicInterior:'yes'});assert.equal(new PlayerPreferences(storage).values.classicInterior,false);
 for(const corrupted of ['{"damage":1}','{"realisticWater":1}','not json','null','[]','42','{"immersive":"false","livery":"../../private","camera":"bad"}','{"circuit":{"toString":42}}']){
  data.set(PREFERENCES_KEY,corrupted);
- assert.deepEqual(new PlayerPreferences(storage).values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,realisticWater:false,classicInterior:false,cinematic:'auto',laps:3});
+ assert.deepEqual(new PlayerPreferences(storage).values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,realisticWater:false,classicInterior:false,cinematic:'auto',duelRival:'73',laps:3});
 }
 const denied=new PlayerPreferences({getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}});
 assert.doesNotThrow(()=>denied.update({immersive:false,camera:'orbit'}));
@@ -41,3 +47,6 @@ console.log('Preferences passed: defaults, both modes, independent fields, inval
 // Film look: auto by default, only the known levels are kept.
 preferences.update({cinematic:'lite'});assert.equal(new PlayerPreferences(storage).values.cinematic,'lite');
 preferences.update({cinematic:'cinema'});assert.equal(new PlayerPreferences(storage).values.cinematic,'auto');
+preferences.update({duelRival:'19'});assert.equal(new PlayerPreferences(storage).values.duelRival,'19');
+preferences.update({duelRival:'99'});assert.equal(new PlayerPreferences(storage).values.duelRival,'73');
+preferences.update({duelRival:19});assert.equal(new PlayerPreferences(storage).values.duelRival,'73');

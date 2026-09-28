@@ -59,6 +59,16 @@ export class TyreSmoke {
   }
   position.needsUpdate=puff.needsUpdate=this.geometry.attributes.dust.needsUpdate=true;
  }
+ // Engine smoke of a broken-down rival (race-field.js breakdowns): grey puffs from under the bonnet
+ // that spread low and drift off with the breeze (a touch of the dust tint and its drag). rate: puffs per second.
+ plume(car,dt,rate=8){
+  const c=Math.cos(car.heading),s=Math.sin(car.heading),x=car.x+c*1.5,y=car.y+s*1.5;car.plumeEmit=(car.plumeEmit??0)+rate*dt;
+  while(car.plumeEmit>=1){
+   car.plumeEmit--;const q=this.particles[this.cursor];this.cursor=(this.cursor+1)%this.capacity;this.total++;
+   Object.assign(q,{x:x+(Math.random()-.5)*.6,y:(car.z??car.surface.z)+.85,z:-y+(Math.random()-.5)*.6,vx:car.vx*.4+.9+(Math.random()-.5)*.5,vy:.8+Math.random()*.5,vz:-car.vy*.4+.5+(Math.random()-.5)*.5,
+    age:0,life:2.2+Math.random(),size:.5+Math.random()*.25,strength:.8,dust:.28});
+  }
+ }
  info(){return {active:this.particles.filter(p=>p.age<p.life).length,total:this.total,capacity:this.capacity,drawCalls:1};}
  dispose(){this.geometry.dispose();this.material.dispose();}
 }

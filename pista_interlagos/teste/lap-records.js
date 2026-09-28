@@ -29,7 +29,8 @@ export class AutomaticRecords {
  update(mode,now=Date.now()){
   if(!this.name||!mode||mode.recordAssisted)return;
   const bestLap=mode.car.best;if(!validTime(bestLap)||mode.car.laps<1)return;
-  const laps=mode.active?mode.storyLaps:mode.freeTotalLaps,completed=laps===LAPS.standard&&mode.car.laps>=laps&&validTime(mode.finishTime);
+  // Race times only from the whole grid (fullGrid): a solo practice or a 1x1 starts at the front.
+  const laps=mode.active?mode.storyLaps:mode.freeTotalLaps,completed=mode.fullGrid!==false&&laps===LAPS.standard&&mode.car.laps>=laps&&validTime(mode.finishTime);
   const bestRace=completed?mode.finishTime:null,circuit=circuitId(mode.data?.meta.id),category=mode.active?'immersive':'normal';
   const signature=JSON.stringify([this.name,circuit,category,bestLap,bestRace]);
   if(signature===this.signature||now<this.retryAt)return;

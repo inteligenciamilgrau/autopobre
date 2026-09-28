@@ -39,6 +39,20 @@
 /* Modo História: the single race takes the story's green and gold. */
 #tracks[data-mode=historia] #singleRace{background:#152d29eb;color:#f4ce39;border:1px solid #d9b93c}
 #tracks[data-mode=historia] #singleRace:hover:not(:disabled){background:#21443ceb;color:#ffe574}
+/* Race length beside the side column's title: the same preference as the race settings' Voltas. */
+.tracks-side-head{display:flex;align-items:center;justify-content:space-between;gap:10px}
+.tracks-laps{display:flex;align-items:center;gap:7px;font-size:10px;letter-spacing:.14em;font-weight:800;color:#e6cd72;text-transform:uppercase}
+.tracks-laps select,.duel-pick select{width:auto;min-width:0;margin:0;padding:5px 6px;border:1px solid #88978c80;border-radius:6px;background:#0b1c19;color:#fff6dc;font:inherit;font-size:12px;font-weight:800;letter-spacing:0;text-transform:none;cursor:pointer}
+/* Modo Corrida's other single races: a solo practice and the 1x1 against a chosen rival. */
+.race-extras{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:10px}
+#tracks[data-mode=historia] .race-extras{display:none}
+#tracks .race-extras button{height:100%;padding:12px 13px;font-size:14px;background:#152d29eb;color:#f4ce39;border:1px solid #d9b93c99}
+#tracks .race-extras button:hover:not(:disabled){background:#21443ceb;color:#ffe574}
+.duel-card{display:flex;flex-direction:column;min-width:0;border:1px solid #d9b93c99;border-radius:8px;overflow:hidden;background:#152d29eb}
+#tracks .duel-card button{flex:1;height:auto;border:0;border-radius:0;background:none}
+.duel-pick{display:flex;align-items:center;gap:6px;padding:6px 8px;border-top:1px solid #d9b93c4d;font-size:10px;font-weight:800;letter-spacing:.08em;color:#c9d3c4;text-transform:uppercase}
+.duel-pick select{flex:1}
+#duelSwatch{width:16px;height:16px;flex-shrink:0;border-radius:3px;border:1px solid #0006;background:linear-gradient(90deg,var(--body,#555) 0 34%,var(--stripe,#e4e4d5) 34% 66%,var(--body,#555) 66%)}
 .championship-panel{padding:14px 16px;border-radius:9px;border:1px solid #d9b93c80;background:linear-gradient(170deg,#1b3a53ee,#0f2433ee);box-shadow:inset 0 3px #f4ce39}
 .championship-panel h3{margin:3px 0 10px;font-size:18px;color:#fff6dc}
 #championshipCalendar{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:5px}
@@ -109,6 +123,7 @@
  .track-detail{margin-top:6px;padding:6px 9px}.track-detail p{font-size:10px;margin:0 0 3px;line-height:1.35}#circuitIntro,#circuitSource{display:none}
  .tracks-side{gap:6px}.tracks-modes{gap:6px}
  .tracks-modes button,.championship-start{padding:8px 9px;font-size:12px;min-height:44px}.tracks-modes small{font-size:9px}
+ .race-extras{gap:6px}#tracks .race-extras button{padding:7px 9px;font-size:12px;min-height:40px}.race-extras small,.duel-pick span{display:none}.duel-pick{padding:4px 6px}.tracks-laps{font-size:8px;gap:5px}.tracks-laps select,.duel-pick select{padding:2px 4px;font-size:10px}
  .championship-panel{padding:8px 10px}.championship-panel h3{display:none}
  #championshipCalendar{grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;margin:4px 0 6px}
  #championshipCalendar li{grid-template-columns:1fr;justify-items:center;text-align:center;gap:1px;font-size:9px}

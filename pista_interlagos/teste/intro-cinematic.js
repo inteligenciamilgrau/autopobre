@@ -72,10 +72,11 @@ export class CinematicIntro{
    {duration:1.9,ramp:true,fov:[42,34],from:orbit(1.0,112,56),to:orbit(.62,50,22),look:[mid,mid.clone().addScaledVector(f,-12)],
     caption:[String(c.venue||'').toUpperCase(),c.circuit,c.weather]},
    {duration:1.5,ramp:true,fov:[48,56],from:lane(40),to:lane(7),look:[car.clone().add(new THREE.Vector3(0,.7,0)),car.clone().add(new THREE.Vector3(0,.6,0))],
-    dof:.3,caption:['OLD STOCK · LARGADA',`${c.grid} carros · ${c.laps} voltas`,'Motores ligados no grid.']},
+    // A solo practice (no flag) or a 1x1 (c.duel: the rival's roster entry) says so on the grid.
+    dof:.3,caption:c.practice?['TREINO SOLO','Só você na pista','Voltas livres, sem bandeirada.']:c.duel?['CORRIDA 1x1',`#99 × #${c.duel.number} ${c.duel.shortName}`,`${c.laps} volta${c.laps>1?'s':''}, mano a mano.`]:['OLD STOCK · LARGADA',`${c.grid} carros · ${c.laps} voltas`,'Motores ligados no grid.']},
    {duration:1.6,ramp:true,fov:[36,26],from:car.clone().addScaledVector(f,8.5).addScaledVector(inward,3.6).add(new THREE.Vector3(0,.85,0)),to:car.clone().addScaledVector(f,3.9).addScaledVector(inward,1.7).add(new THREE.Vector3(0,.6,0)),
     look:[car.clone().addScaledVector(f,.4).add(new THREE.Vector3(0,.6,0)),car.clone().addScaledVector(f,.2).add(new THREE.Vector3(0,.55,0))],
-    dof:.45,caption:['OPALA #99',c.pilot,`Larga em ${c.position}º`]}
+    dof:.45,caption:['OPALA #99',c.pilot,c.practice?'Pista livre':`Larga em ${c.position}º`]}
   ];
  }
  // Moves the camera while the intro runs; returns false when there is nothing to do.

@@ -15,13 +15,15 @@ export class AutomaticAIRecords {
  constructor(storage){this.storage=storage;this.rows=readAIRecords(storage);this.signature='';this.retryAt=0;}
  update(mode,now=Date.now()){
   if(!mode?.rivals?.length||now<this.retryAt)return;
-  const circuit=mode.data.meta.id,category=mode.active?'immersive':'normal',standard=(mode.active?mode.storyLaps:mode.freeTotalLaps)===LAPS.standard;
+  // A 1x1 rival starts on pole with nobody ahead: its laps count, its race time does not (fullGrid).
+  const circuit=mode.data.meta.id,category=mode.active?'immersive':'normal',standard=mode.fullGrid!==false&&(mode.active?mode.storyLaps:mode.freeTotalLaps)===LAPS.standard;
   const signature=JSON.stringify([circuit,category,...mode.rivals.map(r=>[r.car.best,r.finished?r.finishTime:null])]);
   if(signature===this.signature)return;
   let changed=false;const rows=this.rows.map(r=>({...r}));
   for(const rival of mode.rivals){
-   // Koyzinho Indestrutível is a test setting: his times stay off the AI board.
-   const lap=rival.car.best;if(!valid(lap)||rival.style?.ace)continue;
+   // Koyzinho Indestrutível is a test setting and the board is the Fácil field's: the ace's times and
+   // those of the harder levels stay off it.
+   const lap=rival.car.best;if(!valid(lap)||rival.style?.ace||(rival.level??'facil')!=='facil')continue;
    const row=rows.find(r=>r.circuit===circuit&&r.mode===category&&r.number===rival.entry.number);if(!row)continue;
    const race=standard&&rival.finished&&valid(rival.finishTime)?rival.finishTime:null;
    const bestLap=Math.min(row.bestLap,lap),bestRace=best(row.bestRace,race);

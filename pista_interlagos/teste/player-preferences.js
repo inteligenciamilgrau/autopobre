@@ -1,4 +1,5 @@
 import {circuitId} from './circuits.js';
+import {DUEL_DEFAULT,rivalEntry,AI_LEVELS} from './race-roster.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
 // 'tv' films from the trackside towers and verge cameras (tv-camera.js).
 // Race length in laps, for the free race and the story alike, on every circuit.
@@ -16,12 +17,18 @@ export function normalizePreferences(value){
   damage:typeof source.damage==='boolean'?source.damage:false,
   // "Koyzinho Indestrutível": Koyzinho (#2) races as the ace, from the back of the grid. Opt-in.
   aceKoyzinho:typeof source.aceKoyzinho==='boolean'?source.aceKoyzinho:false,
+  // Rivals' level (race-roster.js AI_LEVELS): 'facil' is the original field.
+  aiLevel:AI_LEVELS.includes(source.aiLevel)?source.aiLevel:'facil',
+  // Breakdowns (race-field.js): one to four rivals retire in every race, as in the Old Stock. On unless turned off.
+  retirements:typeof source.retirements==='boolean'?source.retirements:true,
   // Lakes with reflections and wind ripples cost an extra scene render per frame: opt-in.
   realisticWater:typeof source.realisticWater==='boolean'?source.realisticWater:false,
   // The cockpit view shows the V06 body round the controls; true keeps the old box interior.
   classicInterior:typeof source.classicInterior==='boolean'?source.classicInterior:false,
   // Film look (cinematic.js): 'auto' is the full look on computers and the light one on phones.
   cinematic:['auto','full','lite','off'].includes(source.cinematic)?source.cinematic:'auto',
+  // The rival of the 1x1 (Modo Corrida's track screen), by car number.
+  duelRival:typeof source.duelRival==='string'&&rivalEntry(source.duelRival)?source.duelRival:DUEL_DEFAULT,
   // Laps of every race (Modo Corrida and Modo História): 3 unless the player picks more or fewer.
   laps:Number.isInteger(source.laps)&&source.laps>=LAPS.min&&source.laps<=LAPS.max?source.laps:LAPS.standard
  };
