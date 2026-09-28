@@ -6,6 +6,7 @@ import {Room,roomParams,roomName,playerName,validMessage,SEATS,HOST_NUMBER} from
 import {RemoteCar,packCar,readCar,CAR_FIELDS} from '../teste/net-cars.js';
 import {RaceField} from '../teste/race-field.js';
 import {AutomaticAIRecords,readAIRecords} from '../teste/ai-records.js';
+import {ROOM_SERVER} from '../teste/net-link.js';
 import {TestCar,recognitionInput} from '../teste/physics.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));
 const wait=(ms=15)=>new Promise(resolve=>setTimeout(resolve,ms));
@@ -14,7 +15,8 @@ const report={};
 // --- The address: #sala=NOME and its options.
 {
  const p=roomParams('#sala=Teste Óla&carro=73&auto=1&lag=150&perda=5');
- assert.deepEqual(p,{room:'testeola',car:'73',auto:true,ghosts:false,lag:150,loss:.05});
+ assert.deepEqual(p,{room:'testeola',car:'73',auto:true,ghosts:false,local:false,server:null,lag:150,loss:.05});
+ assert.equal(roomParams('#sala=a&local=1').local,true);assert.equal(roomParams('#sala=a&servidor=local').server,'local');assert.equal(roomParams('#sala=a&servidor=outro').server,null);
  assert.equal(roomParams('#sala=a&fantasmas=1').ghosts,true,'humans pass through each other only when asked');
  assert.equal(roomParams('#carro=73'),null,'no room without sala');
  assert.equal(roomParams('#sala=%20%20'),null);
@@ -208,6 +210,11 @@ for(let trial=0;trial<6;trial++){
  const rival=(number,best,remote)=>({entry:{number},car:{best,remote},finished:false,style:{}});
  records.update({data:{meta:{id:'interlagos'}},active:false,freeTotalLaps:3,fullGrid:true,rivals:[rival('73',60,true),rival('00',61,false)]});
  assert.equal(reference('73'),before73,'a remote car is no AI record');assert.equal(reference('00'),61,'a bot this window drives is');assert(before00>61);
+}
+// The room server's address is the one the page's content policy allows (scripts/publicacao.py).
+{
+ const policy=fs.readFileSync(new URL('./publicacao.py',import.meta.url),'utf8').match(/^ROOM_SERVER = '([^']+)'/m)?.[1];
+ assert.equal(policy,ROOM_SERVER,'net-link.js and publicacao.py name the same room server');assert.match(ROOM_SERVER,/^wss:\/\//);
 }
 console.log(JSON.stringify(report,null,1));
 console.log('testar_multiplayer: ok');

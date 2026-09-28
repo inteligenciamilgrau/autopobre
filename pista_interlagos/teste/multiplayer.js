@@ -1,8 +1,11 @@
-// Multiplayer, test version: windows of the game on one machine race each other (net-room.js,
-// net-cars.js). Nothing in the menus leads here; main.js loads this module only when the address
-// asks for a room:
-//   index.html#sala=NOME     the first window in a room hosts it and races the Opala 99; the next
-//                            ones take the first free rival's car (or the one in &carro=73)
+// Multiplayer: players on different machines race each other through the room server
+// (net-link.js, sala-cloudflare), or windows of one browser through a BroadcastChannel (&local=1)
+// (net-room.js, net-cars.js). Nothing in the menus leads here; main.js loads this module only when
+// the address asks for a room:
+//   index.html#sala=NOME     the first in a room hosts it and races the Opala 99; the next ones
+//                            take the first free rival's car (or the one in &carro=73). Online, the
+//                            group key opens the door and the host lets each guest in
+//   &local=1                 this browser's windows only, no server; &servidor=local: wrangler dev
 //   &auto=1                  the automatic pilot drives this window's car from the start
 //   &fantasmas=1             (host) humans pass through each other instead of colliding
 //   &lag=150&perda=5         simulate 150 ms of network delay and 5% of lost car messages
@@ -13,6 +16,7 @@
 // cars). Every window resolves a contact for its own car only, against where it shows the other
 // one; the other window does the same from its side. Modo Corrida only.
 import {Room,roomParams,HOST_NUMBER} from './net-room.js';
+import {ServerLink,ROOM_SERVER,LOCAL_SERVER} from './net-link.js';
 import {RemoteCar,packCar,readCar} from './net-cars.js';
 import {RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
 // Car messages a second; after crossing the line, how long the results wait for the others (s).
@@ -22,12 +26,22 @@ const HOST_PAINT={color:0x17191b,stripe:0xf0cd1f};
 const hostEntry=name=>({...PLAYER_ENTRY,mark:PLAYER_ENTRY.color,name,shortName:name,human:true});
 const seatIndex=number=>RIVAL_ROSTER.findIndex(e=>e.number===number);
 const clock=()=>performance.now()/1000;
+// The group key, typed once on this browser (the server keeps the real one as a secret).
+const KEY_STORE='autopobre-chave-grupo';
+const readKey=()=>{try{return localStorage.getItem(KEY_STORE)??'';}catch{return '';}};
+const saveKey=key=>{try{localStorage.setItem(KEY_STORE,key);}catch{}};
+// What the card says when the server closed the door (net-link.js CLOSED) or the line dropped.
+const PROBLEMS={conectando:'Conectando ao servidor da sala…',reconectando:'Conexão caiu · tentando de novo…',chave:'Digite a chave do grupo para entrar na sala.',
+ cheia:'Sala cheia.',recusado:'O anfitrião recusou sua entrada.',expulso:'Você foi removido da sala.',excesso:'Conexão encerrada: mensagens demais.',
+ ocupada:'Muitas tentativas com a chave errada · tente de novo em um minuto.','outra-aba':'Esta sala foi aberta em outra aba.',origem:'Endereço não autorizado.',
+ fora:'Sem conexão com o servidor da sala (internet, ou o limite do dia do servidor).',saiu:'Você saiu da sala.'};
 // game: main.js hooks (session, immersive, template, pilotName, command, autopilot, startRace, hasCircuit).
 export function startMultiplayer(game,hash=location.hash){const params=roomParams(hash);return params?new Multiplayer(game,params):null;}
 class Multiplayer {
  constructor(game,params){
   this.game=game;this.params=params;this.autopilot=params.auto;this.autopilotOn=false;
-  this.room=new Room({room:params.room,name:game.pilotName(),want:params.car,lag:params.lag,loss:params.loss});
+  const link=params.local?null:new ServerLink({url:params.server==='local'?LOCAL_SERVER:ROOM_SERVER,room:params.room,key:readKey,name:()=>this.room?.name??game.pilotName()});
+  this.room=new Room({room:params.room,name:game.pilotName(),want:params.car,lag:params.lag,loss:params.loss,link});
   this.race=null;this.phase='lobby';this.holding=false;this.remotes=new Map();this.seq=0;this.sendClock=0;this.readyClock=0;this.finishedAt=null;this.panelClock=0;this.immersive=null;this.rows='';
   // A new race from the host: load its track and start (false: busy loading, asked again later).
   this.room.on('race',race=>this.game.hasCircuit(race.circuit)&&this.game.startRace(race.circuit)).on('go',race=>this.go(race))
@@ -211,6 +225,13 @@ class Multiplayer {
   const start=this.panel.start=add('button','mp-start');start.type='button';start.id='mpStart';start.hidden=true;
   start.onclick=()=>{this.room.lightsOut();start.blur();};
   root.insertBefore(start,this.panel.list);
+  // Online: the group key (asked when the server wants it), and the host's doorman.
+  const form=this.panel.key=add('form','mp-key');form.hidden=true;
+  const field=add('input','',form);field.type='password';field.id='mpKey';field.placeholder='Chave do grupo';field.autocomplete='off';field.maxLength=128;
+  const enter=add('button','',form);enter.type='submit';enter.textContent='Entrar';
+  form.onsubmit=e=>{e.preventDefault();const key=field.value.trim();if(!key)return;saveKey(key);field.value='';field.blur();this.room.retry();};
+  root.insertBefore(form,this.panel.list);
+  this.panel.knocks=add('ul','mp-knocks');root.insertBefore(this.panel.knocks,this.panel.list);
   const label=add('label','mp-auto'),box=add('input','',label);box.type='checkbox';box.id='mpAuto';box.checked=this.autopilot;label.append(' Piloto automático neste carro');
   // The box gives the focus back at once: typed driving keys are ignored while an input has it.
   box.onchange=()=>{this.autopilot=box.checked;if(!box.checked&&this.autopilotOn){this.game.autopilot(false);this.autopilotOn=false;}box.blur();};
@@ -219,7 +240,9 @@ class Multiplayer {
  }
  statusText(s){
   const room=this.room,me=room.number;
+  if(room.problem&&PROBLEMS[room.problem])return PROBLEMS[room.problem];
   if(!room.role)return 'Procurando a sala…';
+  if(room.pending)return 'Esperando o anfitrião aceitar você…';
   // The host said goodbye (a reload, most likely): its guests wait for it before electing another.
   if(room.hostAway)return 'O anfitrião saiu · esperando ele voltar…';
   if(this.immersive?.active)return 'A sala corre só no Modo Corrida.';
@@ -256,11 +279,22 @@ class Multiplayer {
   const results=document.getElementById('raceResults');p.root.hidden=!!results&&!results.hidden;
   p.root.classList.toggle('mp-racing',s.started&&!s.paused);p.root.classList.toggle('mp-tracks',!document.getElementById('tracks')?.classList.contains('hidden'));
   p.room.textContent=room.room;
-  p.role.textContent=room.role==='host'?'anfitrião · #99':room.role==='guest'?(me?`convidado · #${me}`:'assistindo'):'…';
+  p.role.textContent=room.role==='host'?'anfitrião · #99':room.pending?'na porta':room.role==='guest'?(me?`convidado · #${me}`:'assistindo'):'…';
   p.status.textContent=this.statusText(s);
-  const rows=room.members.map(m=>`#${m.number??'—'} ${m.name}${m.number===HOST_NUMBER?' (anfitrião)':''}${m.id===room.id?' · você':''}`);
-  if(rows.join('\n')!==this.rows){this.rows=rows.join('\n');p.list.replaceChildren(...rows.map(text=>{const li=document.createElement('li');li.textContent=text;return li;}));}
-  p.net.textContent=[room.role==='guest'?`ping ${Math.round(room.latency*2000)} ms`:room.role==='host'?`${Math.max(0,room.members.length-1)} convidado(s)`:'',
+  // The key form when the server asks for it; knocks and kicks for an online host. Names only ever
+  // reach the page as text.
+  p.key.hidden=!(room.online&&room.problem==='chave');
+  const knocks=room.role==='host'?[...room.knocks.values()]:[],kickable=room.online&&room.role==='host'&&!(s.started&&!s.paused);
+  const rows=room.members.map(m=>({id:m.id,text:`#${m.number??'—'} ${m.name}${m.number===HOST_NUMBER?' (anfitrião)':''}${m.id===room.id?' · você':''}`,kick:kickable&&m.id!==room.id}));
+  const key=JSON.stringify([rows,knocks]);
+  if(key!==this.rows){
+   this.rows=key;
+   const button=(text,action)=>{const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=()=>{action();b.blur();};return b;};
+   p.list.replaceChildren(...rows.map(r=>{const li=document.createElement('li'),name=document.createElement('span');name.textContent=r.text;li.append(name);if(r.kick)li.append(button('Expulsar',()=>this.room.kick(r.id)));return li;}));
+   p.knocks.replaceChildren(...knocks.map(k=>{const li=document.createElement('li'),name=document.createElement('span');name.textContent=`${k.name} quer entrar`;li.append(name,button('Aceitar',()=>this.room.admit(k.id)),button('Recusar',()=>this.room.deny(k.id)));return li;}));
+  }
+  p.knocks.hidden=!knocks.length;
+  p.net.textContent=[room.online?'servidor':'mesmo PC',room.role==='guest'?`ping ${Math.round(room.latency*2000)} ms`:room.role==='host'?`${Math.max(0,room.members.length-1)} convidado(s)`:'',
    this.params.lag?`atraso simulado ${this.params.lag} ms`:'',this.params.loss?`perda simulada ${Math.round(this.params.loss*100)}%`:''].filter(Boolean).join(' · ');
  }
  // For the checks (verificar_multiplayer.py): this window's car and every other car as it shows them.

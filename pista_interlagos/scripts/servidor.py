@@ -72,7 +72,7 @@ class Handler(SimpleHTTPRequestHandler):
 
     def end_headers(self):
         html = (ROOT / GAME / 'index.html').read_text(encoding='utf-8')
-        for name, value in security_headers(html).items():
+        for name, value in security_headers(html, dev=True).items():
             self.send_header(name, value)
         self.send_header('Cache-Control', 'no-cache')
         self.send_header('X-AutoPobre-Preview', 'restricted-v1')

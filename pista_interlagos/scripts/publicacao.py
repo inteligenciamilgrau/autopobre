@@ -12,7 +12,7 @@ MODULES = (
     'circuits.js', 'curvelo-data.js', 'curvelo-scene.js', 'open-circuit.js', 'track-clearance.js', 'interlagos-stands.js',
     'race-results.js', 'race-results.css', 'lap-records.js', 'championship.js', 'championship-board.js', 'pistas.css',
     'race-roster.js',
-    'multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js',
+    'multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js', 'net-link.js',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'car-openings.js', 'cockpit.js', 'cockpit-materials.js', 'cockpit-instruments.js', 'cockpit-rear.js', 'cockpit-equipment.js',
     'driver.js', 'driver-rig.js', 'driver-controls.js', 'driver-helmet.js', 'rival-driver.js', 'family-phone.js',
@@ -86,7 +86,13 @@ def contained_file(root, relative):
     return path
 
 
-def content_policy(html):
+# The multiplayer room server (sala-cloudflare), the page's only connection outside its own origin;
+# the same address as ROOM_SERVER in teste/net-link.js. The local preview also allows wrangler dev.
+ROOM_SERVER = 'wss://sala.inteligenciamilgrau.com.br'
+LOCAL_ROOM_SERVER = 'ws://127.0.0.1:8787'
+
+
+def content_policy(html, dev=False):
     inline = re.search(r'<script type="importmap">(.*?)</script>', html, re.S)
     if not inline:
         raise ValueError('Missing import map')
@@ -95,15 +101,16 @@ def content_policy(html):
         "default-src 'self'; "
         f"script-src 'self' 'sha256-{digest}'; "
         "script-src-attr 'none'; style-src 'self' 'unsafe-inline'; "
-        "img-src 'self' data: blob:; connect-src 'self' blob:; "
+        "img-src 'self' data: blob:; "
+        f"connect-src 'self' blob: {ROOM_SERVER}{' ' + LOCAL_ROOM_SERVER if dev else ''}; "
         "font-src 'self'; media-src 'self' blob:; worker-src 'none'; "
         "object-src 'none'; base-uri 'none'; form-action 'none'"
     )
 
 
-def security_headers(html):
+def security_headers(html, dev=False):
     return {
-        'Content-Security-Policy': content_policy(html) + "; frame-ancestors 'none'",
+        'Content-Security-Policy': content_policy(html, dev) + "; frame-ancestors 'none'",
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY',
         'Referrer-Policy': 'no-referrer',

@@ -1,5 +1,5 @@
 /* Multiplayer room card (multiplayer.js): only in a window opened with #sala=NOME. */
-#mpRoom{position:absolute;right:24px;bottom:24px;z-index:40;width:250px;padding:12px 14px;background:var(--glass);border:1px solid #fff3;border-radius:10px;font:12px/1.35 Inter,"Segoe UI",Arial,sans-serif;color:#f5f6ed;box-shadow:0 8px 30px #0006}
+#mpRoom{position:absolute;right:24px;bottom:78px;z-index:40;width:250px;padding:12px 14px;background:var(--glass);border:1px solid #fff3;border-radius:10px;font:12px/1.35 Inter,"Segoe UI",Arial,sans-serif;color:#f5f6ed;box-shadow:0 8px 30px #0006}
 #mpRoom .mp-head{display:flex;align-items:baseline;gap:7px;font-size:11px;letter-spacing:1.5px}
 #mpRoom .mp-head b{color:var(--lime)}
 #mpRoom .mp-name{font-weight:800;text-transform:uppercase}
@@ -15,6 +15,17 @@
 #mpRoom .mp-start{display:block;width:100%;margin:0 0 8px;padding:8px 10px;border:1px solid #fff4;border-radius:6px;background:#ffffff14;color:#f5f6ed;font:700 12px Inter,"Segoe UI",Arial,sans-serif;cursor:pointer}
 #mpRoom .mp-start.mp-go{background:var(--lime);border-color:var(--lime);color:var(--ink)}
 #mpRoom .mp-start[hidden]{display:none}
+/* Online: the group key, the knocks at the host's door, the kick next to each guest. */
+#mpRoom .mp-key{display:flex;gap:6px;margin:0 0 8px}
+#mpRoom .mp-key[hidden],#mpRoom .mp-knocks[hidden]{display:none}
+#mpRoom .mp-key input{flex:1;min-width:0;padding:6px 8px;border:1px solid #fff4;border-radius:6px;background:#0008;color:#f5f6ed;font:12px Inter,"Segoe UI",Arial,sans-serif}
+#mpRoom button:not(.mp-start){padding:5px 9px;border:1px solid #fff4;border-radius:6px;background:#ffffff14;color:#f5f6ed;font:600 11px Inter,"Segoe UI",Arial,sans-serif;cursor:pointer}
+#mpRoom .mp-key button{background:var(--lime);border-color:var(--lime);color:var(--ink)}
+#mpRoom .mp-knocks{margin:0 0 8px;padding:0;list-style:none}
+#mpRoom .mp-knocks li{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:#e2fb5722}
+#mpRoom .mp-knocks li span{flex:1}
+#mpRoom .mp-players li{display:flex;align-items:center;gap:6px}
+#mpRoom .mp-players li span{flex:1}
 /* One line: on track under the lap banner; on the track screen along the free bottom edge. */
 #mpRoom.mp-racing,#mpRoom.mp-tracks{left:50%;right:auto;transform:translateX(-50%);display:flex;align-items:center;gap:12px;width:auto;max-width:min(680px,80vw);padding:6px 13px;border-radius:20px}
 #mpRoom.mp-racing{top:74px;bottom:auto}
@@ -23,4 +34,6 @@
 #mpRoom:is(.mp-racing,.mp-tracks) :is(.mp-players,.mp-net){display:none}
 #mpRoom:is(.mp-racing,.mp-tracks) :is(.mp-head,.mp-auto){white-space:nowrap}
 #mpRoom:is(.mp-racing,.mp-tracks) .mp-start{width:auto;margin:0;padding:5px 10px;white-space:nowrap}
-@media(max-width:850px){#mpRoom{right:12px;bottom:12px;width:210px}#mpRoom.mp-racing{top:60px}#mpRoom:is(.mp-racing,.mp-tracks) .mp-auto{display:none}}
+#mpRoom:is(.mp-racing,.mp-tracks) :is(.mp-knocks,.mp-key){margin:0}
+#mpRoom:is(.mp-racing,.mp-tracks) .mp-knocks li{white-space:nowrap}
+@media(max-width:850px){#mpRoom{right:12px;bottom:64px;width:210px}#mpRoom.mp-racing{top:60px}#mpRoom:is(.mp-racing,.mp-tracks) .mp-auto{display:none}}

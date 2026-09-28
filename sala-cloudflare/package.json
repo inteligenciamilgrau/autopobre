@@ -1,0 +1,14 @@
+{
+  "name": "sala-autopobre",
+  "private": true,
+  "description": "Servidor das salas multiplayer do Auto-Pobre Racing (Cloudflare Worker + Durable Object).",
+  "type": "module",
+  "scripts": {
+    "dev": "wrangler dev",
+    "deploy": "wrangler deploy",
+    "test": "node teste/testar_sala.mjs"
+  },
+  "devDependencies": {
+    "wrangler": "^4.142.0"
+  }
+}

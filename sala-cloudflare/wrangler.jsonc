@@ -1,0 +1,22 @@
+// Servidor das salas multiplayer (src/index.js). Publicar: .\wrangler deploy
+// A chave do grupo fica só no Cloudflare: .\wrangler secret put CHAVE_GRUPO
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sala-autopobre",
+  "main": "src/index.js",
+  "compatibility_date": "2026-09-01",
+  // On the project's own domain (its DNS is on Cloudflare): the deploy creates the record and the
+  // certificate. The account's workers.dev address stays off.
+  "routes": [{ "pattern": "sala.inteligenciamilgrau.com.br", "custom_domain": true }],
+  "workers_dev": false,
+  "preview_urls": false,
+  "durable_objects": {
+    "bindings": [{ "name": "SALAS", "class_name": "Sala" }]
+  },
+  // The free plan runs SQLite-backed Durable Objects only.
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Sala"] }],
+  "vars": {
+    // Pages allowed to open a room: the site, and the local preview server (INICIAR_TESTE).
+    "ORIGENS": "https://www.inteligenciamilgrau.com.br,https://inteligenciamilgrau.github.io,http://127.0.0.1:8799"
+  }
+}

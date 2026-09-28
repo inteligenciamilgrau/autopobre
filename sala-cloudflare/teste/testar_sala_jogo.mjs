@@ -1,0 +1,54 @@
+// The game's own room code (pista_interlagos/teste/net-room.js, net-link.js) through the room
+// server in wrangler dev: the key, the doorman, a race announced and started, cars both ways, a
+// kick, and the host's reload. Run from sala-cloudflare: node teste/testar_sala_jogo.mjs
+import assert from 'node:assert/strict';
+import {startWrangler} from './wrangler-dev.mjs';
+import {Room} from '../../pista_interlagos/teste/net-room.js';
+import {ServerLink} from '../../pista_interlagos/teste/net-link.js';
+import {packCar} from '../../pista_interlagos/teste/net-cars.js';
+const PORT=8798,KEY='chave-de-teste-local',ORIGIN='http://teste.local',wait=(ms=50)=>new Promise(r=>setTimeout(r,ms));
+const stop=await startWrangler({port:PORT,vars:{HOST_GRACE_MS:800}});
+// A browser tab: its sessionStorage (the server's token for a reload), its key and name.
+const tab=()=>{const store=new Map();return {getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v))};};
+const rooms=[];
+function player(room,name,{key=KEY,storage=tab(),want=null}={}){
+ const link=new ServerLink({url:`ws://127.0.0.1:${PORT}`,room,key:()=>key,name:()=>name,storage,socket:url=>new WebSocket(url,{headers:{Origin:ORIGIN}})});
+ const r=new Room({room,name,want,link});r.events={};r.storage=storage;rooms.push(r);r.start();return r;
+}
+// Every room ticks as a frame would (beacons, pings, hellos).
+const ticker=setInterval(()=>{for(const r of rooms)try{r.tick();}catch{}},50);
+const until=async(check,ms=5000)=>{const end=Date.now()+ms;while(Date.now()<end){const v=check();if(v)return v;await wait(20);}throw new Error('timeout: '+check);};
+const car={x:10,y:20,z:1,heading:.5,pitch:0,roll:0,vx:30,vy:0,vz:0,yaw:0,pitchRate:0,rollRate:0,steer:0,spin:0,rearSpin:0,rpm:4000,gear:3,latAccel:0,longAccel:0,rearSlipSpeed:0,laps:0,best:null,surface:{z:1}};
+const name='jogo-'+Math.random().toString(36).slice(2,8),report={};
+
+// A wrong key: the card asks for the key.
+const intruder=player(name+'x','Intruso',{key:'errada'});await until(()=>intruder.problem==='chave');intruder.leave();
+
+// The host, then a guest at the door; the host lets it in, the guest takes a seat.
+const ana=player(name,'Ana');await until(()=>ana.role==='host');
+const bia=player(name,'Bia',{want:'64'});await until(()=>bia.role==='guest'&&bia.pending);
+await until(()=>ana.knocks.has(bia.id));assert.equal(ana.members.length,1,'a guest at the door is not in the room yet');
+ana.admit(bia.id);await until(()=>!bia.pending&&bia.number==='64');
+assert.deepEqual(ana.members.map(m=>m.number),['99','64']);assert.equal(bia.hostId,ana.id);
+// A race: announced, loaded, started by the host.
+const got=[];bia.on('race',race=>{got.push('race');return true;}).on('go',race=>got.push('go '+race.seats.length)).on('snap',m=>got.push('snap '+m.cars.length));
+ana.on('state',(id,m)=>got.push('state '+(id===bia.id)));
+const race=ana.planRace({circuit:'interlagos',laps:1});ana.openRace(race);await until(()=>got.includes('race'));
+bia.sendReady();await until(()=>ana.ready.has(bia.id));assert.equal(race.state,'waiting');
+ana.lightsOut();await until(()=>got.includes('go 2'));
+bia.sendState(packCar(car),1);ana.sendSnapshot([['99',0,packCar(car)],['64',.02,packCar(car)]],1);
+await until(()=>got.includes('state true')&&got.includes('snap 2'));
+// Pings through the server give the guest its latency.
+await until(()=>bia.latency>0);report.latencyMs=Math.round(bia.latency*1000);
+// A kick: out of the room, and out for good.
+const caio=player(name,'Caio');await until(()=>ana.knocks.has(caio.id));ana.admit(caio.id);await until(()=>caio.number);
+ana.kick(caio.id);await until(()=>caio.problem==='expulso');await until(()=>!ana.members.some(m=>m.id===caio.id));
+// F5 on the host: the same tab (token) hosts again; the guest sees it go and come back.
+const hostTab=ana.storage,id=ana.id;ana.leave();await until(()=>bia.hostAway);
+const ana2=player(name,'Ana',{storage:hostTab});await until(()=>ana2.role==='host');
+assert.equal(ana2.id,id,'the reloaded host is the same player');await until(()=>!bia.hostAway&&bia.number==='64');
+report.flow='ok';
+clearInterval(ticker);for(const r of rooms)try{r.leave();}catch{}
+await wait(200);stop();
+console.log(JSON.stringify(report));
+console.log('testar_sala_jogo: ok');

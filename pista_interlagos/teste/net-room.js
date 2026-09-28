@@ -1,6 +1,9 @@
-// Multiplayer room, test version (multiplayer.js). Windows of the same site on one machine talk
-// through a BroadcastChannel: no server and no network, so a race can be tried in two windows side
-// by side. A WebRTC transport would take the channel's place and keep these messages.
+// Multiplayer room (multiplayer.js). Two ways to carry the same messages:
+// - online (the default): through the room server (net-link.js, sala-cloudflare), for players on
+//   different machines. The server checks the group key, says who is who and who hosts, lets a
+//   guest in once the host admits it, and relays: this module then takes its word for the roles;
+// - same machine (&local=1): windows of one browser talk through a BroadcastChannel, with no server
+//   and no network; the windows elect their host among themselves.
 // The first window in a room hosts it: it gives out the seats (the host races the Opala 99, each
 // guest a rival's car), announces each race and holds its start until the host gives it: whoever
 // joins meanwhile is seated too, and whoever is still loading then races the next one. During the
@@ -11,13 +14,15 @@ import {readCar} from './net-cars.js';
 export const HOST_NUMBER='99';
 export const SEATS=Object.freeze([HOST_NUMBER,...RIVAL_ROSTER.map(e=>e.number)]);
 // Seconds: a silent player (or host) is gone after SILENT; a window hosts once ELECTION passes
-// with no host heard; a guest loading a race it was seated in may stay silent up to READY_WAIT; a gap
+// with no host heard; a guest seated in a race that waits for its start (loading it, or drawing its
+// first frames) may stay silent up to READY_WAIT; online the server says when a connection closes,
+// so silence only drops a player after ONLINE_SILENT; a gap
 // longer than FROZEN between two ticks is this window's own freeze; two hosts whose ages differ
 // by less than TIE began together. A host that said goodbye (a reload says it too) has HOST_GRACE to
 // come back before its guests elect another; its tab keeps its identity (sessionStorage), and back
 // within RECLAIM it takes its room again. A restored identity watches TWIN seconds for a live window
 // with the same one (a duplicated tab copies sessionStorage): then it takes a new one.
-const SILENT=3,ELECTION=.9,READY_WAIT=60,FROZEN=.25,TIE=.5,BEACON=1,PING=1,HELLO=2,RATE=240,HOST_GRACE=10,RECLAIM=30,TWIN=3;
+const SILENT=3,ONLINE_SILENT=30,ELECTION=.9,READY_WAIT=60,FROZEN=.25,TIE=.5,BEACON=1,PING=1,HELLO=2,RATE=240,HOST_GRACE=10,RECLAIM=30,TWIN=3;
 const SAVED='autopobre-sala-id-';
 const sessionStore=()=>{try{return globalThis.sessionStorage??null;}catch{return null;}};
 function readSaved(storage,room){
@@ -38,12 +43,13 @@ export function roomName(value){
 // A pilot's name as the others see it: plain text without control or format characters (bidi
 // overrides, zero-width), at most 24 characters. It is only ever shown as text.
 export function playerName(value){return String(value??'').replace(/\p{C}/gu,'').replace(/\s+/g,' ').trim().slice(0,24);}
-// index.html#sala=NOME[&carro=73][&auto=1][&fantasmas=1][&lag=150][&perda=5]; null without a room.
-// fantasmas: the host's races let humans pass through each other (by default they collide).
+// index.html#sala=NOME[&carro=73][&auto=1][&fantasmas=1][&local=1][&servidor=local][&lag=150][&perda=5];
+// null without a room. fantasmas: the host's races let humans pass through each other (by default
+// they collide). local: this browser's windows only, no server. servidor=local: wrangler dev here.
 export function roomParams(hash){
  const q=new URLSearchParams(String(hash??'').replace(/^#/,'')),room=roomName(q.get('sala'));if(!room)return null;
  const num=(key,hi)=>{const v=Number(q.get(key));return Number.isFinite(v)?clamp(v,0,hi):0;},car=q.get('carro');
- return {room,car:SEATS.includes(car)&&car!==HOST_NUMBER?car:null,auto:q.get('auto')==='1',ghosts:q.get('fantasmas')==='1',lag:num('lag',1000),loss:num('perda',50)/100};
+ return {room,car:SEATS.includes(car)&&car!==HOST_NUMBER?car:null,auto:q.get('auto')==='1',ghosts:q.get('fantasmas')==='1',local:q.get('local')==='1',server:q.get('servidor')==='local'?'local':null,lag:num('lag',1000),loss:num('perda',50)/100};
 }
 const validSeat=s=>s&&typeof s==='object'&&isId(s.id)&&typeof s.name==='string'&&s.name.length<=64&&SEATS.includes(s.number);
 const validSeats=v=>Array.isArray(v)&&v.length<=SEATS.length&&v.every(validSeat);
@@ -66,6 +72,19 @@ export function validMessage(m){
   default:return false;
  }
 }
+// The room server's own word (online): who this tab is and its role, a knock at the host's door, a
+// guest let in, the host gone for a moment, back, or replaced, and this tab made host.
+const TOKEN=/^[0-9a-f]{32}$/;
+export function validControl(m){
+ switch(m?.t){
+  case 'welcome':return isId(m.id)&&TOKEN.test(m.token)&&['host','guest'].includes(m.role)&&(m.host===null||isId(m.host))&&typeof m.pending==='boolean';
+  case 'knock':return isId(m.id)&&typeof m.name==='string'&&m.name.length<=64;
+  case 'host':return isId(m.id);
+  case 'role':return m.role==='host';
+  case 'admitted':case 'host-away':return true;
+  default:return false;
+ }
+}
 // Names from the wire are cleaned on arrival as well: the host cleans what it hands out, but a guest
 // does not rely on that (a lying host could send bidi overrides or zero-width characters).
 const cleanSeats=seats=>seats.map(s=>({...s,name:playerName(s.name)||'Piloto'}));
@@ -78,8 +97,11 @@ export class Room {
  // clock: seconds; random: ids and seeds; storage: where the tab keeps its identity (all three
  // replaceable in tests); lag (ms) and loss (share of car messages dropped) simulate a network on the
  // receiving side.
- constructor({room,name='',want=null,lag=0,loss=0,channel=null,clock=()=>performance.now()/1000,random=Math.random,storage=sessionStore()}={}){
-  Object.assign(this,{room,want,lag,loss,clock,random,storage});this.name=playerName(name)||'Piloto';
+ // link: the room server's connection (net-link.js); without it, the same-machine BroadcastChannel.
+ constructor({room,name='',want=null,lag=0,loss=0,channel=null,link=null,clock=()=>performance.now()/1000,random=Math.random,storage=sessionStore()}={}){
+  this.online=!!link;if(this.online)storage=null;
+  Object.assign(this,{room,want,lag,loss,clock,random,storage,link});this.name=playerName(name)||'Piloto';
+  this.knocks=new Map();this.pending=false;this.problem=null;this.trail=[];
   // The identity this tab had before a reload, if any: its id, its seat, and whether it hosted.
   const saved=this.restored=readSaved(storage,room);this.id=saved?.id??randomId(random);this.lastNumber=saved?.number??null;
   this.role=null;this.hostId=null;
@@ -88,28 +110,61 @@ export class Room {
   this.race=null;          // host: the race announced; guest: the race joined (or waiting to start)
   this.ready=new Set();this.latency=0;this.pings=new Map();this.pingN=0;
   this.nextPing=0;this.nextBeacon=0;this.nextHello=0;this.hostSeen=0;this.electUntil=0;this.rates=new Map();this.events={};
-  this.channel=channel??new BroadcastChannel('autopobre-sala-'+room);
-  this.channel.onmessage=e=>this.arrive(e.data);
+  if(this.online){link.onmessage=m=>this.arrive(m);link.onclose=reason=>this.closed(reason);link.onopen=()=>{this.problem=null;this.emit('change');};}
+  else{this.channel=channel??new BroadcastChannel('autopobre-sala-'+room);this.channel.onmessage=e=>this.arrive(e.data);}
  }
  on(name,fn){this.events[name]=fn;return this;}
+ // The room's last events (who came, who went, the connection), for the checks and a bug report.
+ note(text){this.trail.push(`${this.clock().toFixed(2)} ${text}`);if(this.trail.length>40)this.trail.shift();}
  emit(name,...args){return this.events[name]?.(...args);}
  // This window's seat: the host always races the 99; a guest's comes from the host (null: none free).
  get number(){return this.role==='host'?HOST_NUMBER:this.lobby?.players.find(p=>p.id===this.id)?.number??null;}
  get members(){return this.role==='host'?[...this.players.values()]:this.lobby?.players??[];}
  // A host back from a reload takes its room again at once, as old as it was; anyone else elects.
  start(){
+  // Online the server says who hosts (welcome): nothing to elect.
+  if(this.online){this.role=null;this.problem='conectando';this.link.open();this.emit('change');return;}
   const r=this.restored,now=this.clock();this.twinUntil=r?now+TWIN:0;
   if(r?.host&&r.since!==null&&Date.now()-r.at<RECLAIM*1000)this.becomeHost(now,r.since);else this.elect();
  }
- leave(){this.save();this.send({t:'bye'});this.channel.close();}
+ leave(){if(this.online){this.send({t:'bye'});this.link.close();return;}this.save();this.send({t:'bye'});this.channel.close();}
+ // Online, after a refusal the player can fix (the key): connect again.
+ retry(){if(this.online){this.link.close();this.start();}}
+ // The connection ended: the reason the server gave (net-link.js CLOSED), or the network's.
+ closed(reason){
+  this.note('conexão: '+reason);this.problem=reason;if(reason!=='reconectando'){this.role=null;this.pending=false;this.knocks.clear();}
+  this.emit('change');
+ }
+ // Online: the server's word on who this tab is, who hosts, and who waits at the door.
+ control(m,now){
+  switch(m.t){
+   case 'welcome':
+    this.note(`welcome ${m.role}${m.pending?' (porta)':''}`);this.id=m.id;this.problem=null;this.pending=m.pending;
+    if(m.role==='host'){if(this.role!=='host')this.becomeHost(now);}
+    else{if(this.role!=='guest'||this.hostId!==m.host){this.race=null;this.lobby=null;}this.role='guest';this.hostId=m.host;this.hostSeen=now;this.hostLeft=undefined;if(!m.pending)this.hello();}
+    break;
+   case 'admitted':this.pending=false;this.hello();break;
+   case 'knock':if(this.role==='host'&&!this.players.has(m.id))this.knocks.set(m.id,{id:m.id,name:playerName(m.name)||'Piloto'});break;  // again: a new name
+   case 'host-away':if(this.role==='guest')this.hostLeft=now;break;
+   // The host is back (same id) or another took the room: a new host starts a new room state.
+   case 'host':if(this.role==='guest'){if(m.id!==this.hostId){this.hostId=m.id;this.race=null;this.lobby=null;}this.hostLeft=undefined;this.hostSeen=now;this.hello();}break;
+   case 'role':this.becomeHost(now);break;
+  }
+  this.emit('change');
+ }
+ // Host, online: let a guest in, turn it away, or send it out for good.
+ admit(id){if(this.role!=='host')return;this.knocks.delete(id);this.send({t:'admit',to:id});this.emit('change');}
+ deny(id){if(this.role!=='host')return;this.knocks.delete(id);this.send({t:'deny',to:id});this.emit('change');}
+ kick(id){if(this.role!=='host'||id===this.id)return;this.knocks.delete(id);this.send({t:'kick',to:id});this.drop(id);}
  // The tab's identity, for a reload: id, seat, whether it hosts and since when (wall clock).
  save(){try{this.storage?.setItem(SAVED+this.room,JSON.stringify({id:this.id,host:this.role==='host',since:this.role==='host'?this.hostEpoch:null,number:this.number??this.lastNumber,at:Date.now()}));}catch{}}
  // Another live window has this identity (a duplicated tab): this one takes a new id and elects.
  renew(){this.id=randomId(this.random);this.restored=null;this.twinUntil=0;this.lastNumber=null;this.save();this.elect();}
  // A guest whose host said goodbye and has not come back yet.
  get hostAway(){return this.role==='guest'&&this.hostLeft!==undefined;}
- setName(value){const name=playerName(value)||'Piloto';if(name===this.name)return;this.name=name;if(this.role==='host'){this.players.get(this.id).name=name;this.beacon();}else this.hello();}
- send(m){m.from=this.id;try{this.channel.postMessage(m);}catch{}}
+ // A guest still at the door (online) says its new name too: the host sees who is knocking.
+ setName(value){const name=playerName(value)||'Piloto';if(name===this.name)return;this.name=name;if(this.role==='host'){this.players.get(this.id).name=name;this.beacon();}else if(this.role==='guest')this.hello();}
+ send(m){m.from=this.id;if(this.online){this.link.send(m);return;}try{this.channel.postMessage(m);}catch{}}
  // The seat it had (a host back from a reload gives it again) or the one the address asks for.
  hello(){this.helloAt=this.clock();this.nextHello=this.helloAt+HELLO;this.send({t:'hello',name:this.name,want:this.lastNumber&&this.lastNumber!==HOST_NUMBER?this.lastNumber:this.want});}
  elect(){this.role=null;this.hostId=null;this.lobby=null;this.electUntil=this.clock()+ELECTION+this.lag/500;this.hello();this.emit('change');}
@@ -120,14 +175,15 @@ export class Room {
  // No more than RATE messages a second from anyone.
  allow(id,now){const r=this.rates.get(id);if(!r||now-r.since>=1){this.rates.set(id,{since:now,count:1});return true;}return ++r.count<=RATE;}
  receive(m){
+  if(this.online&&validControl(m)){this.control(m,this.clock());return;}
   if(!validMessage(m))return;
-  if(m.from===this.id){if(this.clock()<this.twinUntil)this.renew();return;}
+  if(m.from===this.id){if(!this.online&&this.clock()<this.twinUntil)this.renew();return;}
   m=cleanNames(m);
   const now=this.clock();if(!this.allow(m.from,now))return;
   const host=this.role==='host',fromHost=this.role==='guest'&&m.from===this.hostId;
   switch(m.t){
    case 'hello':if(host)this.join(m.from,m.name,m.want,now);break;
-   case 'bye':if(host)this.drop(m.from);else if(fromHost){this.hostLeft=now;this.emit('change');}break;
+   case 'bye':if(host){this.note('bye '+m.from);this.drop(m.from);}else if(fromHost){this.hostLeft=now;this.emit('change');}break;
    case 'lobby':this.heardHost(m,now);break;
    case 'ready':if(host&&this.race?.id===m.race&&this.race.state==='waiting'&&this.race.seats.some(s=>s.id===m.from)&&!this.ready.has(m.from)){this.touch(m.from,now);this.ready.add(m.from);this.emit('change');}break;
    case 'go':if(fromHost&&this.race?.id===m.race&&this.race.state==='waiting'){this.hostSeen=now;this.race={...this.race,state:'racing',seats:m.seats};this.emit('go',this.race);this.emit('change');}break;
@@ -171,11 +227,13 @@ export class Room {
  becomeHost(now,epoch=Date.now()){
   this.role='host';this.hostId=this.id;this.hostEpoch=epoch;this.hostSince=now-Math.max(0,(Date.now()-epoch)/1000);this.lobby=null;this.race=null;this.ready.clear();this.players.clear();
   this.players.set(this.id,{id:this.id,name:this.name,number:HOST_NUMBER,seen:now});this.save();this.beacon(now);this.emit('change');
+  // The server's doorman stays on: every guest waits until the host lets it in.
+  if(this.online)this.send({t:'config',porteiro:true});
  }
  join(id,name,want,now){
   const p=this.players.get(id);
   if(p){p.name=playerName(name)||p.name;p.seen=now;}
-  else this.players.set(id,{id,name:playerName(name)||'Piloto',number:this.freeSeat(want),seen:now});
+  else{this.players.set(id,{id,name:playerName(name)||'Piloto',number:this.freeSeat(want),seen:now});this.note('entrou '+id);}
   this.seatEveryone();this.beacon(now);this.emit('change');
  }
  // While a race waits for its start, everyone in the room has a seat in it, under their current name.
@@ -189,7 +247,7 @@ export class Room {
  freeSeat(want){const taken=new Set([...this.players.values()].map(p=>p.number));return want&&!taken.has(want)?want:SEATS.find(n=>!taken.has(n))??null;}
  drop(id){
   const p=this.players.get(id);if(!p||id===this.id)return;
-  this.players.delete(id);this.ready.delete(id);
+  this.note('saiu '+id);this.players.delete(id);this.ready.delete(id);
   if(this.race)this.race.seats=this.race.seats.filter(s=>s.id!==id);
   this.emit('leave',p);this.beacon();this.emit('change');
  }
@@ -223,18 +281,20 @@ export class Room {
   // could be heard meanwhile, so that time counts for no one's silence.
   const frozen=this.lastTick===undefined?0:Math.max(0,now-this.lastTick-FROZEN);this.lastTick=now;
   if(frozen){this.hostSeen+=frozen;for(const p of this.players.values())p.seen+=frozen;}
-  if(this.role===null){if(now>=this.electUntil)this.becomeHost(now);return;}
+  // Online the server hosts the election: until its welcome there is nothing to do.
+  if(this.role===null){if(!this.online&&now>=this.electUntil)this.becomeHost(now);return;}
   if(this.role==='host'){
    if(now>=this.nextBeacon)this.beacon(now);
-   // A guest still loading the race it was seated in freezes too: it has until READY_WAIT.
-   const loading=p=>this.race?.state==='waiting'&&!this.ready.has(p.id)&&this.race.seats.some(s=>s.id===p.id);
-   for(const p of [...this.players.values()])if(p.id!==this.id&&now-p.seen>(loading(p)?READY_WAIT:silent))this.drop(p.id);
+   // A guest seated in a race that waits for its start may freeze (loading the track, its first
+   // frames): it has until READY_WAIT. Online a closed connection comes as the server's bye.
+   const waiting=p=>this.race?.state==='waiting'&&this.race.seats.some(s=>s.id===p.id),limit=p=>waiting(p)?READY_WAIT:this.online?ONLINE_SILENT:silent;
+   for(const p of [...this.players.values()])if(p.id!==this.id&&now-p.seen>limit(p)){this.note('silêncio '+p.id);this.drop(p.id);}
    return;
   }
   // A host that said goodbye (a reload) gets HOST_GRACE to come back; a silent one, SILENT.
-  if(now-this.hostSeen>(this.hostLeft!==undefined?HOST_GRACE:silent)){this.elect();return;}
+  if(!this.online&&now-this.hostSeen>(this.hostLeft!==undefined?HOST_GRACE:silent)){this.elect();return;}
   if(now>=this.nextPing){this.nextPing=now+PING;this.pings.set(++this.pingN,now);if(this.pings.size>8)this.pings.delete(this.pings.keys().next().value);this.send({t:'ping',n:this.pingN});}
-  if(now>=this.nextHello)this.hello();
+  if(now>=this.nextHello&&!this.pending)this.hello();
  }
- info(){return {room:this.room,id:this.id,role:this.role,number:this.number,name:this.name,latency:this.latency,ready:[...this.ready],members:this.members.map(({id,name,number})=>({id,name,number})),race:this.race&&{...this.race,seats:this.race.seats.map(s=>({...s}))}};}
+ info(){return {room:this.room,trail:[...this.trail],online:this.online,problem:this.problem,pending:this.pending,knocks:[...this.knocks.values()],id:this.id,role:this.role,number:this.number,name:this.name,latency:this.latency,ready:[...this.ready],members:this.members.map(({id,name,number})=>({id,name,number})),race:this.race&&{...this.race,seats:this.race.seats.map(s=>({...s}))}};}
 }

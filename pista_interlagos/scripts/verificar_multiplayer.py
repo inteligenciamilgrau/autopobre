@@ -7,10 +7,18 @@ result sheet lists all three pilots. Then the host reloads (F5): it hosts again 
 identity and the guests keep their cars. A window opened without #sala shows nothing of it and does
 not even load the module.
 
-Usage: verificar_multiplayer.py [porta]  (INTERLAGOS_SHOTS=pasta keeps the screenshots there)."""
+Two ways, as in the game: the windows of one browser alone (&local=1, the default here), or through
+the room server (--servidor): wrangler dev from sala-cloudflare on this machine, with the group key
+of its .dev.vars, and the host letting each guest in (Aceitar) as the doorman asks.
+
+Usage: verificar_multiplayer.py [porta] [--servidor]  (INTERLAGOS_SHOTS=pasta keeps the screenshots;
+INTERLAGOS_NODE=node.exe when node is not on the PATH)."""
 import json
 import os
 import random
+import shutil
+import subprocess
+import time
 import statistics
 import sys
 import tempfile
@@ -18,8 +26,13 @@ from pathlib import Path
 from playwright.sync_api import sync_playwright
 from browser_config import browser_executable, browser_args, wait_js
 
-PORT = sys.argv[1] if len(sys.argv) > 1 else '8799'
+ARGS = [a for a in sys.argv[1:] if not a.startswith('--')]
+PORT = ARGS[0] if ARGS else '8799'
 URL = f'http://127.0.0.1:{PORT}/pista_interlagos/teste/'
+SERVER = '--servidor' in sys.argv
+# The room's way: this browser only, or the room server on this machine.
+MODE = '&servidor=local' if SERVER else '&local=1'
+SERVER_KEY = 'chave-de-teste-local'
 SHOTS = Path(os.environ.get('INTERLAGOS_SHOTS') or tempfile.gettempdir()) / 'verificar_multiplayer'
 SHOTS.mkdir(parents=True, exist_ok=True)
 ROOM = f'verif{random.randrange(10**6)}'
@@ -62,16 +75,21 @@ def guest_window(context, host, pages, name, car=None):
     into the race before anyone could type)."""
     host.evaluate("name=>localStorage.setItem('autopobre-pilots-v1',JSON.stringify({selected:name,names:[name]}))", PILOTS[name][0])
     with context.expect_page() as popup:
-        host.evaluate("url=>{window.open(url,'_blank','popup,noopener,width=800,height=450');}", f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1' + (f'&carro={car}' if car else ''))
+        host.evaluate("url=>{window.open(url,'_blank','popup,noopener,width=800,height=450');}", f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1{MODE}' + (f'&carro={car}' if car else ''))
     page = pages[name] = popup.value
     watch(page, name)
     page.wait_for_load_state('load', timeout=120000)
+    if SERVER:
+        # The doorman: the host lets the guest in from its room card.
+        wait_js(page, "window.interlagosSala?.info().pending", timeout=60000)
+        knock = host.locator('#mpRoom .mp-knocks li', has_text=PILOTS[name][0])
+        knock.get_by_role('button', name='Aceitar').click(timeout=30000)
     wait_js(page, f"window.interlagosSala?.info().role==='guest'&&interlagosSala.info().number==={PILOTS[name][1]!r}", timeout=60000)
     return page
 
 
 def race_room(context, host, pages):
-    host.goto(f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1', wait_until='load', timeout=120000)
+    host.goto(f'{URL}?intro=0&cinema=off#sala={ROOM}&auto=1{MODE}', wait_until='load', timeout=120000)
     wait_js(host, "window.interlagosSala?.info().role==='host'&&" + OPENING, timeout=60000)
     host.fill('#pilotName', PILOTS['host'][0])
     guest = guest_window(context, host, pages, 'guest', PILOTS['guest'][1])
@@ -153,11 +171,39 @@ def race_room(context, host, pages):
     return fps, speed, gaps
 
 
+def start_server():
+    """wrangler dev on 8787 (net-link.js LOCAL_SERVER), from sala-cloudflare with its .dev.vars."""
+    root = Path(__file__).resolve().parents[2] / 'sala-cloudflare'
+    node = os.environ.get('INTERLAGOS_NODE') or shutil.which('node')
+    assert node, 'node not found: set INTERLAGOS_NODE'
+    process = subprocess.Popen([node, str(root / 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--ip', '127.0.0.1', '--port', '8787', '--show-interactive-dev-session=false'],
+                               cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', env={**os.environ, 'WRANGLER_SEND_METRICS': 'false'})
+    deadline = time.monotonic() + 90
+    for line in process.stdout:
+        if 'Ready on' in line:
+            break
+        if time.monotonic() > deadline:
+            break
+    return process
+
+
+def stop_server(process):
+    if process and process.poll() is None:
+        if os.name == 'nt':
+            subprocess.run(['taskkill', '/pid', str(process.pid), '/T', '/F'], capture_output=True)
+        else:
+            process.kill()
+
+
+server = start_server() if SERVER else None
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=browser_executable(), headless=True, args=browser_args())
     context = browser.new_context(viewport={'width': 800, 'height': 450})
     # (try: a noopener popup first opens about:blank, whose opaque origin has no localStorage)
     context.add_init_script("try{localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false,laps:1,camera:'chase'}));}catch{}")
+    if SERVER:
+        # The group key, as a pilot types it once on the room card.
+        context.add_init_script("try{localStorage.setItem('autopobre-chave-grupo'," + json.dumps(SERVER_KEY) + ");}catch{}")
 
     # The normal game: no card, no room, no multiplayer file requested.
     plain = context.new_page()
@@ -182,10 +228,12 @@ with sync_playwright() as p:
                 print(name, json.dumps(page.evaluate("({sala:window.interlagosSala?.info(),menu:document.querySelector('#menu').className,tracks:!document.querySelector('#tracks').classList.contains('hidden'),pilot:document.querySelector('#pilotName')?.hidden,status:document.querySelector('#status').textContent})"), ensure_ascii=False, default=str)[:1500])
             except Exception as err:
                 print(name, 'sem estado:', err)
+        stop_server(server)
         raise
     browser.close()
+stop_server(server)
 
-report = {'room': ROOM, 'fps': fps, 'guestSpeedKmh': round(speed), 'gaps': {k: {'median': round(statistics.median(v), 2), 'max': round(max(v), 2)} for k, v in gaps.items()},
+report = {'room': ROOM, 'mode': 'servidor' if SERVER else 'local', 'fps': fps, 'guestSpeedKmh': round(speed), 'gaps': {k: {'median': round(statistics.median(v), 2), 'max': round(max(v), 2)} for k, v in gaps.items()},
           'shots': str(SHOTS)}
 print(json.dumps(report, indent=1, ensure_ascii=False))
 print('verificar_multiplayer: ok')

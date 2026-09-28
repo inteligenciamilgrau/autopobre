@@ -87,3 +87,7 @@ desktop.ini
 !/modelo_3d/scripts/verificar_opala_v06.py
 !/modelo_3d/scripts/renderizar_opala_v06.py
 /pista_interlagos/teste/assets/piloto/referencia_capacete.jpg
+
+# Servidor das salas (sala-cloudflare): segredos locais e cache do wrangler
+.dev.vars
+.wrangler/

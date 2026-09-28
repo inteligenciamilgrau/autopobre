@@ -74,11 +74,15 @@ No Windows, também é possível executar `pista_interlagos/INICIAR_TESTE.cmd`. 
 
 ### Multiplayer (versão de teste)
 
-Não há botão no jogo: a sala abre só pelo endereço. Abra duas janelas do mesmo navegador, lado a lado, em `…/index.html#sala=teste`. A primeira janela hospeda a sala e corre com o Opala 99; a segunda pega o carro de um rival. Quem hospeda escolhe a pista e clica em **Corrida única**: o grid espera no "3", quem entrar na sala nesse meio-tempo também ganha um carro, e a largada sai quando o anfitrião clica em **Largar** (ou aperta Enter). As janelas conversam pelo próprio navegador (`BroadcastChannel`), sem servidor nem rede.
+Não há botão no jogo: a sala abre só pelo endereço, `…/index.html#sala=NOME`. O primeiro a entrar hospeda a sala e corre com o Opala 99; os outros pegam o carro de um rival. Quem hospeda escolhe a pista e clica em **Corrida única**: o grid espera no "3", quem entrar na sala nesse meio-tempo também ganha um carro, e a largada sai quando o anfitrião clica em **Largar** (ou aperta Enter).
+
+Entre computadores diferentes, todos conversam só com o servidor das salas no Cloudflare (pasta [`sala-cloudflare/`](sala-cloudflare/README.md)), e ninguém vê o IP de ninguém. Para entrar é preciso a **chave do grupo**, digitada uma vez no cartão da sala; a chave de verdade fica só no Cloudflare, como *secret*. Cada convidado espera na porta até o anfitrião clicar em **Aceitar**, e o anfitrião pode **Expulsar** alguém a qualquer momento.
+
+Para testar num PC só, sem servidor, abra duas janelas do mesmo navegador lado a lado com `#sala=teste&local=1`: elas conversam pelo próprio navegador (`BroadcastChannel`).
 
 Os carros dos humanos batem entre si e nos bots. Se o anfitrião der F5, ele volta como anfitrião, e os convidados mantêm os carros.
 
-Opções no endereço: `&carro=73` escolhe o carro do convidado, `&auto=1` liga o piloto automático daquela janela, `&fantasmas=1` (no anfitrião) faz os humanos passarem uns pelos outros, e `&lag=150&perda=5` simulam 150 ms de atraso e 5% de mensagens perdidas. O código fica em `teste/multiplayer.js`, `teste/net-room.js` e `teste/net-cars.js`. Os testes são `scripts/testar_multiplayer.mjs` (Node) e `scripts/verificar_multiplayer.py` (navegador).
+Opções no endereço: `&carro=73` escolhe o carro do convidado, `&auto=1` liga o piloto automático daquela janela, `&fantasmas=1` (no anfitrião) faz os humanos passarem uns pelos outros, `&local=1` usa só as janelas deste navegador, `&servidor=local` usa o servidor das salas rodando neste PC (`wrangler dev`), e `&lag=150&perda=5` simulam 150 ms de atraso e 5% de mensagens perdidas. O código fica em `teste/multiplayer.js`, `teste/net-room.js`, `teste/net-link.js` e `teste/net-cars.js`. Os testes são `scripts/testar_multiplayer.mjs` (Node) e `scripts/verificar_multiplayer.py [porta] [--servidor]` (navegador).
 
 ## O que entra no Git
 
