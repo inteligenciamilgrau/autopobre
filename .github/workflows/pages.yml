@@ -79,7 +79,13 @@ jobs:
           for pasta in principal apr_v1 dev; do
             [ -d "$pasta" ] || continue
             echo "::group::Testes de $pasta"
-            for teste in testar_preferencias testar_audio testar_eventos_audio testar_colisoes testar_saldo testar_imersivo testar_voltas testar_derrapadas testar_terreno_rivais testar_aderencia testar_direcao testar_bandeirada testar_recordes testar_pilotos_largada testar_curvelo testar_pitstop; do
+            for teste in testar_preferencias testar_audio testar_eventos_audio testar_colisoes testar_saldo testar_imersivo testar_voltas testar_derrapadas testar_terreno_rivais testar_aderencia testar_direcao testar_bandeirada testar_recordes testar_pilotos_largada testar_curvelo testar_pitstop testar_controle; do
+              # A release from before a test was written (apr-2.0 and apr-1.0 have no testar_controle)
+              # skips it; /dev/ must have every one.
+              if [ "$pasta" != dev ] && [ ! -f "$pasta/pista_interlagos/scripts/$teste.mjs" ]; then
+                echo "::notice::$pasta nao tem $teste (versao anterior ao teste): pulado."
+                continue
+              fi
               (cd "$pasta" && node "pista_interlagos/scripts/$teste.mjs")
             done
             echo "::endgroup::"

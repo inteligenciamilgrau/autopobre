@@ -34,6 +34,12 @@
 /* One line: on track under the lap banner; on the track screen along the free bottom edge. */
 #mpRoom.mp-racing,#mpRoom.mp-tracks{left:50%;right:auto;transform:translateX(-50%);display:flex;align-items:center;gap:12px;width:auto;max-width:min(680px,80vw);padding:6px 13px;border-radius:20px}
 #mpRoom.mp-racing{top:74px;bottom:auto}
+/* The yellow flag (a car with nobody at the wheel on the road): the pill turns flag yellow and pulses. */
+#mpRoom.mp-yellow{background:#f2c318;border-color:#f2c318;color:#1a1a1a;animation:mp-yellow 1s ease-in-out infinite}
+#mpRoom.mp-yellow .mp-head b,#mpRoom.mp-yellow .mp-role{color:#1a1a1a;opacity:1}
+#mpRoom.mp-yellow .mp-status{font-weight:800}
+@keyframes mp-yellow{50%{background:#ffe04a}}
+@media(prefers-reduced-motion:reduce){#mpRoom.mp-yellow{animation:none}}
 #mpRoom.mp-tracks{bottom:12px}
 /* The car screen keeps that bottom edge free for it (the chosen car's plate sits low on the stage). */
 body.mp-room #cars{padding-bottom:58px}

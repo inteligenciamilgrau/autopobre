@@ -73,7 +73,14 @@ export function towerSpots(data,count=9){
  }
  return spots.sort((a,b)=>a.s-b.s);
 }
+// The marshal posts of a circuit (createTrackside builds them; multiplayer.js waves the yellow flag
+// from them): found once per circuit's data.
+const marshalCache=new WeakMap();
 export function marshalSpots(data){
+ if(!marshalCache.has(data))marshalCache.set(data,Object.freeze(findMarshalSpots(data)));
+ return marshalCache.get(data);
+}
+function findMarshalSpots(data){
  const L=data.meta.reconstructed_xy_m,bands=sceneryBands(data),spots=[];
  for(let s=140,k=0;s<L-60;s+=360,k++){
   const side=k%2?1:-1;

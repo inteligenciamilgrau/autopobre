@@ -23,3 +23,5 @@
 /* Tight layouts: short label for 04 and, in a single row of tabs, no numbers. */
 .settings-tabs .tab-short{display:none}
 @media(max-width:700px){.settings-tabs button{font-size:0;gap:0;flex:1 1 auto;padding-inline:4px}.settings-tabs b{font-size:12px}.settings-tabs .tab-long{display:none}.settings-tabs .tab-short{display:inline}}
+/* 03 Controles: the Xbox / PlayStation controller (gamepad-controls.js), shown on touch screens too. */
+.pad-guide{margin-top:34px;padding-top:24px;border-top:1px solid #ffffff18}.pad-guide h4{margin:0 0 6px;font-size:17px;color:#f2f3ea}.settings-content .pad-status{margin:0;color:#c9a96a}.settings-content .pad-status.connected{color:#a6c88d}.pad-guide .choices{margin:14px 0}.touch-device #settings-controls .key-guide.pad-keys{display:block}.pad-keys kbd{white-space:nowrap}.pad-keys dd kbd{padding:1px 4px;font-size:10px}

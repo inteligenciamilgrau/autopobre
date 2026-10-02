@@ -149,6 +149,25 @@ export function racingLine(data){
 // mechanical failures, and a race nobody retires from never happened. smoke: seconds of engine smoke.
 export const BREAKDOWNS=Object.freeze([{kind:'motor',smoke:14},{kind:'câmbio',smoke:0},{kind:'embreagem',smoke:0},{kind:'suspensão',smoke:0},{kind:'superaquecimento',smoke:10},{kind:'pane elétrica',smoke:0}].map(Object.freeze));
 const PARK_OFF=3.2;
+// A car whose driver is gone (multiplayer: a guest's line dropped; r.stop, stopInput): the tow truck
+// takes TOW_ARRIVE seconds to reach it once it stands on the road, then pulls it at TOW_PACE (m/s);
+// a pull that has not got it clear after TOW_GIVE_UP seconds leaves it where it is (on the strap,
+// under the yellow flag, if that is still the asphalt). While
+// such a car is on the road the rivals take the yellow flag: no faster than CAUTION_PACE (m/s) right
+// behind it, a little more the further back, through the CAUTION_REACH metres before it.
+export const TOW_ARRIVE=4;
+const TOW_PACE=3,TOW_GIVE_UP=40,CAUTION_PACE=20,CAUTION_REACH=250;
+// Nobody at the pedals or the wheel (stopInput; multiplayer.js gives the same to a guest's own car).
+export const FAINTED=Object.freeze({left:0,right:0,throttle:0,brake:0,reverse:0,handbrake:0});
+const GRASS_DRAG=Object.freeze({...FAINTED,brake:.45}),HELD=Object.freeze({...FAINTED,brake:1});
+// What a car with nobody at the wheel gets this step: free on the asphalt; off it the grass and gravel
+// hold it (rolling free there, one crossed 300 m of infield); at a standstill it stays put.
+export const faintedInput=c=>Math.hypot(c.vx,c.vy)<=.4?HELD:c.surface.onRoad||c.surface.pit?FAINTED:GRASS_DRAG;
+// A car without its driver (stop: r.stop, or the host's word in multiplayer.js) in the race's way:
+// still on the road, rolling, standing or on the strap; not off it, nor in the pit lane. The rivals
+// ease off for it (cautions) and every window shows the yellow flag for it (multiplayer.js).
+export const inTheWay=(stop,c)=>!!stop&&stop.stage!=='fora'&&!c.surface.pit;
+const NO_CAUTIONS=Object.freeze([]);
 const COOL_PACE=24,PIT_PACE=22,PIT_LIMIT=15.5,INLAP_MERGE=220,SLOT_GAP=6.6,routes=new WeakMap();
 export function pitRoute(data){
  if(routes.has(data))return routes.get(data);
@@ -206,7 +225,7 @@ export class RaceField {
  // roster (taken here too): the drivers, RIVAL_ROSTER or, when the player races another team's car,
  // race-roster.js fieldRoster with the Opala 99 in that car's seat.
  reset(startS=0,{grid=false,seed=this.seed,entrants=null}={}){
-  this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;this.hero=null;
+  this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;this.hero=null;this.cautions=[];
   // The player's race distance and split times, measured here too: a reference pace (classification).
   this.playerRun={progress:0,lastS:null,splits:[]};
   // A fresh seed per start: the same grid never races the same way twice.
@@ -256,10 +275,14 @@ export class RaceField {
    c.draft=0;const fx=Math.cos(c.heading),fy=Math.sin(c.heading);if(c.vx*fx+c.vy*fy<15)continue;
    for(const o of bodies){if(o===c)continue;const dx=o.x-c.x,dy=o.y-c.y,f=dx*fx+dy*fy,side=Math.abs(dy*fx-dx*fy);if(f>4&&f<35&&side<1.9)c.draft=Math.max(c.draft,.38*(1-f/35)*(1-side/3.8));}
   }
-  // One physics step for a rival, then its race distance and the flag.
-  const drive=(r,input)=>{const c=r.car;r.tow=c.draft;c.step(input,dt);commands.push(input);r.progress+=lapTravel(r.lastS,c.surface.s,L);r.lastS=c.surface.s;if(totalLaps&&!r.finished&&!r.retired&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}};
-  // A seat raced over the network (r.puppet, multiplayer.js) is placed, not driven: it returns the pedals.
-  for(const r of this.rivals){if(r.puppet){commands.push(r.puppet(r,dt));continue;}drive(r,r.pit?this.pitInput(r,bodies,dt):this.decide(r,bodies,driverOf,player,dt,totalLaps));}
+  // One physics step for a rival, then its race distance and the flag. A car with nobody at the
+  // wheel that gets there has run its race without its driver: AB for good (reclaim).
+  const drive=(r,input)=>{const c=r.car;r.tow=c.draft;c.step(input,dt);commands.push(input);r.progress+=lapTravel(r.lastS,c.surface.s,L);r.lastS=c.surface.s;if(totalLaps&&!r.finished&&r.progress>=L*totalLaps+this.gridLeadIn){if(!r.retired){r.finished=true;r.finishTime=this.time;}else if(r.stop)r.stop.flagged=true;}};
+  // A seat raced over the network (r.puppet, multiplayer.js) is placed, not driven: it returns the
+  // pedals. The driverless cars on the road (caution) as they stand before the step (almost always
+  // none: no list built then).
+  this.cautions=this.rivals.some(r=>r.stop)?this.rivals.filter(r=>inTheWay(r.stop,r.car)):NO_CAUTIONS;
+  for(const r of this.rivals){if(r.puppet){commands.push(r.puppet(r,dt));continue;}drive(r,r.stop?this.stopInput(r,dt):r.pit?this.pitInput(r,bodies,dt):this.decide(r,bodies,driverOf,player,dt,totalLaps));}
   // Split times: when each car first reached each of the race's sectors (classification).
   const me=this.playerRun;me.lastS??=player.surface.s;me.progress+=lapTravel(me.lastS,player.surface.s,L);me.lastS=player.surface.s;
   if(totalLaps&&Number.isFinite(totalLaps)){const split=L/SPLITS,last=totalLaps*SPLITS;for(const r of [me,...this.rivals]){const k=Math.min(last,Math.floor((r.progress-this.gridLeadIn)/split));while(r.splits.length<=k)r.splits.push(t);}}
@@ -492,6 +515,8 @@ export class RaceField {
    if(away)target=Math.min(target,6);
    // Off the asphalt the ace eases off until the tyres are back on it.
    if(st.clean&&!here.onRoad&&!here.pit)target=Math.min(target,Math.max(12,speed-1));
+   // Yellow flag: a car without its driver still on the road ahead (stopInput).
+   target=Math.min(target,this.caution(c));
    // Pedals: proportional to the speed error, plus the deceleration the braking curve asks for.
    const slide=along>3?Math.abs(Math.atan2(-c.vx*fy+c.vy*fx-1.117*c.yaw,c.vx*fx+c.vy*fy)):0,need=bindDist>1&&speed>bindV?(speed*speed-bindV*bindV)/(2*bindDist):0;
    let throttle=clamp((target-speed)*st.throttleResponse,0,1)*clamp(1-(slide-.06)*8,0,1);
@@ -522,19 +547,74 @@ export class RaceField {
  // along the edge until they are; it stops a few metres past the edge for the rest of the race.
  // Leaving the road faster, it slid 20 m into the infield; picking the spot too early, into a wall.
  brokenInput(r,dt){
-  const c=r.car,b=r.broken,line=this.line,a=this.data.samples,n=a.length,here=c.surface,i=c.index,speed=Math.hypot(c.vx,c.vy);
+  const c=r.car,b=r.broken,here=c.surface,i=c.index,speed=Math.hypot(c.vx,c.vy);
   r.retired=true;Object.assign(r,{mode:'line',rival:null});
-  if(!b.side){const score=side=>[15,30,45,60,75].filter(j=>this.grassAt(c,i,side,j)).length,near=Math.sign(here.d)||1;b.side=score(-near)>score(near)?-near:near;b.from=r.progress;}
+  if(!b.side){b.side=this.parkSide(c,[15,30,45,60,75]);b.from=r.progress;}
   const fast=speed>22;
   if(!b.exit&&!fast&&(r.progress-b.from>800||[8,18,28].every(j=>this.grassAt(c,i,b.side,j))))b.exit=true;
-  const look=6+speed*.5,k=(i+Math.round(look/line.ds))%n,p=a[k],reach=1+.15*look,aim=clamp(b.side*(b.exit?p[4]/2+PARK_OFF:p[4]/2-1.2),here.d-reach,here.d+reach);
-  const dx=p[1]+p[9]*aim-c.x,dy=p[2]+p[10]*aim-c.y,alpha=wrap(Math.atan2(dy,dx)-c.heading);
-  const turn=clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(dx,dy))/steerLimit(speed),-1,1);
+  const look=6+speed*.5,turn=this.pursuit(c,look,p=>b.side*(b.exit?p[4]/2+PARK_OFF:p[4]/2-1.2),1+.15*look);
   const off=!here.onRoad&&!here.pit&&Math.abs(here.d)>here.width/2,parked=off&&Math.abs(here.d)>here.width/2+PARK_OFF-1;
   b.smokeLeft=Math.max(0,b.smokeLeft-(parked&&speed<.5?dt:0));
-  if(parked&&speed<.5)return {left:0,right:0,throttle:0,brake:1,reverse:0,handbrake:0};
+  if(parked&&speed<.5)return HELD;
   // Along the edge it limps at walking pace or a little more until a clear spot comes.
   return {left:Math.max(0,turn),right:Math.max(0,-turn),throttle:!off&&speed<(b.exit?5:9)?.3:0,brake:parked?.8:off?.5:fast?.3:!b.exit&&speed>12?.12:0,reverse:0,handbrake:0};
+ }
+ // A car nobody drives any more (r.stop, set by multiplayer.js when a guest's line drops; no bot takes
+ // it): 'parado', as if its driver had fainted (the players' idea): off the throttle, no brake, the wheel
+ // let go, it rolls on until it stands. Stopped clear of the road (the next bend often takes it into
+ // the grass), it is left there ('fora'); on the road, the tow truck comes ('reboque') and pulls it at
+ // walking pace to the grass on the side with room, as a broken car gets there (brokenInput). The pit
+ // lane is out of the race's way already (and walled: no grass to pull it to): left there too.
+ stopInput(r,dt){
+  const c=r.car,S=r.stop,here=c.surface,i=c.index,speed=Math.hypot(c.vx,c.vy);
+  S.time=(S.time??0)+dt;
+  const off=!here.onRoad&&!here.pit&&Math.abs(here.d)>here.width/2+1,clear=off&&Math.abs(here.d)>here.width/2+PARK_OFF-1,away=off||here.pit;
+  if(S.stage==='parado'){
+   if(speed>.4){S.still=0;return faintedInput(c);}
+   if((S.still=(S.still??0)+dt)>=1)Object.assign(S,{stage:away?'fora':'reboque',time:0});
+   return HELD;
+  }
+  if(S.stage!=='reboque'||S.time<TOW_ARRIVE)return HELD;
+  // Clear of the road it is let go, stopped; there it waits. A pull that got nowhere stops too, but a
+  // car still on the asphalt stays the tow's, under the yellow flag.
+  if(clear||S.time>TOW_ARRIVE+TOW_GIVE_UP){if(speed<.5&&away)Object.assign(S,{stage:'fora',time:0});return HELD;}
+  if(!S.side)S.side=this.parkSide(c,[8,16,24,32,40]);
+  if(!S.exit&&[4,10,16].every(j=>this.grassAt(c,i,S.side,j)))S.exit=true;
+  const turn=this.pursuit(c,6,p=>S.side*(S.exit?p[4]/2+PARK_OFF:p[4]/2-1.2),2);
+  return {left:Math.max(0,turn),right:Math.max(0,-turn),throttle:speed<TOW_PACE?.3:0,brake:speed>TOW_PACE+1?.4:0,reverse:0,handbrake:0};
+ }
+ // The side to park a car on (1 left, -1 right): the one with grass at more of these distances ahead
+ // (grassAt), the nearer side on a tie (brokenInput, stopInput).
+ parkSide(c,reach){
+  const score=side=>reach.filter(j=>this.grassAt(c,c.index,side,j)).length,near=Math.sign(c.surface.d)||1;
+  return score(-near)>score(near)?-near:near;
+ }
+ // The wheel (-1 right .. 1 left) toward a point look metres ahead, aim(p) metres from the centre line
+ // of the station p there but no more than reach from where the car is: pure pursuit (brokenInput,
+ // stopInput).
+ pursuit(c,look,aim,reach){
+  const a=this.data.samples,here=c.surface,p=a[(c.index+Math.round(look/this.line.ds))%a.length],to=clamp(aim(p),here.d-reach,here.d+reach);
+  const dx=p[1]+p[9]*to-c.x,dy=p[2]+p[10]*to-c.y,alpha=wrap(Math.atan2(dy,dx)-c.heading);
+  return clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(dx,dy))/steerLimit(Math.hypot(c.vx,c.vy)),-1,1);
+ }
+ // Multiplayer (multiplayer.js, the host's field): the driver of a car raced over the network is gone
+ // mid-race and no bot takes the wheel: nobody drives it (stopInput), and at the flag it is AB (why:
+ // the breakdown's name). A car past the flag keeps its result: a bot brings it in (the cool-down lap,
+ // the pit lane). Gone again before taking the car back, it waits where it is.
+ strand(r,why){
+  Object.assign(r,{puppet:null,lastS:r.car.surface.s,breakdown:null});
+  if(!r.finished){r.stop??={stage:'parado'};Object.assign(r,{retired:true,broken:{kind:why,smokeLeft:0}});}
+ }
+ // Its driver back at the wheel: the tow, the yellow flag and the AB it was heading for are over (a
+ // result it already has stands). Not a car that reached the flag meanwhile: its AB stands (false).
+ reclaim(r){if(r.stop?.flagged)return false;if(r.stop)Object.assign(r,{stop:null,broken:null,retired:false});return true;}
+ // The yellow flag's speed for a car at c: with a driverless car still on the road ahead (rolling,
+ // stopped, or on the tow; not in the pit lane), slower the closer it is, never below that car's own
+ // speed; Infinity with none. (Those cars are listed once a step, step: almost always none.)
+ caution(c){
+  const L=this.data.meta.reconstructed_xy_m;let v=Infinity;
+  for(const o of this.cautions??[]){if(o.car===c)continue;const gap=trackGap(c,o.car,L);if(gap>-15&&gap<CAUTION_REACH)v=Math.min(v,Math.max(Math.hypot(o.car.vx,o.car.vy),CAUTION_PACE+Math.max(0,gap-60)*.1));}
+  return v;
  }
  // A place to park j metres ahead on one side, a few metres past the edge: grass of this stretch (not
  // another road, as beside ECPA's twin straights, nor the pit lane) with no wall on the way.

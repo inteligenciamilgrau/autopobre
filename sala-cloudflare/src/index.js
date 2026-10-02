@@ -9,6 +9,7 @@
 // - roles: only the host sends the room's word (lobby, go, snap, pong) and it reaches the admitted
 //   guests; guests' messages (hello, ready, state, ping, bye) reach the host only;
 // - the doorman: a guest waits outside until the host admits it; the host can refuse or kick;
+// - the line check: an echo the server answers itself, so a player's game can tell a dead connection;
 // - limits: message size, messages and bytes per second per connection, players per room, failed
 //   keys per room.
 // A tab keeps its token (sessionStorage): back within HOST_GRACE after a reload, a host hosts again
@@ -25,8 +26,9 @@ const HOST_GRACE=15000;      // ms a host that left may take to come back (env H
 const HOST_TYPES=new Set(['lobby','go','snap','pong','admit','deny','kick','config','bye']);
 const GUEST_TYPES=new Set(['hello','ready','state','ping','bye']);
 const ROOM=/^[a-z0-9-]{1,24}$/,ID=/^[0-9a-f]{8}$/,TOKEN=/^[0-9a-f]{32}$/;
-// Close codes the game explains to the player (net-link.js).
-export const CLOSE={key:4001,full:4002,denied:4003,kicked:4004,flood:4008,busy:4009,elsewhere:4010,origin:4011};
+// Close codes the game explains to the player (net-link.js); late (no key within AUTH_WAIT: a slow
+// connection, not a wrong key) it just tries again.
+export const CLOSE={key:4001,full:4002,denied:4003,kicked:4004,flood:4008,busy:4009,elsewhere:4010,origin:4011,late:4012};
 const hex=bytes=>[...crypto.getRandomValues(new Uint8Array(bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
 const cleanName=value=>String(value??'').replace(/\p{C}/gu,'').replace(/\s+/g,' ').trim().slice(0,24)||'Piloto';
 // Same length and every byte compared: the time taken says nothing about the key.
@@ -56,19 +58,22 @@ export class Sala {
   this.tokens=new Map();       // token -> {id, token, admitted, since}: who has been in this room
   this.banned=new Set();       // tokens the host kicked
   this.hostId=null;this.hostToken=null;this.hostAwayTimer=null;this.porteiro=true;
-  this.fails=[];this.refuseUntil=0;this.grace=Number(env.HOST_GRACE_MS)||HOST_GRACE;
+  this.fails=[];this.refuseUntil=0;this.grace=Number(env.HOST_GRACE_MS)||HOST_GRACE;this.authWait=Number(env.AUTH_WAIT_MS)||AUTH_WAIT;
  }
  async fetch(){
   const [client,socket]=Object.values(new WebSocketPair());
   socket.accept();
   const peer={socket,id:null,token:null,authed:false,window:{since:Date.now(),messages:0,bytes:0,over:0}};
-  peer.authTimer=setTimeout(()=>{if(!peer.authed)this.shut(peer,CLOSE.key,'Sem chave');},AUTH_WAIT);
+  peer.authTimer=setTimeout(()=>{if(!peer.authed)this.shut(peer,CLOSE.late,'Sem chave a tempo');},this.authWait);
   socket.addEventListener('message',e=>this.message(peer,e.data));
   socket.addEventListener('close',()=>this.gone(peer));
-  socket.addEventListener('error',()=>this.gone(peer));
+  // An error ends the connection for good: closed here too, so the player's browser notices and
+  // connects again (left open, it would wait on a line the room no longer serves).
+  socket.addEventListener('error',()=>this.shut(peer,1011,'Erro na conexão'));
   return new Response(null,{status:101,webSocket:client});
  }
- shut(peer,code,reason){try{peer.socket.close(code,reason);}catch{}this.gone(peer);}
+ // Once per connection: closing a broken socket may raise its error again.
+ shut(peer,code,reason){if(peer.shut)return;peer.shut=true;try{peer.socket.close(code,reason);}catch{}this.gone(peer);}
  send(peer,m){try{peer.socket.send(JSON.stringify(m));}catch{}}
  // Messages and bytes per second per connection: over the limit a message is dropped, and a
  // connection that stays over it for OVER_LIMIT_CLOSE seconds is closed.
@@ -83,6 +88,9 @@ export class Sala {
   let m;try{m=JSON.parse(data);}catch{return;}
   if(!m||typeof m!=='object'||Array.isArray(m)||typeof m.t!=='string')return;
   if(!peer.authed){if(m.t==='auth')this.auth(peer,m);return;}
+  // The line check (net-room.js): answered here, whatever the host is doing; no answer for a few
+  // seconds tells the player's game its connection is dead before the browser notices.
+  if(m.t==='eco'){this.send(peer,{t:'eco'});return;}
   const host=peer.id===this.hostId;
   if(!(host?HOST_TYPES:GUEST_TYPES).has(m.t))return;
   m.from=peer.id;

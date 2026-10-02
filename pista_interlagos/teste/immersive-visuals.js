@@ -157,8 +157,7 @@ export class ImmersiveVisuals {
    this.leo={pos,person,cup,yaw,label:this.tag(this.crowd,'Leonardo Martins · #19',[pos.x,pos.y+2.1,pos.z],2.6,.3),idler:new Idler(person,'counter',{props:{cup},seed:.57})};}
   this.banner(this.crowd,'PADDOCK · VAQUINHA ANTES DA LARGADA',L.point(12,L.bounds.d1-.1,6.3),L.heading,9,.55,'#f5d279','#1a292b');
   this.truck=this.truckModel();this.root.add(this.truck);
-  const strapGeometry=new THREE.BufferGeometry();strapGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(25*2*3),3));const indices=[];for(let i=0;i<24;i++)indices.push(i*2,i*2+1,i*2+2,i*2+1,i*2+3,i*2+2);strapGeometry.setIndex(indices);
-  this.strap=new THREE.Mesh(strapGeometry,new THREE.MeshBasicMaterial({color:0xe9b640,side:THREE.DoubleSide}));this.strap.frustumCulled=false;this.root.add(this.strap);
+  this.strap=this.strapMesh();this.root.add(this.strap);
   this.damage=new THREE.Group();this.damage.visible=false;carRoot.add(this.damage);
   this.tank=new THREE.Group();this.damage.add(this.tank);this.box(this.tank,[0,0,0],[.64,.17,.95],0x686b64);
   for(const z of [-.31,.31])this.box(this.tank,[0,-.012,z],[.67,.185,.045],0x302c26);
@@ -402,6 +401,24 @@ export class ImmersiveVisuals {
   this.numberPlates(template,detail).forEach((g,i)=>{const decal=new THREE.Mesh(g,sticker);decal.name=PLATE_NAMES[i]+number;decal.renderOrder=2;detail.add(decal);});
   root.userData.wheels=pivots;root.userData.nameLabel=label;return root;
  }
+ // The tow strap: a flat ribbon along the 25 points of its path (immersive-state.js strapPath),
+ // laid by layStrap; also the strap of multiplayer.js's tow trucks.
+ strapMesh(){
+  const geometry=new THREE.BufferGeometry(),index=[];geometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(25*2*3),3));for(let i=0;i<24;i++)index.push(i*2,i*2+1,i*2+2,i*2+1,i*2+3,i*2+2);geometry.setIndex(index);
+  const strap=new THREE.Mesh(geometry,new THREE.MeshBasicMaterial({color:0xe9b640,side:THREE.DoubleSide}));strap.frustumCulled=false;return strap;
+ }
+ // ground(x, y): the height under a point of the strap, which never goes below it.
+ layStrap(mesh,points,ground){
+  const a=mesh.geometry.attributes.position;
+  points.forEach((p,i)=>{const next=points[Math.min(points.length-1,i+1)],previous=points[Math.max(0,i-1)],nx=-(next[2]-previous[2]),nz=next[0]-previous[0],n=Math.max(.001,Math.hypot(nx,nz));
+   for(let side=0;side<2;side++)a.setXYZ(i*2+side,p[0]+nx/n*.035*(side*2-1),Math.max(p[1],ground(p[0],-p[2])+.025),p[2]+nz/n*.035*(side*2-1));});
+  a.needsUpdate=true;
+ }
+ // A tow truck's amber light bar (truckModel): two quick flashes a second (now: seconds).
+ flashBeacon(truck,now){const flash=(now*2)%1;truck.userData.beacon.material.emissiveIntensity=flash<.12||flash>.25&&flash<.37?7:.25;}
+ // A model built here let go: its geometries, and the materials that are its own (the shared ones,
+ // mat(), stay).
+ disposeModel(root){const shared=new Set(Object.values(this.materials));root.traverse(o=>{if(!o.isMesh)return;o.geometry.dispose();if(!shared.has(o.material))o.material.dispose();});}
  // Flatbed tow truck ("guincho plataforma"): white cab with an orange stripe, aluminium bed,
  // dual rear wheels and an amber light bar that flashes. It faces +x; the strap hooks at x -2.45.
  truckModel(){const root=new THREE.Group(),glass=new THREE.MeshStandardMaterial({color:0x0c1114,roughness:.08,metalness:.3});
@@ -528,12 +545,10 @@ export class ImmersiveVisuals {
   this.leak.visible=!staged;this.debris.visible=!!projectile&&state.phase==='race';if(this.debris.visible){const t=projectile.age/projectile.duration;this.debris.position.lerpVectors(projectile.start,projectile.end,t);this.debris.position.y+=Math.sin(t*Math.PI)*.55;this.debris.rotation.set(this.time*12,this.time*9,0);}
   const towing=['tow','snag'].includes(state.phase);this.truck.visible=towing||state.phase==='broken';this.strap.visible=towing;
   if(this.truck.visible){const point=trackPoint(this.data,towOrigin+(state.towDistance||0)+9);this.setPose(this.truck,point);
-   // Amber light bar: two quick flashes per second.
-   const flash=(performance.now()/1000*2)%1;this.truck.userData.beacon.material.emissiveIntensity=flash<.12||(flash>.25&&flash<.37)?7:.25;if(towing){
+   this.flashBeacon(this.truck,performance.now()/1000);if(towing){
    this.carRoot.updateWorldMatrix(true,false);this.truck.updateWorldMatrix(true,false);
    const start=new THREE.Vector3(2.22,.12,0).applyMatrix4(this.carRoot.matrixWorld),end=new THREE.Vector3(-2.45,.12,0).applyMatrix4(this.truck.matrixWorld);
-   const points=strapPath(start.toArray(),end.toArray(),5),a=this.strap.geometry.attributes.position;
-   points.forEach((p,i)=>{const next=points[Math.min(24,i+1)],previous=points[Math.max(0,i-1)],nx=-(next[2]-previous[2]),nz=next[0]-previous[0],n=Math.max(.001,Math.hypot(nx,nz));for(let side=0;side<2;side++)a.setXYZ(i*2+side,p[0]+nx/n*.035*(side*2-1),Math.max(p[1],car.sample(p[0],-p[2]).z+.025),p[2]+nz/n*.035*(side*2-1));});a.needsUpdate=true;this.strap.material.color.setHex(state.phase==='snag'?0xf34435:0xe9b640);
+   this.layStrap(this.strap,strapPath(start.toArray(),end.toArray(),5),(x,y)=>car.sample(x,y).z);this.strap.material.color.setHex(state.phase==='snag'?0xf34435:0xe9b640);
   }}
   this.judge.visible=state.phase==='inspection';this.closedPark.visible=this.pitSign.visible=state.phase==='inspection';if(this.judge.visible)this.judgeIdle.update(dt);
   // The first five applaud (or not) the pilot in sixth.

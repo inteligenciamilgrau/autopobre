@@ -104,7 +104,9 @@
 .champ-head button{width:32px;height:32px;padding:0;margin:0;background:#214e40;color:#fff;border:0;border-radius:5px;flex-shrink:0}
 #championshipBanner{margin:0;padding:8px 12px;background:#173e35;color:#fff8d5;font-weight:800;font-size:13px;border-left:6px solid #f7ce16}
 #championshipBanner.champion{background:linear-gradient(90deg,#b8860b,#f4ce39);color:#1b1a10;font-size:16px}
-.champ-scroll{flex:1;min-height:0;overflow:auto;scrollbar-width:thin}
+/* The table's own height, shrunk to what the dialog leaves (flex:1 gave it none in iPhone Safari:
+   a 0% basis in a column only capped by max-height). */
+.champ-scroll{flex:1 1 auto;min-height:0;overflow:auto;scrollbar-width:thin}
 .champ-scroll table{width:100%;border-collapse:collapse;font-size:13px;text-align:left}
 .champ-scroll th,.champ-scroll td{padding:6px 8px;border-bottom:1px solid #cfd9c6;white-space:nowrap}
 .champ-scroll thead th{position:sticky;top:0;background:#f1f3e9;color:#28558a;font-size:10px}

@@ -46,7 +46,7 @@ with sync_playwright() as p:
     assert saved['aiLevel'] == 'impossivel' and saved['retirements'] is True, saved
     enter_track(page)
     roster = page.evaluate("document.querySelector('#gridRoster').textContent")
-    assert 'Koyzinho” Bechtold · Nível 10/10' in roster and 'Aluisio Bueno · Nível 5/10' in roster, roster
+    assert 'Koyzinho” Bechtold · Nível 10/10' in roster and 'Aloísio Bueno · Nível 5/10' in roster, roster
     page.evaluate(HOOK)
     field = page.evaluate(FIELD)
     report['field'] = {k: v for k, v in field.items() if k != 'rivals'}

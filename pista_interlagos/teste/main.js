@@ -31,6 +31,7 @@ import {SkidMarks} from './skid-marks.js?v=20260923-capotagem';
 import {TyreSmoke} from './tyre-smoke.js?v=20260927-visibilidade';
 import {ImmersiveMode} from './immersive-mode.js';
 import {MobileControls} from './mobile-controls.js';
+import {GamepadControls} from './gamepad-controls.js';
 import {setupSettings} from './settings.js';
 import {CarAudio} from './car-audio.js?v=20260913-immersive';
 import {PlayerPreferences,CAMERA_MODES,LAPS} from './player-preferences.js';
@@ -477,15 +478,27 @@ document.addEventListener('pointerlockerror',lockFailed);
 document.addEventListener('mousemove',e=>{
  // On foot (pit stop, story-mode paddock) and on the podium the mouse belongs to that camera.
  if(!pointerLocked||paused||pitstop?.opened||immersive?.ownsMouse()||(!e.movementX&&!e.movementY))return;
+ lookAround(e.movementX,e.movementY);
+});
+// Looking around from the car (dx, dy in mouse pixels): the captured mouse or the controller's right stick.
+function lookAround(dx,dy){
  if(isInside()){
   // The cockpit turns right round; while B holds the look back, the look to return to stays put.
-  if(!lookBack.held)turnHead(headLook,e.movementX,e.movementY,mode==='cockpit'?HEAD_YAW_COCKPIT:HEAD_YAW_HOOD);
+  if(!lookBack.held)turnHead(headLook,dx,dy,mode==='cockpit'?HEAD_YAW_COCKPIT:HEAD_YAW_HOOD);
  }else{
   orbitFromView();
-  orbit.rotateLeft(e.movementX*.0025);orbit.rotateUp(e.movementY*.0025);
+  orbit.rotateLeft(dx*.0025);orbit.rotateUp(dy*.0025);
  }
  cameraReturn.manual(performance.now());
-});
+}
+// The right stick needs no captured mouse: on foot it turns the walking camera, at the box (in the
+// car) it orbits round the crew, and on the podium the mouse alone moves the photo camera.
+function padLook(dx,dy){
+ if(!ready||paused)return;
+ if(pitstop?.opened){if(!pitstop.coffee)pitstop.orbitView(dx,dy);else if(!pitstop.coffee.menu)pitstop.turnView(dx,dy);return;}
+ if(immersive?.onFoot()){immersive.visual.turnView(dx,dy);return;}
+ if(!immersive?.ownsMouse())lookAround(dx,dy);
+}
 $('view').addEventListener('pointermove',e=>{if(!pointerLocked&&e.buttons)cameraReturn.manual(performance.now());});
 window.addEventListener('pointerup',()=>$('view').classList.remove('dragging'));
 $('view').addEventListener('pointercancel',()=>$('view').classList.remove('dragging'));
@@ -583,8 +596,12 @@ function updateCamera(dt){
  }
  sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();
 }
-const pressed=code=>keys.has(code)||mobile?.pressed.has(code);
-function input(){return {ignition:pressed('KeyI')?1:0,throttle:Math.max(pressed('KeyW')||pressed('ArrowUp')?1:0,mobile?.throttle??0),brake:Math.max(pressed('KeyS')||pressed('ArrowDown')?1:0,mobile?.brake??0),left:Math.max(pressed('KeyA')||pressed('ArrowLeft')?1:0,-(mobile?.steering??0)),right:Math.max(pressed('KeyD')||pressed('ArrowRight')?1:0,mobile?.steering??0),reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};}
+// (a controller's button held through the menu or a pause, which let go of the keys, still holds its
+// key; Space only latches the handbrake, keyboard or controller)
+const pressed=code=>keys.has(code)||mobile?.pressed.has(code)||code!=='Space'&&gamepad.holds(code);
+// Keyboard, touch pads and the controller's triggers and stick (analog) all drive at once. On foot
+// the controller's left stick also walks, pushed up or down; in the car it never accelerates.
+function input(){const walk=pitstop?.coffee||immersive?.onFoot()?gamepad.walk:0;return {ignition:pressed('KeyI')?1:0,throttle:Math.max(pressed('KeyW')||pressed('ArrowUp')?1:0,mobile?.throttle??0,gamepad.throttle,walk),brake:Math.max(pressed('KeyS')||pressed('ArrowDown')?1:0,mobile?.brake??0,gamepad.brake,-walk),left:Math.max(pressed('KeyA')||pressed('ArrowLeft')?1:0,-(mobile?.steering??0),-gamepad.steering),right:Math.max(pressed('KeyD')||pressed('ArrowRight')?1:0,mobile?.steering??0,gamepad.steering),reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};}
 // The recon lap races the Opala 99 with the rivals' racecraft (RaceField.heroInput). Each physics
 // step asks for a new command; the sound and the driver's hands reuse the last one.
 let heroCommand=null;
@@ -664,7 +681,7 @@ function lapBanner(dt){
  bestBefore=car.best;
  if(lapShown>0){lapShown-=dt;if(lapShown<=0)banner.hidden=true;}
 }
-function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);multiplayer?.frame(dt);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);if(renderer&&!sessionStarted&&!$('cars').classList.contains('hidden'))carSelect.render(renderer,dt);return;}
+function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.poll(dt);multiplayer?.frame(dt);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);if(renderer&&!sessionStarted&&!$('cars').classList.contains('hidden'))carSelect.render(renderer,dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(intro.active&&automatic)intro.stop();
  if(intro.active&&!immersive.active&&immersive.freeCountdown>0){immersive.freeCountdown=3;$('raceCountdown').hidden=true;}
@@ -672,7 +689,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  if(!immersive.active&&immersive.freeResultReady&&!paused&&!multiplayer?.holdResults()){accumulator=0;recordChampionshipRound();menu(true);}
  // The sound is heard from the rival the recon lap watches (N), otherwise from the player's car.
  const heard=watchedRival()?.car??car;
- if(automatic&&!paused&&(mobile?.throttle||mobile?.brake||mobile?.steering))takeWheel();
+ if(automatic&&!paused&&(mobile?.throttle||mobile?.brake||mobile?.steering||gamepad.driving))takeWheel();
  if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
@@ -686,7 +703,7 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
  // A watched rival is posed by immersive.update below: its camera follows after that.
- updateOpenings(paused?0:dt);updateCar(dt);if(!watchedRival())updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,heard===car?carAudio.state:null).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ updateOpenings(paused?0:dt);updateCar(dt);if(!watchedRival())updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,heard===car?carAudio.state:null).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});gamepad.bump(Math.max(frameImpact,immersive?.takeKnock()??0));frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  if(immersive?.visual)immersive.visual.renderAhead=renderAhead();immersive?.update(paused?0:dt,camera);if(watchedRival())updateCamera(dt);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
  // Marshals, cameramen, crews, the terrace and the café idle; passing cars catch their eye.
@@ -851,6 +868,23 @@ const pilotPicker=new PilotPicker(),automaticRecords=new AutomaticRecords(pilotS
 $('recordsButton').onclick=()=>{lapRecords.circuit=circuit.id;lapRecords.open();};
 $('settingsButton').onclick=openSettings;
 mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(nextCameraMode(),true);},onSkin:cycleLivery,onReset:()=>{if(ready&&!immersive.finishing){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
+// Xbox / PlayStation controller (gamepad-controls.js): its buttons arrive as keys. Menu opens the
+// pause menu and, paused, goes back to the race (as P does from the menu or the pause badge).
+const gamepad=new GamepadControls({onLook:padLook,onChange:padStatus,onMenu:()=>{
+ if(!sessionStarted||lapRecords.dialog.open||championshipDialog.dialog.open)return;
+ if($('settings').open)resumeRace();else gamepad.press(paused?'KeyP':'Escape');
+}});
+$('padSteering').value=preferences.values.padSteering;gamepad.setSteering(preferences.values.padSteering);
+$('padSteering').onchange=()=>{preferences.update({padSteering:$('padSteering').value});gamepad.setSteering(preferences.values.padSteering);};
+$('padRumble').checked=gamepad.rumble=preferences.values.padRumble;
+$('padRumble').onchange=()=>{preferences.update({padRumble:$('padRumble').checked});gamepad.rumble=preferences.values.padRumble;gamepad.bump(12);};
+// The controls tab names the controller; a race in progress says so for a moment too.
+// A device that is no standard pad (a wheel, pedals) is named, and why it does nothing.
+function padStatus(pad){
+ const odd=pad.unsupported,text=pad.connected?`Controle conectado: ${pad.name}`:odd?`${odd}: não é um controle padrão (Xbox, PlayStation) e não funciona no jogo`:'Nenhum controle conectado';
+ $('padStatus').textContent=pad.connected||odd?text:`${text}. Ligue o controle e aperte um botão.`;$('padStatus').classList.toggle('connected',pad.connected);
+ if(!sessionStarted)return;const shown=pad.connected?`${text} · RT acelera, LT freia`:odd?text:'Controle desconectado';status(shown);setTimeout(()=>{if($('status').textContent===shown)status('');},4000);
+}
 document.addEventListener('keydown',e=>{
  if(lapRecords.dialog.open||championshipDialog.dialog.open)return;
  if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape')openSettings();else if(e.code==='KeyP')hold(!held);else if(!paused){if(pitstop.coffee&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(!e.repeat&&pitstop.handleKey(e.code))e.preventDefault();}return;}
@@ -1100,7 +1134,7 @@ async function loadCircuit(){
  ready=true;loadedCircuit=circuit.id;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;
  window.interlagos={ready:true,circuit:circuit.id,car,renderAhead,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),pitInfo:()=>pitstop?.info()??null,
-  audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),
+  audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),gamepadInfo:()=>({connected:gamepad.connected,name:gamepad.connected?gamepad.name:'',steering:gamepad.steering,throttle:gamepad.throttle,brake:gamepad.brake,held:[...gamepad.held],rumble:gamepad.rumble,curve:gamepad.curve}),
   cinematicInfo:()=>({...cinematic.info(),adaptation:cinematic.adaptation()}),tvInfo:()=>tvCamera.info(),tvCamera:()=>tvCamera,introInfo:()=>intro.info(),skipIntro:()=>intro.stop(),setCinematic:level=>cinematic.setLevel(level),cinematicLook:patch=>Object.assign(cinematic.look,patch||{}),
   skidInfo:()=>skidMarks.info(),smokeInfo:()=>tyreSmoke.info(),sceneryInfo:()=>({...landscape.stats,sky:sky.info()}),waterInfo:()=>landscape.waterInfo(),lakeInfo:()=>lakeContact?.info()??null,treeInfo:()=>treeField?.info()??null,tumbleInfo,waterAt:(x,y)=>landscape.water.at(x,y),
   structureInfo:()=>({revision:'v04_fechamentos',parts:carStructure.children.length,visible:carStructure.visible}),

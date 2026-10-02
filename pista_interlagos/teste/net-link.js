@@ -7,7 +7,8 @@
 export const ROOM_SERVER='wss://sala.inteligenciamilgrau.com.br';
 // wrangler dev on this machine (&servidor=local), for the checks.
 export const LOCAL_SERVER='ws://127.0.0.1:8787';
-// Why the server closed the connection (sala-cloudflare/src/index.js CLOSE): the game says so.
+// Why the server closed the connection (sala-cloudflare/src/index.js CLOSE): the game says so. Its
+// 4012 (the key came too late: a slow connection) is not here: a line that dropped, tried again.
 export const CLOSED=Object.freeze({4001:'chave',4002:'cheia',4003:'recusado',4004:'expulso',4008:'excesso',4009:'ocupada',4010:'outra-aba',4011:'origem'});
 const MAX_BYTES=65536,RETRIES=[1000,2000,4000,8000,15000];
 const TOKEN=/^[0-9a-f]{32}$/;
@@ -33,12 +34,20 @@ export class ServerLink {
   ws.onclose=e=>{if(this.ws!==ws)return;this.ws=null;const reason=CLOSED[e.code];if(reason||this.closing)this.onclose?.(reason??'saiu');else this.lost();};
   ws.onerror=()=>{};
  }
- // The connection dropped (network, a server restart, the day's limit): try again a few times.
+ // The connection dropped (network, a server restart, the day's limit): try again, soon at first,
+ // then every RETRIES' last delay for as long as the page stays ('fora' once the quick tries ran out).
  lost(){
-  if(this.closing)return;const delay=RETRIES[this.tries++];
-  if(delay===undefined){this.onclose?.('fora');return;}
-  this.onclose?.('reconectando');this.retry=setTimeout(()=>this.open(),delay);
+  if(this.closing)return;const delay=RETRIES[Math.min(this.tries++,RETRIES.length-1)];
+  this.onclose?.(this.tries>RETRIES.length?'fora':'reconectando');clearTimeout(this.retry);this.retry=setTimeout(()=>this.open(),delay);
  }
+ // The room went quiet (net-room.js): this connection may be dead though the browser has not noticed
+ // (it may take it a minute). A new one takes its place at once; the old one is left open, for the
+ // server to close once the new one is in (the same token: no goodbye reaches the room, so a false
+ // alarm costs nothing), or to die on its own. Not while a new one is still connecting.
+ reconnect(){if(this.closing||!this.ws||this.ws.readyState===0)return;this.open();}
+ // For the checks (multiplayer.js dropLine): the line drops as a network drops it, no goodbye; slow:
+ // the next try only after the longest wait.
+ drop(slow=false){const ws=this.ws;if(!ws)return;if(slow)this.tries=RETRIES.length-1;try{ws.close(4000);}catch{}}
  send(m){if(this.ws?.readyState===1)try{this.ws.send(JSON.stringify(m));}catch{}}
  close(){this.closing=true;clearTimeout(this.retry);try{this.ws?.close(1000);}catch{}this.ws=null;}
 }

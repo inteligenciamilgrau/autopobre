@@ -5,9 +5,9 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {startWrangler} from './wrangler-dev.mjs';
-const PORT=8797,KEY='chave-de-teste-local',ORIGIN='http://teste.local',GRACE=600;
+const PORT=8797,KEY='chave-de-teste-local',ORIGIN='http://teste.local',GRACE=600,AUTH_WAIT=1500;
 const wait=(ms=40)=>new Promise(r=>setTimeout(r,ms));
-const stop=await startWrangler({port:PORT,vars:{HOST_GRACE_MS:GRACE}});
+const stop=await startWrangler({port:PORT,vars:{HOST_GRACE_MS:GRACE,AUTH_WAIT_MS:AUTH_WAIT}});
 let rooms=0;const fresh=()=>'sala-'+(++rooms)+'-'+Math.random().toString(36).slice(2,6);
 // The HTTP status of a WebSocket request that is turned away before the upgrade.
 const refused=(path,origin)=>new Promise(done=>{const req=http.request({host:'127.0.0.1',port:PORT,path,headers:{Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Version':'13','Sec-WebSocket-Key':'dGhlIHNhbXBsZSBub25jZQ==',...(origin?{Origin:origin}:{})}});
@@ -33,6 +33,9 @@ const report={};
  assert.equal(await refused('/sala/abc',ORIGIN),101,'the game page gets in');
  const wrong=await open(fresh(),{key:'errada'});assert.equal(wrong.closed?.code,4001,'a wrong key is shut out');
  const none=await open(fresh(),{key:''});assert.equal(none.closed?.code,4001);
+ // No key at all in time (a slow connection): its own code, which the game tries again instead of
+ // asking for the key.
+ const slow=await open(fresh(),{auth:false});await slow.until(()=>slow.closed,AUTH_WAIT+3000);assert.equal(slow.closed.code,4012,'late, not a wrong key');
 }
 
 // Roles, the doorman, and who is who.
@@ -46,6 +49,9 @@ const report={};
  bia.send({t:'hello',name:'Bia Souza​',want:null});host.send({t:'lobby',name:'Ana',age:1,players:[],race:null});
  await host.until(()=>host.of('knock').some(k=>k.id===bia.me.id&&k.name==='Bia Souza'));
  assert.equal(host.of('hello').length,0);assert.equal(bia.of('lobby').length,0);
+ // The line check: the server echoes it itself, to the one who asked only (a guest at the door too).
+ bia.send({t:'eco'});await bia.until(()=>bia.of('eco')[0]);host.send({t:'eco'});await host.until(()=>host.of('eco')[0]);await wait(40);
+ assert.equal(bia.of('eco').length,1);assert.equal(host.of('eco').length,1,'an echo reaches only the one who asked');
  host.send({t:'admit',to:bia.me.id});await bia.until(()=>bia.of('admitted')[0]);
  // Whatever a guest claims to be, the host hears the id the server gave it.
  bia.send({t:'hello',name:'Bia',want:'64',from:host.me.id});const hello=await host.until(()=>host.of('hello')[0]);assert.equal(hello.from,bia.me.id,'from is the server\'s word');

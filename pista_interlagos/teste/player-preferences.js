@@ -32,7 +32,10 @@ export function normalizePreferences(value){
   // The car the player races in Modo Corrida (the car screen, car-select.js), by number; the story is the 99's.
   car:typeof source.car==='string'&&carEntry(source.car)?source.car:PLAYER_CAR_DEFAULT,
   // Laps of every race (Modo Corrida and Modo História): 3 unless the player picks more or fewer.
-  laps:Number.isInteger(source.laps)&&source.laps>=LAPS.min&&source.laps<=LAPS.max?source.laps:LAPS.standard
+  laps:Number.isInteger(source.laps)&&source.laps>=LAPS.min&&source.laps<=LAPS.max?source.laps:LAPS.standard,
+  // Xbox / PlayStation controller (gamepad-controls.js): how the left stick steers, and the shake on impacts.
+  padSteering:['suave','normal','direta'].includes(source.padSteering)?source.padSteering:'normal',
+  padRumble:typeof source.padRumble==='boolean'?source.padRumble:true
  };
 }
 function browserStorage(){try{return globalThis.localStorage;}catch{return null;}}

@@ -451,8 +451,11 @@ export class ImmersiveMode {
  get fieldSize(){return this.rivals.length+1;}
  // Race times reach the record boards only from the whole grid: a practice or a 1x1 starts at the front.
  get fullGrid(){return this.active||!this.freeLineup;}
- wallImpact(speed){const c=this.car,side=Math.sign(c.surface.d);this.damageAt(speed,[c.x+c.surface.lx*side,c.y+c.surface.ly*side]);this.parts.burst({speed,point:[this.car.x+Math.cos(this.car.heading)*2,this.car.y+Math.sin(this.car.heading)*2]},this.car);}
- contacts(hits){for(const hit of hits){if(hit.player)this.damageAt(hit.speed,hit.point);this.parts.burst(hit,this.car);if(hit.player&&this.active)this.state.hitCar(Math.min(1.5,hit.speed/10));else{const dx=hit.point[0]-this.car.x,dy=hit.point[1]-this.car.y,d=Math.hypot(dx,dy);if(d<65)this.state.emitSound('collision',{strength:Math.min(1.5,hit.speed/10)*(1-d/65),pan:clamp((-dx*Math.sin(this.car.heading)+dy*Math.cos(this.car.heading))/Math.max(1,d),-1,1)});}}}
+ wallImpact(speed){const c=this.car,side=Math.sign(c.surface.d);this.knock=Math.max(this.knock??0,speed);this.damageAt(speed,[c.x+c.surface.lx*side,c.y+c.surface.ly*side]);this.parts.burst({speed,point:[this.car.x+Math.cos(this.car.heading)*2,this.car.y+Math.sin(this.car.heading)*2]},this.car);}
+ // The hardest knock on the player's car (m/s, a wall or a rival) since main.js last took it: the
+ // controller's rumble, in the story's race as in Modo Corrida.
+ takeKnock(){const knock=this.knock??0;this.knock=0;return knock;}
+ contacts(hits){for(const hit of hits){if(hit.player){this.damageAt(hit.speed,hit.point);this.knock=Math.max(this.knock??0,hit.speed);}this.parts.burst(hit,this.car);if(hit.player&&this.active)this.state.hitCar(Math.min(1.5,hit.speed/10));else{const dx=hit.point[0]-this.car.x,dy=hit.point[1]-this.car.y,d=Math.hypot(dx,dy);if(d<65)this.state.emitSound('collision',{strength:Math.min(1.5,hit.speed/10)*(1-d/65),pan:clamp((-dx*Math.sin(this.car.heading)+dy*Math.cos(this.car.heading))/Math.max(1,d),-1,1)});}}}
  stepFree(dt,input={}){if(this.freeFinished)return;const previous=this.freeFuel;this.freeFuel=Math.max(0,this.freeFuel-dt*((.002+Math.hypot(this.car.vx,this.car.vy)*.00045+(input.throttle||0)*.005+(this.car.rearSlipSpeed||0)*.0023)*3/this.freeTotalLaps+(this.car.condition?.factors.leak??0)));if(previous>=1&&this.freeFuel<1)this.state.emitSound('reserve');if(previous>0&&this.freeFuel===0)this.state.emitSound('fuelEmpty');this.contacts(this.field.step(this.car,dt,this.freeTotalLaps));
   const L=this.data.meta.reconstructed_xy_m;this.freePlayerProgress+=lapTravel(this.freeLastS??0,this.car.surface.s,L);this.freeLastS=this.car.surface.s;
   const progress=Math.min(this.freePlayerProgress,this.car.laps*L+this.car.surface.s+this.field.gridLeadIn);

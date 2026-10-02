@@ -12,7 +12,7 @@ export const ACE_NUMBER='2';
 // whose best drivers race at Koyzinho Indestrutível's pace (race-field.js PRO_LEVELS).
 export const AI_LEVELS=Object.freeze(['facil','medio','alto','impossivel']);
 export const AI_LEVEL_NAMES=Object.freeze({facil:'Fácil',medio:'Médio',alto:'Alto',impossivel:'Impossível'});
-// The pilots' table: skill 1-10 and chance of a mistake 1-10 ("Aluisio is so slow he can't go wrong").
+// The pilots' table: skill 1-10 and chance of a mistake 1-10 ("Aloísio is so slow he can't go wrong").
 // It has no line for the 99 (the player's own car): when Stevan Gaipo races it as a rival (Modo
 // Corrida's car screen), mid-field, a game adaptation like the others.
 const PILOT_TABLE={'2':[10,1],'73':[9,2],'7':[8,2],'64':[8,3],'00':[8,3],'19':[7,3],'51':[9,1],'93':[9,2],'312':[5,1],'70':[10,1],'9':[7,3],'74':[7,3],'88':[7,3],'42':[6,3],'99':[7,3]};
@@ -25,7 +25,7 @@ const entries=[
  ['19','Leo Martins','Leonardo Martins',126,6,4,7,1,0xc9a03a,0x141516,{metalness:.55,roughness:.3}],
  ['51','Pedro Pimenta','Pedro Pimenta',118,7,11,8,4,0x1d4fb8,0xc81d25],
  ['93','Felipe Matos / Karim','Felipe Matos / Karim Machatta',99,8,1,null,3,0x8a8f95,null],
- ['312','Aluisio Bueno','Aluisio Bueno',88,9,9,10,2,0x6cb6e8,0x141516],
+ ['312','Aloísio Bueno','Aloísio Bueno',88,9,9,10,2,0x6cb6e8,0x141516],
  ['70','Kleber Eletric','Kleber Eletric / JP Velardi',78,11,6,1,0,0xf07c18,0x1f4fb5],
  ['9','Marco Maragno','Marco Maragno',52,13,13,11,4,0x2156c4,0x2f9b4b],
  ['74','Denis / Marcos Jr.','Denis Navarro / Marcos Jr.',45,15,7,null,1,0xd9362c,null],

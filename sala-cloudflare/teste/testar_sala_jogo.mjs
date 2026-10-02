@@ -42,6 +42,17 @@ bia.sendState(packCar(car),1);ana.sendSnapshot([['99',0,packCar(car)],['64',.02,
 await until(()=>got.includes('state true')&&got.includes('snap 2'));
 // Pings through the server give the guest its latency.
 await until(()=>bia.latency>0);report.latencyMs=Math.round(bia.latency*1000);
+// Mid-race the guest's line drops (her socket closes, no goodbye): the server tells the host, her seat
+// waits for her (away) and her car goes on with nobody at the wheel; she connects again by herself, as
+// the same player, and the host seats her again.
+const seated=()=>race.seats.some(s=>s.id===bia.id),biaId=bia.id;ana.on('leave',p=>got.push('leave '+p.number));
+bia.link.ws.close(4000);await until(()=>got.includes('leave 64'));assert(!seated(),'out of the seats: her car without a driver');
+await until(()=>seated()&&bia.problem===null&&bia.race.seats.some(s=>s.id===biaId),10000);assert.equal(bia.id,biaId);
+// A line dead one way (open, but nothing reaches her): no echo from the server for 10 seconds,
+// she connects again and keeps her seat.
+const deaf=bia.link.ws,leaves=got.filter(x=>x==='leave 64').length;deaf.onmessage=null;
+await until(()=>bia.link.ws&&bia.link.ws!==deaf&&bia.problem===null&&seated()&&bia.race.seats.some(s=>s.id===biaId),30000);
+assert(bia.trail.some(t=>t.includes('sem sinal')));assert.equal(got.filter(x=>x==='leave 64').length,leaves,'the new connection takes over: the host never hears her go');report.drop='ok';
 // A kick: out of the room, and out for good.
 const caio=player(name,'Caio');await until(()=>ana.knocks.has(caio.id));ana.admit(caio.id);await until(()=>caio.number);
 ana.kick(caio.id);await until(()=>caio.problem==='expulso');await until(()=>!ana.members.some(m=>m.id===caio.id));

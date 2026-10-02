@@ -110,7 +110,7 @@ export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.pitGeo=pitGeometry(data);this.axes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};this.reset();}
  // The grid spot: back metres before the line, lane metres across (race-roster.js playerGridSlot).
  resetGrid({back=GRID_START_BACK,lane=0}={}){const target=this.data.meta.reconstructed_xy_m-back;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));if(lane){this.x+=this.surface.lx*lane;this.y+=this.surface.ly*lane;this.settle();}this.awaitingStart=true;}
- reset(index=0){this.awaitingStart=false;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.shifts=0;this.rightings=0;this.rightedAt=null;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.recover(index);}
+ reset(index=0){this.awaitingStart=false;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.shifts=0;this.rightings=0;this.rightedAt=null;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.beforeCross=null;this.recover(index);}
  // Put the car back at rest on the centre line, keeping its clock, laps and race progress.
  recover(index=this.index){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.rpm=IDLE_RPM;this.shiftTimer=0;this.longAccel=0;this.latAccel=0;this.crashImpactSpeed=0;this.settle();}
  // Seat the body on its wheels at the current position and heading: level with
@@ -468,14 +468,11 @@ export class TestCar {
  trackLap(previous,current,distance,forwardSpeed){
   const L=this.data.meta.reconstructed_xy_m;
   let advance=current.s-previous.s;if(advance<-L/2)advance+=L;if(advance>L/2)advance-=L;
-  if(this.awaitingStart){
-   if(previous.s>L-16&&current.s<16&&advance>0&&forwardSpeed>1){this.awaitingStart=false;this.checkpoints=new Set([0]);this.nextCheckpoint=1;this.excursion=null;}
-   return;
-  }
+  const finish=previous.s>L-16&&current.s<16&&advance>0&&forwardSpeed>1;
+  if(this.awaitingStart){if(finish)this.crossLine();return;}
   const outside=p=>!p.pit&&Math.abs(p.d)>p.width/2+1;
   if(!this.excursion&&(outside(previous)||outside(current)))this.excursion={advance:0,distance:0};
   if(this.excursion){this.excursion.advance+=advance;this.excursion.distance+=distance;}
-  const finish=previous.s>L-16&&current.s<16&&advance>0&&forwardSpeed>1;
   // A runoff alone is allowed. Reject only a meaningful gain from cutting the route.
   if(this.excursion&&(!outside(current)||finish)){
    if(this.excursion.advance>40&&this.excursion.advance-this.excursion.distance>18){if(this.lapValid)this.invalidReason='cut';this.lapValid=false;}
@@ -484,13 +481,42 @@ export class TestCar {
   const checkpoint=Math.floor(current.s/L*20);
   this.checkpoints.add(checkpoint);
   if(advance>0&&checkpoint===this.nextCheckpoint)this.nextCheckpoint++;
-  if(finish){
-   this.lastLapValid=this.lapValid&&this.nextCheckpoint===20;
-   this.lastLap=this.clock-this.lapStart;
-   if(this.lastLapValid){this.laps++;if(this.best===null||this.lastLap<this.best)this.best=this.lastLap;}
-   this.lastInvalidReason=this.lastLapValid?null:this.invalidReason??'cut';
-   this.lapStart=this.clock;this.lapValid=true;this.invalidReason=null;this.checkpoints=new Set([0]);this.nextCheckpoint=1;
-  }
+  if(finish)this.crossLine();
+ }
+ // Over the finish line: from the grid, the first lap begins; else a lap ends (valid with every
+ // checkpoint passed and no cut) and the next begins. (syncLaps also crosses it for a car that crossed
+ // it in the host's window while its pilot's line was down, and takes back one crossed only in this
+ // window: uncrossLine.) The lap books as they stood before, with the clock then.
+ crossLine(){
+  this.beforeCross={...this.lapBooks(),at:this.clock};
+  if(this.awaitingStart){this.awaitingStart=false;this.checkpoints=new Set([0]);this.nextCheckpoint=1;this.excursion=null;return;}
+  this.lastLapValid=this.lapValid&&this.nextCheckpoint===20;
+  this.lastLap=this.clock-this.lapStart;
+  if(this.lastLapValid){this.laps++;if(this.best===null||this.lastLap<this.best)this.best=this.lastLap;}
+  this.lastInvalidReason=this.lastLapValid?null:this.invalidReason??'cut';
+  this.lapStart=this.clock;this.lapValid=true;this.invalidReason=null;this.checkpoints=new Set([0]);this.nextCheckpoint=1;
+ }
+ // Everything crossLine changes: the laps that count, the lap under way and the one before, the best.
+ lapBooks(){return {awaitingStart:this.awaitingStart,laps:this.laps,lapStart:this.lapStart,lapValid:this.lapValid,invalidReason:this.invalidReason,best:this.best,lastLap:this.lastLap,
+  lastLapValid:this.lastLapValid,lastInvalidReason:this.lastInvalidReason,checkpoints:new Set(this.checkpoints),nextCheckpoint:this.nextCheckpoint};}
+ // The last crossing taken back, as if the car had never reached the line: its lap goes on, timed
+ // from where it began. Only one: false when there is none to take back.
+ uncrossLine(){
+  const b=this.beforeCross;if(!b)return false;this.beforeCross=null;
+  const {at,...books}=b;Object.assign(this,books,{checkpoints:new Set(books.checkpoints)});return true;
+ }
+ // multiplayer.js, a guest back after its line dropped (since: this car's clock then): the laps
+ // follow the host's count for this car (there: laps that count, -1 still short of the line from the
+ // grid). A line crossed here since the drop is taken back first (the host's car may not have got
+ // there); then a lap that counts there and not here is a line crossed only there (crossed here too:
+ // the checkpoints on the way passed there), and one that counts here and not there, a crossing here
+ // that never reached the host (taken back). Laps that count on both sides, never the distance
+ // driven: an invalid lap adds none to the race distance a guest sends.
+ syncLaps(there,since){
+  if(this.beforeCross&&this.beforeCross.at>=since)this.uncrossLine();
+  const here=()=>this.awaitingStart?-1:this.laps,counted=()=>!!this.beforeCross&&(this.beforeCross.awaitingStart||this.beforeCross.laps<this.laps);
+  if(here()>there){if(counted())this.uncrossLine();if(here()>there)this.laps=Math.max(0,there);}
+  else if(here()<there){if(!this.awaitingStart){this.nextCheckpoint=20;this.checkpoints=new Set(Array.from({length:20},(_,k)=>k));}this.crossLine();}
  }
  telemetry(){return {x:this.x,y:this.y,z:this.surface.z,speed:Math.hypot(this.vx,this.vy)*3.6,index:this.index,s:this.surface.s,grade:this.surface.grade*100,bank:this.surface.bank*100,onRoad:this.surface.onRoad,laps:this.laps,best:this.best,clock:this.clock,
   height:this.z-CG_HEIGHT,airborne:this.wheelsDown===0&&!this.hullContact,wheelsDown:this.wheelsDown,upright:this.upright,roll:this.roll,pitch:this.pitch,overturned:this.overturned,rightings:this.rightings};}

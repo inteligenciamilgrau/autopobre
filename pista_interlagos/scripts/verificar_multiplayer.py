@@ -6,7 +6,9 @@ was in the room already (she asked for the 64), the other arrives during that wa
 lets her in from the grid, its captured mouse let go for it, no menu), gets the first free car, the
 99, and is seated once she says she waits; the host gives the start (the Largar button). Each window
 paints its own car as its own. They race one lap of Interlagos on the automatic pilot, every window shows the
-others' cars where they really are (solid: humans collide unless the host asks for ghosts), and every
+others' cars where they really are (solid: humans collide unless the host asks for ghosts) (through
+the server, a guest's line also drops mid-race: nobody drives her car, it rolls on, the tow and
+the yellow flag come, until she is back in it), and every
 result sheet lists all three pilots; a guest's sheet leads back to its car screen, still waiting for
 the next race. Then the host reloads (F5): it hosts again under the same
 identity and the guests keep their cars. A window opened without #sala shows nothing of it and does
@@ -18,6 +20,7 @@ of its .dev.vars, and the host letting each guest in (Aceitar) as the doorman as
 
 Usage: verificar_multiplayer.py [porta] [--servidor]  (INTERLAGOS_SHOTS=pasta keeps the screenshots;
 INTERLAGOS_NODE=node.exe when node is not on the PATH)."""
+import atexit
 import json
 import os
 import random
@@ -27,6 +30,7 @@ import time
 import statistics
 import sys
 import tempfile
+import threading
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 from browser_config import browser_executable, browser_args, wait_js
@@ -49,7 +53,7 @@ OPENING = "window.interlagos&&!document.querySelector('#start').disabled&&!docum
 PROBE = "()=>{const s=interlagosSala.info();return {t:performance.timeOrigin+performance.now(),me:s.me,cars:s.cars};}"
 FPS = "new Promise(done=>{let n=0;const t=performance.now();const f=()=>{n++;if(performance.now()-t<1000)requestAnimationFrame(f);else done(n);};requestAnimationFrame(f);})"
 MODULES = ('multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js')
-errors, requests = [], {}
+errors, requests, report_extra = [], {}, {}
 
 
 def watch(page, name):
@@ -104,6 +108,67 @@ def wait_for_start(page):
     """The guest's "Aguardar início da corrida": the button stays pressed until a race takes it."""
     page.click('#carsNext')
     wait_js(page, "interlagosSala.info().waiting&&document.querySelector('#carsNext').getAttribute('aria-pressed')==='true'", timeout=10000)
+
+
+def drop_line(host, guest, late):
+    """Mid-race the guest's line drops for about 15 s, no goodbye (players' report 2026-10-02: a car
+    became the AI's and stayed so, and the host's car stood still for that guest; their wish: the car
+    left with nobody at the wheel, the tow truck if it stops on the road, the yellow flag, and the car
+    back to its pilot). No bot takes her car: the host leaves it to roll on as if she had fainted, the
+    other guest gets the yellow flag while it is on the road, her own window lets the car roll on too;
+    back, she takes it from where the host has it, and the host shows it where she really is."""
+    guest_id = guest.evaluate('interlagosSala.info().id')
+    speed = "Math.hypot(interlagos.car.vx,interlagos.car.vy)"
+    guest.evaluate('interlagosSala.dropLine(true)')
+    wait_js(host, f"interlagosSala.info().trail.some(t=>t.endsWith('saiu {guest_id}'))", timeout=10000)
+    host_view = host.evaluate("(()=>{const s=interlagosSala.info();return {stopped:s.stopped,car:s.cars.find(c=>c.number==='64')};})()")
+    assert any(x['number'] == '64' for x in host_view['stopped']), host_view
+    assert host_view['car']['name'] == PILOTS['guest'][0] and host_view['car']['remote'], ('her car, under her name, not a bot', host_view)
+    # The other guest hears where it stands; while it is on the road, the yellow flag.
+    wait_js(late, "interlagosSala.info().stopped.some(x=>x.number==='64')", timeout=10000)
+    # What the other guest's card says while the car stands (every 0.2 s for up to 8 s): the yellow
+    # flag as long as it is on the road.
+    seen_late, yellow = [], None
+    for _ in range(40):
+        v = late.evaluate("(()=>{const s=interlagosSala.info();return {stage:s.stopped.find(x=>x.number==='64')?.stage??null,yellow:s.yellow,pill:document.querySelector('#mpRoom').classList.contains('mp-yellow'),text:document.querySelector('#mpRoom .mp-status').textContent};})()")
+        if not seen_late or seen_late[-1] != v:
+            seen_late.append(v)
+        if v['pill'] and 'BANDEIRA AMARELA' in v['text'] and yellow is None:
+            yellow = v['text']
+            late.screenshot(path=str(SHOTS / '3_atrasado_bandeira.png'))
+        if v['stage'] in ('fora', None) and yellow is not None:
+            break
+        late.wait_for_timeout(200)
+    print('atrasado durante a parada:', json.dumps(seen_late, ensure_ascii=False), flush=True)
+    assert yellow or all(v['stage'] in ('fora', None) for v in seen_late), ('the yellow flag while it is on the road', seen_late)
+    # Her own window: the car rolls on with nobody at the wheel (no throttle: it only slows).
+    wait_js(guest, "interlagosSala.info().cut", timeout=15000)
+    before = guest.evaluate(speed)
+    guest.wait_for_timeout(2500)
+    after = guest.evaluate(speed)
+    assert after <= before + .5, ('nobody presses the throttle', before, after)
+    stages = set()
+    for _ in range(30):
+        stages.update(x['stage'] for x in host.evaluate("interlagosSala.info().stopped") if x['number'] == '64')
+        if 'reboque' in stages:
+            host.screenshot(path=str(SHOTS / '3_anfitriao_guincho.png'))
+            break
+        host.wait_for_timeout(400)
+    # Back: in her seat, her car taken from where the host has it, and shown where it is.
+    wait_js(host, f"interlagosSala.info().trail.some(t=>t.endsWith('voltou {guest_id}'))", timeout=40000)
+    wait_js(guest, f"(()=>{{const s=interlagosSala.info();return !s.problem&&!s.cut&&s.id==={guest_id!r}&&s.phase==='racing';}})()", timeout=15000)
+    # (only hers: another car may wait for its own pilot meanwhile, its states held up by a stalled
+    # server for more than 5 s, multiplayer.js checkSilence)
+    wait_js(host, "(()=>{const s=interlagosSala.info();return !s.stopped.some(x=>x.number==='64')&&s.cars.find(c=>c.number==='64').remote&&s.race.seats.some(x=>x.number==='64');})()", timeout=10000)
+    host.wait_for_timeout(1500)
+    shown = []
+    for _ in range(4):
+        first, view, second = guest.evaluate(PROBE), host.evaluate(PROBE), guest.evaluate(PROBE)
+        shown.append(gap(seen(view, '64'), first, second, view['t']))
+        host.wait_for_timeout(400)
+    assert statistics.median(shown) < 4, ('back from the drop, the host shows her car where it is', shown)
+    host.screenshot(path=str(SHOTS / '3_anfitriao_depois_da_queda.png'))
+    return {'yellow': yellow, 'stages': sorted(stages), 'coast': [round(before * 3.6), round(after * 3.6)], 'shownAfter': [round(v, 2) for v in shown]}
 
 
 def race_room(context, host, pages):
@@ -207,6 +272,8 @@ def race_room(context, host, pages):
     speed = pages['guest'].evaluate("Math.hypot(interlagos.car.vx,interlagos.car.vy)*3.6")
     for key, values in gaps.items():
         assert statistics.median(values) < 3 and max(values) < 8, (key, values)
+    if SERVER:
+        report_extra['queda'] = drop_line(host, guest, late)
 
     # The flag: the result waits for the other humans, then every sheet lists all three pilots.
     for page in pages.values():
@@ -241,11 +308,16 @@ def start_server():
     process = subprocess.Popen([node, str(root / 'node_modules/wrangler/bin/wrangler.js'), 'dev', '--ip', '127.0.0.1', '--port', '8787', '--show-interactive-dev-session=false'],
                                cwd=root, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, encoding='utf-8', errors='replace', env={**os.environ, 'WRANGLER_SEND_METRICS': 'false'})
     deadline = time.monotonic() + 90
+    log = open(SHOTS / 'wrangler.log', 'w', encoding='utf-8')
     for line in process.stdout:
+        log.write(line)
         if 'Ready on' in line:
             break
         if time.monotonic() > deadline:
             break
+    # Its output read to the end, into the shots folder: a pipe nobody reads fills up and stalls the
+    # server writing to it.
+    threading.Thread(target=lambda: [log.write(line) or log.flush() for line in process.stdout], daemon=True).start()
     return process
 
 
@@ -258,6 +330,8 @@ def stop_server(process):
 
 
 server = start_server() if SERVER else None
+# Stopped however the check ends (a failure before the race too: a wrangler left on 8787 serves the next run).
+atexit.register(stop_server, server)
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=browser_executable(), headless=True, args=browser_args())
     context = browser.new_context(viewport={'width': 800, 'height': 450})
@@ -296,6 +370,6 @@ with sync_playwright() as p:
 stop_server(server)
 
 report = {'room': ROOM, 'mode': 'servidor' if SERVER else 'local', 'fps': fps, 'guestSpeedKmh': round(speed), 'gaps': {k: {'median': round(statistics.median(v), 2), 'max': round(max(v), 2)} for k, v in gaps.items()},
-          'shots': str(SHOTS)}
+          **report_extra, 'shots': str(SHOTS)}
 print(json.dumps(report, indent=1, ensure_ascii=False))
 print('verificar_multiplayer: ok')

@@ -33,9 +33,10 @@ export function readCar(values){
  s.retired=s.finished>=1.5;s.finished=s.finished>=.5&&!s.retired;s.finishTime=s.finishTime<0?null:s.finishTime;s.best=s.best<0?null:s.best;return s;
 }
 export class RemoteCar {
- // car: where the remote car stands until its owner is first heard (a grid slot, at rest).
- constructor(car=null,{progress=0}={}){
-  this.state=car?readCar(packCar(car,{progress,still:true})):null;this.raw=null;this.age=0;this.seq=-1;this.err=[0,0,0,0];this.shown=null;
+ // car: where the remote car stands until its owner is first heard (a grid slot, at rest), its race
+ // distance and whether it is past the flag.
+ constructor(car=null,{progress=0,finished=false,finishTime=null}={}){
+  this.state=car?readCar(packCar(car,{progress,finished,finishTime,still:true})):null;this.raw=null;this.age=0;this.seq=-1;this.err=[0,0,0,0];this.shown=null;
  }
  // age: how old the state already is (s). Older or repeated messages (seq) are ignored.
  receive(state,{age=0,seq=0,raw=null}={}){

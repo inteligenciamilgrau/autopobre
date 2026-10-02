@@ -107,7 +107,7 @@ assert.equal(ace.stun,0,'contacts never stun the ace');
 // Rivals' levels (the race setting, race-roster.js AI_LEVELS). Fácil is the original field: the
 // default, every style as before (its seeded races match ai-record-references.js). Above it the
 // pace comes from the pilots' table: in each level the table's best (Koyzinho, 10) stay well ahead
-// of its weakest (Aluisio, 5), and each level is faster than the one below; Médio's best already
+// of its weakest (Aloísio, 5), and each level is faster than the one below; Médio's best already
 // beats Fácil's best reference lap, and at Impossível skill 10 is Koyzinho Indestrutível's pace.
 assert.deepEqual(AI_LEVELS,['facil','medio','alto','impossivel']);
 assert(RIVAL_ROSTER.every(e=>Number.isInteger(e.skill)&&e.skill>=1&&e.skill<=10&&Number.isInteger(e.errors)&&e.errors>=1&&e.errors<=10),'every driver has the pilots\' skill and mistake scores');
