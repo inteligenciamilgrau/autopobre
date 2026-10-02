@@ -84,7 +84,7 @@ export class Championship {
  get info(){return CHAMPIONSHIP_CALENDARS[this.calendar];}
  // The calendar on screen: each round's circuit with, in a real season, its place and dates.
  get schedule(){const own=this.info.rounds;return this.rounds.map((circuit,k)=>own[k]?.circuit===circuit?own[k]:{circuit});}
- // Every round on a circuit the game has (Brasília is still being built).
+ // Every round on a circuit the game has (a season's circuit not built yet holds the start).
  get available(){return this.rounds.every(id=>Object.hasOwn(CIRCUITS,id));}
  get nextCircuit(){return this.active?this.state.rounds[this.round]:null;}
  get laps(){return this.state?.laps??null;}
