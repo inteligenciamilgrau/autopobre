@@ -71,9 +71,11 @@ class Studio {
  turn(dx){this.yaw+=dx*.009;this.handUntil=this.time+2.5;}
 }
 // root: the #cars screen. value: the chosen car's number. onPick(number), onNext(), onBack().
+// In a multiplayer room (setRoom) the cars other pilots have show their names and cannot be taken.
 export class CarSelect {
  constructor({root,value,carRoot,onPick,onNext,onBack}){
   this.root=root;this.value=carEntry(value)?value:CAR_CHOICES[0].number;this.onPick=onPick;this.studio=new Studio(carRoot);this.studio.wanted=this.value;this.live=false;
+  this.room=null;this.taken=new Map();this.asked=null;this.tell('');
   const $=id=>root.querySelector('#'+id);this.stage=$('carStage');this.status=$('carStageStatus');
   this.cards=$('carCards');this.cards.replaceChildren(...CAR_CHOICES.map(entry=>{
    const b=document.createElement('button');b.type='button';b.dataset.car=entry.number;b.setAttribute('role','radio');
@@ -84,7 +86,11 @@ export class CarSelect {
   this.cards.addEventListener('keydown',e=>{
    if(e.key==='Enter'){e.preventDefault();onNext();return;}
    const keys={ArrowLeft:-1,ArrowRight:1,ArrowUp:-this.columns(),ArrowDown:this.columns()},step=keys[e.key];if(!step)return;e.preventDefault();
-   const i=CAR_CHOICES.findIndex(c=>c.number===this.value),next=CAR_CHOICES[Math.max(0,Math.min(CAR_CHOICES.length-1,i+step))];
+   // Past the cars other pilots have in a room; a step past the ends stops at the first or last free card.
+   const cur=CAR_CHOICES.findIndex(c=>c.number===this.value),last=CAR_CHOICES.length-1,free=i=>!this.taken.has(CAR_CHOICES[i].number);
+   let i=cur+step;while(i>=0&&i<=last&&!free(i))i+=step;
+   if(i<0||i>last){i=Math.max(0,Math.min(last,i));while(i!==cur&&!free(i))i-=Math.sign(step);}
+   if(i===cur)return;const next=CAR_CHOICES[i];
    this.pick(next.number);this.cards.querySelector(`[data-car="${next.number}"]`).focus();
   });
   $('carsNext').onclick=()=>onNext();$('carsBack').onclick=()=>onBack();
@@ -96,17 +102,41 @@ export class CarSelect {
   this.show();
  }
  columns(){return getComputedStyle(this.cards).gridTemplateColumns.split(' ').length||1;}
- pick(number){if(!carEntry(number))return;this.value=number;this.studio.wanted=number;this.show();this.onPick?.(number);}
+ pick(number){
+  if(!carEntry(number))return;
+  if(this.taken.has(number)){this.tell(`O #${number} está com ${this.taken.get(number)}. Escolha outro carro.`,number);this.show();return;}
+  this.tell('');this.value=number;this.studio.wanted=number;this.show();this.onPick?.(number);
+ }
+ // The room's note; one about a car someone else has goes when that car changes hands (setRoom).
+ tell(text,car=null){this.notice=text;this.noticeCar=car;this.noticeHolder=car&&this.taken.get(car);}
+ // A multiplayer room (multiplayer.js, through main.js): taken, the cars other pilots have (number ->
+ // name); mine, this window's car once the host has answered its last choice (the room's word wins:
+ // the car asked for may have gone to someone else first); asking, the car still being asked for.
+ setRoom({taken,mine,asking}){
+  this.room??=this.root.querySelector('.car-note');this.taken=taken;
+  if(this.noticeCar&&taken.get(this.noticeCar)!==this.noticeHolder)this.tell('');
+  if(this.asked&&!asking&&mine&&mine!==this.asked)this.tell(`O #${this.asked} já estava com outro piloto: você segue no #${mine}.`,this.asked);
+  this.asked=asking;
+  if(mine&&mine!==this.value){this.value=mine;this.studio.wanted=mine;}
+  this.show();
+ }
  // The model arrived (main.js loads it for the screen): the studio can build the car.
  setTemplate(template){const s=this.studio;s.drop();s.template=template;s.number=null;this.show();}
  failed(){this.status.textContent='Não foi possível carregar o Opala. A escolha vale mesmo assim.';this.status.hidden=false;}
  show(){
   const entry=carEntry(this.value),$=id=>this.root.querySelector('#'+id),own=entry.number==='99';
-  for(const b of this.cards.children){const on=b.dataset.car===entry.number;b.setAttribute('aria-checked',String(on));b.tabIndex=on?0:-1;}
+  for(const b of this.cards.children){
+   const on=b.dataset.car===entry.number,holder=this.taken.get(b.dataset.car),label=b.querySelector('span');b.setAttribute('aria-checked',String(on));b.tabIndex=on?0:-1;
+   b.classList.toggle('taken',!!holder);b.setAttribute('aria-disabled',String(!!holder));label.textContent=holder??carEntry(b.dataset.car).shortName;
+   b.title=holder?`#${b.dataset.car} · com ${holder}`:`#${b.dataset.car} · ${carEntry(b.dataset.car).name}`;
+  }
   $('carNumber').textContent='#'+entry.number;$('carNumber').style.setProperty('--body',css(entry.color));$('carNumber').style.setProperty('--stripe',css(entry.stripe));
   $('carName').textContent=own?'Opala 99 · Auto-Pobre Racing':`Opala ${entry.number} · ${entry.shortName}`;
   $('carDetail').textContent=own?`O carro do Stevan Gaipo e do Edu Neves, da vaquinha ao grid. ${entry.rank}º no campeonato (${entry.points} pts).`
-   :`Carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele; o Stevan Gaipo vai de Opala 99.`;
+   :`Carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele${this.room?'':'; o Stevan Gaipo vai de Opala 99'}.`;
+  // In a room the note says how the cars are shared, and what became of the last choice.
+  if(this.room)this.room.textContent=this.notice||(this.asked?`Pedindo o #${this.asked} ao anfitrião… Vale a partir da próxima largada.`:
+   'Na sala, cada piloto corre com o carro que escolher, se ninguém estiver com ele; os outros carros correm com a IA. O anfitrião larga em último.');
   this.status.hidden=!!this.studio.template;if(!this.studio.template)this.status.textContent='Carregando o Opala…';
  }
  // Every frame while the screen shows (main.js): the studio on the page's canvas.
@@ -115,5 +145,5 @@ export class CarSelect {
   if(!live)return;
   const rect=this.stage.getBoundingClientRect();this.studio.render(renderer,Math.min(dt,.05),rect);
  }
- info(){return {value:this.value,live:this.live,built:this.studio.number,yaw:this.studio.yaw,meshes:(()=>{let n=0;this.studio.car?.traverse(o=>{if(o.isMesh&&o.visible)n++;});return n;})()};}
+ info(){return {value:this.value,live:this.live,taken:Object.fromEntries(this.taken),asked:this.asked,built:this.studio.number,yaw:this.studio.yaw,meshes:(()=>{let n=0;this.studio.car?.traverse(o=>{if(o.isMesh&&o.visible)n++;});return n;})()};}
 }

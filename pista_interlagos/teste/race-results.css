@@ -21,3 +21,6 @@
 
 /* Keep the driver-type icons readable without enlarging the compact top ten. */
 #recordsSource button:not([data-records-source="all"]){font-size:16px;line-height:1}.record-source-badge{font-size:12px}
+
+/* A car still on the track at the flag: its estimated time, set apart from the real ones. */
+.results-table tbody td.results-estimated{font-style:italic;color:#5a6b78}

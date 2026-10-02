@@ -2,7 +2,8 @@
 // prediction under network delay, and RaceField's remote and ghost cars.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {Room,roomParams,roomName,playerName,validMessage,SEATS,HOST_NUMBER} from '../teste/net-room.js';
+import {Room,roomParams,roomName,playerName,validMessage,SEATS} from '../teste/net-room.js';
+import {fieldRoster} from '../teste/race-roster.js';
 import {RemoteCar,packCar,readCar,CAR_FIELDS} from '../teste/net-cars.js';
 import {RaceField} from '../teste/race-field.js';
 import {AutomaticAIRecords,readAIRecords} from '../teste/ai-records.js';
@@ -20,13 +21,13 @@ const report={};
  assert.equal(roomParams('#sala=a&fantasmas=1').ghosts,true,'humans pass through each other only when asked');
  assert.equal(roomParams('#carro=73'),null,'no room without sala');
  assert.equal(roomParams('#sala=%20%20'),null);
- assert.equal(roomParams('#sala=a&carro=99').car,null,'the 99 is always the host');
+ assert.equal(roomParams('#sala=a&carro=99').car,'99','a guest may ask for the 99 too');
  assert.equal(roomParams('#sala=a&carro=1234').car,null);
  assert.equal(roomParams('#sala=a&lag=-50').lag,0);assert.equal(roomParams('#sala=a&lag=1e9').lag,1000);assert.equal(roomParams('#sala=a&perda=90').loss,.5);
  assert.equal(roomName('x'.repeat(40)).length,24);
  assert.equal(playerName('  Bia‮​ <b>oi</b>\n\t  '),'Bia <b>oi</b>','control and format characters go, text stays text');
  assert.equal(playerName('a'.repeat(80)).length,24);
- assert.equal(SEATS.length,15);assert.equal(SEATS[0],HOST_NUMBER);
+ assert.equal(SEATS.length,15);assert.equal(SEATS[0],'99');
 }
 
 // --- A car on the wire: packed, read back, anything malformed refused.
@@ -72,14 +73,14 @@ const report={};
  const events=[],A=new Room({room:name,name:'Ana',clock}),B=new Room({room:name,name:'Bia‮',want:'19',clock});
  A.on('race',()=>events.push('A race'));B.on('race',race=>{events.push('B race '+race.circuit);return true;}).on('go',race=>events.push('B go '+race.seats.length));
  A.on('state',(id,m)=>events.push(`A state ${id===B.id} ${m.seq}`)).on('leave',p=>events.push('A leave '+p.number));B.on('snap',m=>events.push(`B snap ${m.cars.length}`));
- A.start();await wait();advance([A],1);assert.equal(A.role,'host','alone in the room: hosts it');assert.equal(A.number,HOST_NUMBER);
+ A.start();await wait();advance([A],1);assert.equal(A.role,'host','alone in the room: hosts it');assert.equal(A.number,'99','asking for no car: the 99');
  B.start();await wait();await wait();
  assert.equal(B.role,'guest');assert.equal(B.hostId,A.id);assert.equal(B.number,'19','the car asked for');assert.equal(B.name,'Bia');
  assert.deepEqual(A.members.map(m=>m.number),['99','19']);
  const race=A.planRace({circuit:'interlagos',laps:2,ace:true,level:'medio'});
- assert.deepEqual(race.seats.map(s=>s.number),['99','19']);assert(Number.isInteger(race.seed));
+ assert.deepEqual(race.seats.map(s=>s.number),['99','19']);assert(Number.isInteger(race.seed));assert.equal(race.car,'99',"the host's car starts at the back");
  A.openRace(race);await wait();
- assert.equal(race.state,'waiting','the start waits for the guest');assert.deepEqual(events,['B race interlagos']);assert.equal(B.race.id,race.id);assert.equal(B.race.level,'medio');
+ assert.equal(race.state,'waiting','the start waits for the guest');assert.deepEqual(events,['B race interlagos']);assert.equal(B.race.id,race.id);assert.equal(B.race.level,'medio');assert.equal(B.race.car,'99');
  B.sendReady();await wait();await wait();
  assert.equal(race.state,'waiting','ready is not the start: the host gives it');assert(A.ready.has(B.id));
  // A third window arrives while the start waits: it is seated and gets the race too.
@@ -93,7 +94,7 @@ const report={};
  assert.equal(race.state,'racing');assert(events.includes('B go 2'));assert.deepEqual(race.seats.map(s=>s.number),['99','19']);
  assert.deepEqual(late,['race '+race.id,'go 2'],'Caio hears the start without a seat in it');
  const car=new TestCar(data);car.reset(10);
- B.sendState(packCar(car),1);A.sendSnapshot([[HOST_NUMBER,0,packCar(car)],['19',.05,packCar(car)]],1);await wait();
+ B.sendState(packCar(car),1);A.sendSnapshot([['99',0,packCar(car)],['19',.05,packCar(car)]],1);await wait();
  assert(events.includes('A state true 1')&&events.includes('B snap 2'));
  // A forged or broken message changes nothing and reaches no one.
  const raw=new BroadcastChannel('autopobre-sala-'+name),before=events.length;
@@ -109,6 +110,9 @@ const report={};
  for(let i=0;i<400;i++)raw.postMessage({t:'state',from:B.id,race:race.id,seq:100+i,lat:0,car:valid});
  await wait(60);assert(seen>0&&seen<=240,`rate limit: ${seen}`);raw.close();
  assert.equal(validMessage({t:'hello',from:A.id,name:'x',want:'42'}),true);assert.equal(validMessage({t:'hello',from:A.id,name:'x',want:'999'}),false);
+ assert.equal(validMessage({t:'hello',from:A.id,name:'x',want:'42',pick:7}),true);assert.equal(validMessage({t:'hello',from:A.id,name:'x',want:'42',pick:-1}),false);assert.equal(validMessage({t:'hello',from:A.id,name:'x',want:'42',pick:'7'}),false);
+ const lobby=r=>({t:'lobby',from:A.id,name:'x',age:1,players:[],race:r});
+ assert.equal(validMessage(lobby({...A.race,seats:[]})),true);assert.equal(validMessage(lobby({...A.race,seats:[],car:'999'})),false,"the host's car must be one of the grid");assert.equal(validMessage(lobby({...A.race,seats:[],car:undefined})),false);
  // A frozen host (a track loading) holds nobody's silence against them...
  now=3.5;A.tick();assert.equal(A.members.length,3,'a freeze is not silence');
  // ...but a guest silent for longer than 3 s is let go (its car becomes a bot in the game).
@@ -118,6 +122,71 @@ const report={};
  A.leave();C.leave();await wait();B.tick();assert(B.hostAway&&B.role==='guest','host gone: the guest waits for it first');
  const heard=B.hostSeen;advance([B],heard+10.5);assert.equal(B.role,null,'10 s after the goodbye: a new election');advance([B],heard+11.5);assert.equal(B.role,'host','nobody came back: the guest hosts');B.leave();
  report.room=events.slice(0,6);
+}
+// The car screen in a room: the host races the car it chose (its race's car, at the back); a guest
+// gets the car it asks for when nobody has it, otherwise the first free one; a new choice is granted
+// at once, refused for a car already taken, and waits while that guest races; F5 keeps every car.
+{
+ let now=0;const clock=()=>now,name='carros-'+Math.random().toString(36).slice(2,8),advance=(rooms,to)=>{while(now<to-1e-9){now=Math.min(to,now+.1);for(const r of rooms)r.tick();}};
+ const settle=async(rooms,n=3)=>{for(let i=0;i<n;i++){await wait();advance(rooms,now+.2);}};
+ const tab=()=>{const store=new Map();return {getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v))};},hostTab=tab(),guestTab=tab();
+ const A=new Room({room:name,name:'Ana',want:'73',clock,storage:hostTab}),B=new Room({room:name,name:'Bia',want:'73',clock,storage:guestTab}),C=new Room({room:name,name:'Caio',want:'99',clock});
+ B.on('race',()=>true);C.on('race',()=>true);
+ A.start();advance([A],1);assert.equal(A.number,'73','the host races its choice');
+ B.start();await settle([A,B]);C.start();await settle([A,B,C],4);
+ assert.equal(B.number,'99',"the 73 is the host's: the first free car");assert.equal(C.number,'00','the 99 went to Bia first: the next free one');
+ assert(B.settled&&C.settled);assert.equal(B.hostNumber,'73');
+ // A choice on the car screen: free, granted; taken, refused (the guest keeps its car).
+ C.choose('99');assert.equal(C.settled,false);await settle([A,B,C]);
+ assert(C.settled,'the host answered');assert.equal(C.number,'00',"the 99 is Bia's");
+ B.choose('19');await settle([A,B,C]);
+ assert(B.settled);assert.equal(B.number,'19');
+ C.choose('99');await settle([A,B,C]);
+ assert.equal(C.number,'99','the 99 is free now');
+ // The host's own choice is its at once, if free; its race's car is the one at the back.
+ A.choose('19');assert.equal(A.number,'73',"the 19 is Bia's");A.choose('7');assert.equal(A.number,'7');
+ await settle([A,B,C]);
+ assert.equal(B.hostNumber,'7');assert.deepEqual(A.members.map(m=>m.number).sort(),['19','7','99']);
+ const race=A.planRace({circuit:'interlagos',laps:1});assert.equal(race.car,'7');A.openRace(race);
+ await settle([A,B,C]);
+ assert.equal(B.race.car,'7');
+ // Every window builds the same field: the host's car out of it, the 99 in its seat (a human here).
+ const roster=fieldRoster(B.race.car);assert.equal(roster.findIndex(e=>e.number==='99'),fieldRoster().findIndex(e=>e.number==='7'));
+ assert(roster.some(e=>e.number==='19')&&!roster.some(e=>e.number==='7'));
+ // While the start waits a guest may still change car: its seat in the race follows.
+ let seats=0;A.on('seats',()=>seats++);
+ B.choose('64');await settle([A,B,C]);
+ assert.equal(B.number,'64');assert.equal(race.seats.find(s=>s.id===B.id).number,'64');assert(seats>0,'the host re-seats the humans');
+ // Racing: a new choice waits until that race ends; the host's car too.
+ B.sendReady();C.sendReady();await settle([A,B,C],2);A.lightsOut();await settle([A,B,C],2);
+ assert.equal(race.state,'racing');assert.equal(race.seats.length,3);
+ B.choose('2');A.choose('42');await settle([A,B,C]);
+ assert.equal(B.number,'64','racing: the car stays');assert.equal(B.settled,false,'the answer waits');assert.equal(race.seats.find(s=>s.id===B.id).number,'64');
+ assert.equal(A.number,'7');
+ A.closeRace();await settle([A,B,C]);
+ assert.equal(B.number,'2','granted once the race is over');assert(B.settled);assert.equal(A.number,'42');
+ // F5 on the host and on a guest: both keep their cars.
+ A.leave();await wait();const A2=new Room({room:name,name:'Ana',want:'73',clock,storage:hostTab});A2.start();
+ await settle([A2,B,C],8);
+ assert.equal(A2.number,'42','the host back from F5 keeps its car');assert.equal(B.number,'2');assert.equal(C.number,'99');
+ B.leave();await wait();const B2=new Room({room:name,name:'Bia',want:'73',clock,storage:guestTab});B2.start();
+ await settle([A2,B2,C],8);
+ assert.equal(B2.number,'2','a guest back from F5 keeps its car, not its old choice');assert(B2.settled);
+ // F5 in the middle of a race, the tab gone without a word: its choice still waits at the host, and
+ // the tab back has nothing to wait for (pick 0 is no new choice).
+ const race2=A2.planRace({circuit:'interlagos',laps:1});A2.openRace(race2);await settle([A2,B2,C]);B2.sendReady();C.sendReady();await settle([A2,B2,C],2);A2.lightsOut();await settle([A2,B2,C],2);
+ B2.choose('51');await settle([A2,B2,C]);assert.equal(B2.settled,false,'racing: the answer waits');
+ B2.channel.close();const B3=new Room({room:name,name:'Bia',want:'73',clock,storage:guestTab});B3.on('race',()=>true);B3.start();
+ await settle([A2,B3,C],4);
+ assert.equal(B3.number,'2','back from F5 mid-race: the same car');assert(B3.settled,'nothing asked since the reload');
+ A2.closeRace();await settle([A2,B3,C]);assert.equal(B3.number,'51','the choice made before F5 is granted after the race');
+ // A guest's choice still waiting when its host leaves: the guest hosts the room in the car it asked for.
+ const race3=A2.planRace({circuit:'interlagos',laps:1});A2.openRace(race3);await settle([A2,B3,C]);B3.sendReady();C.sendReady();await settle([A2,B3,C],2);A2.lightsOut();await settle([A2,B3,C],2);
+ B3.choose('88');await settle([A2,B3,C]);assert.equal(B3.number,'51');assert.equal(B3.settled,false);
+ C.leave();A2.leave();await wait();B3.tick();const left=now;advance([B3],left+12);
+ assert.equal(B3.role,'host','the guest hosts');assert.equal(B3.number,'88','in the car it had asked for');assert(B3.settled);
+ B3.leave();
+ report.cars={host:A2.number,guests:[B2.number,C.number],reloaded:B3.number};
 }
 // Two windows opened at once: both host for a moment, then the smaller id keeps the room.
 {
@@ -142,7 +211,7 @@ for(let trial=0;trial<6;trial++){
  let now=0;const clock=()=>now,name='nomes-'+Math.random().toString(36).slice(2,8),H=new Room({room:name,name:'H',clock}),G=new Room({room:name,name:'G',clock});
  G.on('race',()=>true);H.start();now=1;H.tick();G.start();await wait();await wait();assert.equal(G.role,'guest');
  const raw=new BroadcastChannel('autopobre-sala-'+name),dirty='A​na‮ ',seats=[{id:H.id,name:dirty,number:'99'},{id:G.id,name:'G⁦',number:'73'}];
- raw.postMessage({t:'lobby',from:H.id,name:'Ho‮st',age:9,players:seats,race:{id:'0000abcd',circuit:'interlagos',laps:1,seed:1,ace:false,retirements:true,ghosts:false,level:null,seats,state:'waiting'}});
+ raw.postMessage({t:'lobby',from:H.id,name:'Ho‮st',age:9,players:seats,race:{id:'0000abcd',circuit:'interlagos',laps:1,seed:1,car:'99',ace:false,retirements:true,ghosts:false,level:null,seats,state:'waiting'}});
  await wait(30);
  assert.equal(G.lobby.name,'Host');assert.deepEqual(G.lobby.players.map(p=>p.name),['Ana','G']);assert.deepEqual(G.race.seats.map(s=>s.name),['Ana','G']);
  raw.postMessage({t:'go',from:H.id,race:'0000abcd',seats});await wait(30);assert.deepEqual(G.race.seats.map(s=>s.name),['Ana','G']);

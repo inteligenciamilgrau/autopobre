@@ -1,16 +1,18 @@
 import * as THREE from 'three';
 import {CIRCUITS,circuitId} from './circuits.js';
 import {RIVAL_ROSTER,GRID_SIZE} from './race-roster.js';
-import {RaceField} from './race-field.js';
+import {RaceField,lapTravel} from './race-field.js';
 import {recognitionInput} from './physics.js';
 import {CrashParts} from './crash-parts.js';
 import {ImmersiveState,FANS,JOKES,BLAZER_COST,COSTS,START,startCost} from './immersive-state.js';
 import {SWITCH_TILT} from './cockpit-instruments.js';
 import {ImmersiveVisuals,trackPoint} from './immersive-visuals.js';
 import {footGround} from './on-foot.js';
+import {CAFE_MENU,snackState,giveSnack,buySnack,useSnack,stepSnack,snackArms,snackHead,snackHands,showSnacks,snackLabel,snackVerb} from './pitstop.js';
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
 const idle={throttle:0,brake:1,left:0,right:0,handbrake:0,reverse:0},still={throttle:0,brake:0,left:0,right:0};
 const touchScreen=()=>document.body.classList.contains('touch-device');
+const capital=text=>text[0].toUpperCase()+text.slice(1);
 // What the action key does by the Opala in the paddock (car-openings.js carSpot); open: already open.
 const CAR_ACTIONS=Object.freeze({capo:open=>open?'Fechar o capô':'Abrir o capô · ver o motor',porta_malas:open=>open?'Fechar o porta-malas':'Abrir o porta-malas',porta:()=>'Entrar no Opala 99'});
 const money=n=>`R$ ${n.toFixed(2).replace('.',',')}`;
@@ -38,7 +40,10 @@ export class ImmersiveMode {
   this.onPickFan=e=>this.pickFan(e);document.getElementById('view').addEventListener('pointerdown',this.onPickFan);
   // On foot in the paddock, as in a third-person game: the mouse is captured (no cursor)
   // from the first key or click and turns the camera; the wheel zooms, Shift runs.
-  Object.assign(this.visual,{layout,obstacles,groundAt:(x,y)=>car.sample(x,y).z-.055});this.visual.addDesk(layout?.desk);
+  Object.assign(this.visual,{layout,obstacles,groundAt:(x,y)=>car.sample(x,y).z-.055});this.visual.addDesk(layout?.desk);this.visual.addCafe(layout);
+  // The Tia's café is open before the race too, as during a pit stop (pitstop.js): what is bought,
+  // and Leonardo's coffee, goes into the pilot's hands.
+  this.cafe=snackState();this.snackHands=snackHands(this.visual.hero);
   this.walkGround=footGround({car,pit:layout?.pit??null,layout,blocked:pos=>this.visual.blocked(pos)});
   const view=document.getElementById('view');
   this.onFootMouse=e=>{if(this.onFoot()&&document.pointerLockElement===view)this.visual.turnView(e.movementX,e.movementY);};
@@ -70,15 +75,17 @@ export class ImmersiveMode {
   // click takes the mouse for the camera (after this one is handled).
   const view=event.currentTarget,locked=document.pointerLockElement===view,rect=view.getBoundingClientRect(),pointer=locked?new THREE.Vector2():new THREE.Vector2((event.clientX-rect.left)/rect.width*2-1,1-(event.clientY-rect.top)/rect.height*2),ray=new THREE.Raycaster();ray.setFromCamera(pointer,this.camera);
   if(event.pointerType==='mouse'){this.mouseFree=false;queueMicrotask(()=>this.captureMouse());}
-  if(this.inCar||this.state.desk||this.state.leo)return;
-  const marker=this.visual.deskMarker?.marker.visible?this.visual.deskMarker:null;
-  const leo=this.visual.leo,hit=ray.intersectObjects([...this.visual.fans.flatMap(f=>[f.person,f.label,...(f.dollar.visible?[f.dollar]:[])]),...(marker?[marker.marker,marker.sign]:[]),...(leo?[leo.person,leo.label]:[])],true)[0];if(!hit)return;
+  if(this.inCar||this.state.desk||this.state.leo||this.state.cafe)return;
+  const marker=this.visual.deskMarker?.marker.visible?this.visual.deskMarker:null,cafeSign=this.visual.cafe?.sign.visible?this.visual.cafe.sign:null;
+  const leo=this.visual.leo,hit=ray.intersectObjects([...this.visual.fans.flatMap(f=>[f.person,f.label,...(f.dollar.visible?[f.dollar]:[])]),...(marker?[marker.marker,marker.sign]:[]),...(leo?[leo.person,leo.label]:[]),...(cafeSign?[cafeSign]:[])],true)[0];if(!hit)return;
   // Leonardo: the pilot walks up to him, and he asks (again) once there.
-  if(leo&&(hit.object===leo.label||hit.object===leo.person||hit.object.parent===leo.person)){this.state.fan=null;this.state.feedback='';this.walkToFan=this.walkToDesk=null;if(this.visual.nearLeo(2.4))this.action('leo');else this.walkToLeo=this.visual.leoRoute();this.ui();return;}
+  if(leo&&(hit.object===leo.label||hit.object===leo.person||hit.object.parent===leo.person)){this.state.fan=null;this.state.feedback='';this.walkToFan=this.walkToDesk=this.walkToCafe=null;if(this.visual.nearLeo(2.4))this.action('leo');else this.walkToLeo=this.visual.leoRoute();this.ui();return;}
   // The registration circle or its sign: he walks there by the steps.
-  if(marker&&(hit.object===marker.sign||hit.object.parent===marker.marker)){this.state.fan=null;this.state.feedback='';this.walkToFan=null;this.walkToLeo=false;this.walkToDesk=this.visual.deskRoute();this.state.touch();this.ui();return;}
+  if(marker&&(hit.object===marker.sign||hit.object.parent===marker.marker)){this.state.fan=null;this.state.feedback='';this.walkToFan=this.walkToCafe=null;this.walkToLeo=false;this.walkToDesk=this.visual.deskRoute();this.state.touch();this.ui();return;}
+  // The café's sign: through Box 99 to the Tia's counter, where her menu opens.
+  if(cafeSign&&hit.object===cafeSign){this.state.fan=null;this.state.feedback='';this.walkToFan=this.walkToDesk=null;this.walkToLeo=false;if(this.visual.nearCafe(2.4))this.action('cafe');else this.walkToCafe=this.visual.cafeRoute();this.state.touch();this.ui();return;}
   const index=this.visual.fans.findIndex(f=>{let obj=hit.object;while(obj){if(obj===f.person||obj===f.label||obj===f.dollar)return true;obj=obj.parent;}return false;});if(index<0)return;
-  this.state.fan=null;this.state.feedback='';this.state.touch();this.walkToFan=index;this.walkToDesk=null;this.walkToLeo=false;this.fanRoute=this.visual.routeTo(this.visual.fans[index].pos,{direct:true});
+  this.state.fan=null;this.state.feedback='';this.state.touch();this.walkToFan=index;this.walkToDesk=this.walkToCafe=null;this.walkToLeo=false;this.fanRoute=this.visual.routeTo(this.visual.fans[index].pos,{direct:true});
   if(this.visual.hero.position.distanceTo(this.visual.fans[index].pos)<2.6){this.state.talk(index);this.walkToFan=null;}
   this.ui();
  }
@@ -90,7 +97,8 @@ export class ImmersiveMode {
  beginFinish(position){
   if(this.finishing)return;
   this.finishElapsed=0;this.finishTime=this.car.clock;this.finishPosition=position;this.finishBest=this.car.best;
-  this.freeOrder=[...this.rivals].sort((a,b)=>(a.finishTime??Infinity)-(b.finishTime??Infinity)||!!a.retired-!!b.retired||b.progress-a.progress).map(r=>({...r.entry,bestLap:r.car.best,totalTime:r.finished?r.finishTime:null,finished:r.finished,laps:r.car.laps,...(r.retired?{dnf:true,breakdown:r.broken?.kind}:{})}));
+  // The order at the line; whoever is still racing gets an estimated time to the flag.
+  this.freeOrder=this.field.classification(this.active?this.storyLaps:this.freeTotalLaps,this.finishTime);
   this.projectile=null;this.state.emitSound('finish');
  }
  stepFinish(input,dt){
@@ -117,7 +125,7 @@ export class ImmersiveMode {
  enterCar(){
   const pose=this.visual.ownPose();if(!pose||this.inCar)return false;
   const c=this.car;c.x=pose.x;c.y=pose.y;c.heading=pose.heading;c.vx=c.vy=c.yaw=0;c.surface=c.sample(c.x,c.y);c.index=c.surface.i;c.settle?.();
-  this.inCar=this.visual.inCar=true;this.walkToFan=this.walkToDesk=null;this.walkToLeo=false;this.viewBefore=this.getView?.()??'chase';this.visual.restoreCamera();this.setView?.('cockpit');this.state.emitSound('click');return true;
+  this.inCar=this.visual.inCar=true;this.walkToFan=this.walkToDesk=this.walkToCafe=null;this.walkToLeo=false;this.viewBefore=this.getView?.()??'chase';this.visual.restoreCamera();this.setView?.('cockpit');this.state.emitSound('click');return true;
  }
  // The paddock hint by the Opala: what E does where the pilot stands.
  carHint(){
@@ -130,8 +138,36 @@ export class ImmersiveMode {
   const s=this.state,name=escapeHtml(this.pilotName||'Stevan'),line={ask:`E aí, ${name}! Aceita um café? A Tia acabou de passar um fresquinho.`,yes:'Toma aí, puro e quentinho. Boa corrida — e cuidado comigo na freada do S do Senna!',no:'Beleza, fica pra próxima. Boa corrida!',chat:'E o café, tava bom? Agora é acelerar!'}[s.leo];
   const head=`<div class="social-person"><span class="social-avatar">19</span><div><span>CONVERSANDO COM</span><h2>Leonardo Martins · #19</h2></div><b>◆</b></div><div class="speech-bubble fan-speech" role="status">“${line}”</div>`;
   if(s.leo!=='ask')return head+this.button('leo:close','Valeu! Boa corrida (E)',true);
-  return head+`<div class="social-prompt">Sua resposta</div><div class="social-choices">${[['yes','Aceito! Valeu, Leo','Um cafezinho antes da largada cai bem.'],['no','Agora não, obrigado','Fica pra depois da corrida.']].map(([answer,text,more],i)=>`<button type="button" data-action="leo:${answer}" class="speech-choice"><span>${i+1}</span><div><b>${text}</b><small>${more}</small></div></button>`).join('')}</div>`;
+  // The cup goes into a free hand: with both busy (the Tia's snacks) it has to wait.
+  const full=this.cafe.held.length>=2;
+  return head+`<div class="social-prompt">Sua resposta</div><div class="social-choices">${[['yes','Aceito! Valeu, Leo',full?'As duas mãos estão ocupadas: coma ou beba primeiro.':'Um cafezinho antes da largada cai bem.'],['no','Agora não, obrigado','Fica pra depois da corrida.']].map(([answer,text,more],i)=>`<button type="button" data-action="leo:${answer}" class="speech-choice" ${answer==='yes'&&full?'disabled':''}><span>${i+1}</span><div><b>${text}</b><small>${more}</small></div></button>`).join('')}</div>`;
  }
+ // The Tia's menu at her counter, as at the pit stop: 1, 2, 3 or a click buys into a free hand, paid
+ // from the kitty first, then from the savings (state.pay), never with the registration's money; E
+ // goes back to the paddock. It stands where the team's panel does, clear of the pilot and the Tia
+ // (visual.faceCafe).
+ cafePanel(){
+  const s=this.state,c=this.cafe,wallet=s.spareCash()+s.profile.fund,kept=s.cash+s.profile.fund,full=c.held.length>=2,line=c.feedback||'Uma prosa é de graça. O cafezinho e os quitutes são por sua conta, uai!';
+  return `<div class="social-person"><span class="social-avatar">☕</span><div><span>LANCHONETE DA TIA</span><h2>Cardápio da Tia</h2></div><b>◆</b></div><div class="speech-bubble fan-speech" role="status">“${line}”</div>`
+   +`<div class="social-prompt">Na vaquinha: ${money(s.cash)}${s.profile.fund>0?` · guardado: ${money(s.profile.fund)}`:''}${c.held.length?` · na mão: ${snackLabel(c)}`:''}</div>`
+   +`<div class="social-choices">${CAFE_MENU.map((item,i)=>`<button type="button" data-action="snack:${item.id}" class="speech-choice" ${full||item.price>wallet?'disabled':''}><span>${i+1}</span><div><b>${item.name} · ${money(item.price)}</b><small>${item.bites} ${item.portion}s · ${full?'as duas mãos estão ocupadas':item.price>wallet?(item.price>kept?'não cabe na vaquinha':'o resto é da inscrição'):'sai da vaquinha'}</small></div></button>`).join('')}</div>`
+   +this.button('closeCafe','Continuar o passeio (E)');
+ }
+ // What E does on foot in the paddock, GTA style: the team stand's registration, the Opala's hood,
+ // trunk lid or door, Leonardo or the nearest supporter where they are; elsewhere it eats or drinks
+ // what is in hand, as during a pit stop, and at the Tia's counter with empty hands opens her menu.
+ actionKey(){const v=this.visual;return v.nearDesk()?'desk':v.carAction()?'car':v.nearLeo()?'leo':this.near>=0?'talk':this.cafe.held.length?'eat':v.nearCafe()?'cafe':'talk';}
+ // The café's line on the HUD: at the counter, the menu; with something in hand, eating it.
+ cafeHint(){const key=this.actionKey();if(key==='cafe')return touchScreen()?'Lanchonete da Tia: toque em Ver cardápio da Tia':'E: cardápio da Tia';return key==='eat'&&!touchScreen()?`E: ${snackVerb(this.cafe)}`:'';}
+ // The paddock panel's café part, under the kitty: what is in hand with its button, and the menu at the counter.
+ cafeButtons(){
+  const c=this.cafe,key=this.actionKey(),e=k=>touchScreen()||key!==k?'':' (E)';let html='';
+  if(c.held.length)html+=`<p class="imm-desk-hint"><b>Na mão:</b> ${snackLabel(c)}</p>`+this.button('eat',capital(snackVerb(c))+e('eat'),false,!!c.using);
+  if(this.visual.nearCafe()&&c.held.length<2)html+=this.button('cafe','Ver cardápio da Tia'+e('cafe'),true);
+  return html;
+ }
+ // The Tia greets and serves the pilot walking the paddock (PitStop.update hands this to her).
+ cafeGuest(){return this.onFoot()?{hero:this.visual.hero.getWorldPosition(new THREE.Vector3()),snack:this.cafe.snackTime}:null;}
  // Guidance to the registration: the action key by the team stand, else the way there once the kitty is enough.
  deskHint(){
   if(!this.visual.desk)return '';if(this.visual.nearDesk())return touchScreen()?'Entre no círculo amarelo para falar com a equipe 99':'E: falar com a equipe 99 · inscrição';
@@ -222,7 +258,7 @@ export class ImmersiveMode {
  // during a conversation, whose jokes are clicked, nor after Tab freed it.
  captureMouse(){
   const view=document.getElementById('view');
-  const walking=this.state.phase==='crowd'&&this.state.fan===null&&!this.state.desk&&!this.state.leo,podium=this.state.phase==='podium'&&this.podiumCamera;
+  const walking=this.state.phase==='crowd'&&this.state.fan===null&&!this.state.desk&&!this.state.leo&&!this.state.cafe,podium=this.state.phase==='podium'&&this.podiumCamera;
   if(!this.active||!(walking||podium)||this.mouseFree||touchScreen()||!view?.requestPointerLock||document.pointerLockElement===view||navigator.userActivation?.isActive===false)return;
   this.footLock=true;this.lockFor=this.state.phase;try{view.requestPointerLock()?.catch?.(()=>{this.footLock=false;});}catch{this.footLock=false;}
  }
@@ -230,7 +266,7 @@ export class ImmersiveMode {
  // laps (the player's setting, main.js) is taken at each start: storyLaps for the story,
  // freeTotalLaps (resetField) for the free race. The story's tank still buys what one lap
  // burnt (state.fuelScale), the free race's 12 L still last the race.
- start(){this.freeCountdown=0;this.goTime=0;this.car.condition?.reset();this.finishElapsed=null;this.finishTime=null;this.freeOrder=null;this.recordAssisted=false;this.resetVehicle();this.inCar=this.visual.inCar=false;this.storyLaps=this.laps;this.state.start();this.state.fuelScale=1/this.storyLaps;this.visual.reset();this.near=-1;this.walkToFan=this.walkToDesk=null;this.walkToLeo=false;this.leoAsked=false;this.deskInside=false;this.projectile=null;this.raceProgress=0;this.previousS=this.car.surface.s;this.field.reset(this.car.surface.s,{grid:true});this.parts.reset();this.rivals=this.field.rivals;this.debrisTimer=6;this.contactCooldown=0;this.sync();}
+ start(){this.freeCountdown=0;this.goTime=0;this.car.condition?.reset();this.finishElapsed=null;this.finishTime=null;this.freeOrder=null;this.recordAssisted=false;this.resetVehicle();this.inCar=this.visual.inCar=false;this.storyLaps=this.laps;this.state.start();this.state.fuelScale=1/this.storyLaps;this.visual.reset();this.near=-1;this.walkToFan=this.walkToDesk=this.walkToCafe=null;this.walkToLeo=false;this.cafe=snackState();this.leoAsked=false;this.deskInside=false;this.projectile=null;this.raceProgress=0;this.previousS=this.car.surface.s;this.field.reset(this.car.surface.s,{grid:true});this.parts.reset();this.rivals=this.field.rivals;this.debrisTimer=6;this.contactCooldown=0;this.sync();}
  disable(){if(this.lastPhase==='starting'){this.restoreStartView();this.startSwitches(1,true);}document.body.classList.remove('start-scene');this.finishElapsed=null;this.state.disable();this.visual.restoreCamera();this.visual.root.visible=this.visual.damage.visible=false;this.carRoot.visible=true;this.panel.classList.add('hidden');this.hud.classList.add('hidden');document.getElementById('dqScreen').classList.add('hidden');document.body.classList.remove('disqualified-scene','podium-scene','tow-scene');document.body.classList.remove('immersive-mode','immersive-stage');this.brand.innerHTML=this.baseBrand;this.controls.innerHTML=this.baseControls;document.title=this.baseTitle;this.lastPhase='off';}
  sync(){
   const s=this.state;if(s.phase===this.lastPhase)return;const previous=this.lastPhase;this.lastPhase=s.phase;this.lastUI='';
@@ -267,12 +303,19 @@ export class ImmersiveMode {
   if(action.startsWith('joke:')&&s.phase==='crowd'&&s.fan!==null){const fan=s.fan,cash=s.cash;s.joke(Number(action.split(':')[1]));if(s.cash>cash){this.visual.showDonation(fan);s.fan=null;s.feedback='';this.walkToFan=null;s.touch();}}
   if(action==='close'){s.fan=null;s.feedback='';s.touch();}
   // The fuel starts at the pilot's last choice (6 L at first), lowered to what the kitty pays for.
-  if(action==='desk'&&s.fan===null&&!this.inCar&&s.openDesk()){this.walkToFan=this.walkToDesk=null;this.visual.faceDesk();this.prepLitres=clamp(Math.min(this.fuelChoice,Math.floor((s.cash-COSTS.entry-(this.prepFilm?COSTS.film:0))/COSTS.litre)),2,12);}
+  if(action==='desk'&&s.fan===null&&!this.inCar&&s.openDesk()){this.walkToFan=this.walkToDesk=this.walkToCafe=null;this.visual.faceDesk();this.prepLitres=clamp(Math.min(this.fuelChoice,Math.floor((s.cash-COSTS.entry-(this.prepFilm?COSTS.film:0))/COSTS.litre)),2,12);}
   if(action==='leaveDesk')s.closeDesk();
   // Leonardo's coffee: asked when the pilot walks up (step) or with the action key by him.
-  if(action==='leo'&&!this.inCar&&s.offerCoffee()){this.walkToFan=this.walkToDesk=null;this.walkToLeo=false;this.leoAsked=true;}
-  if(action==='leo:yes'||action==='leo:no')s.answerCoffee(action==='leo:yes');
+  if(action==='leo'&&!this.inCar&&s.offerCoffee()){this.walkToFan=this.walkToDesk=this.walkToCafe=null;this.walkToLeo=false;this.leoAsked=true;}
+  // His cup goes into a free hand, to be drunk like the Tia's (E).
+  if(action==='leo:yes'&&this.cafe.held.length<2&&s.answerCoffee(true))giveSnack(this.cafe,'cafe');
+  if(action==='leo:no')s.answerCoffee(false);
   if(action==='leo:close')s.closeCoffee();
+  // The Tia's café: her menu at the counter, a snack bought from it, a sip or a bite of what is in hand.
+  if(action==='cafe'&&!this.inCar&&this.visual.nearCafe()&&s.openCafe()){this.walkToFan=this.walkToDesk=this.walkToCafe=null;this.walkToLeo=false;this.cafe.feedback='';this.visual.faceCafe();}
+  if(action==='closeCafe')s.closeCafe();
+  if(action.startsWith('snack:')&&s.cafe&&this.visual.nearCafe()){buySnack(this.cafe,action.slice(6),{pay:price=>{const paid=s.pay(price);if(paid)this.save();return paid;},emit:name=>s.emitSound(name),touch:touchScreen()});s.touch();}
+  if(action==='eat'&&s.phase==='crowd'&&!this.inCar&&useSnack(this.cafe))s.touch();
   if(action==='car'&&s.phase==='crowd'&&s.fan===null&&!this.inCar){const spot=this.visual.carAction();if(spot==='porta'){if(this.enterCar())this.captureMouse();}else if(spot)this.visual.toggleOwnOpening(spot);}
   if(action==='buy')s.buy(this.prepLitres,this.prepFilm);
   if(action==='ign')s.switchIgnition();
@@ -293,15 +336,15 @@ export class ImmersiveMode {
   if(s.phase==='crowd'){
    // Keys on foot: Space jumps, C crouches, Tab frees the mouse (and takes it back); at
    // the team's desk Enter goes to the track. Any other key takes the mouse for the camera.
-   let used=false;const free=s.fan===null&&!s.desk&&!s.leo;
+   let used=false;const free=s.fan===null&&!s.desk&&!s.leo&&!s.cafe;
    if(code==='KeyF'&&free&&(this.inCar?this.leaveCar():this.visual.nearCar()&&this.enterCar())){this.captureMouse();return true;}
    if(this.inCar)return false;
-   // E is the action key, GTA style: at the team stand it opens (or leaves) the registration;
-   // by the Opala it lifts the hood (at the nose), the trunk lid (at the tail) or gets in (at
-   // the driver's door); elsewhere it talks to the nearest supporter.
-   if(code==='KeyE'){this.action(s.leo?(s.leo==='ask'?'leo:no':'leo:close'):s.desk?'leaveDesk':s.fan!==null?'close':this.visual.nearDesk()?'desk':this.visual.carAction()?'car':this.visual.nearLeo()?'leo':'talk');used=true;}
+   // E is the action key, GTA style (actionKey): it ends a conversation or the Tia's menu, or does
+   // what the place calls for.
+   if(code==='KeyE'){this.action(s.leo?(s.leo==='ask'?'leo:no':'leo:close'):s.desk?'leaveDesk':s.cafe?'closeCafe':s.fan!==null?'close':this.actionKey());used=true;}
    else if(['Digit1','Digit2','Digit3'].includes(code)&&s.fan!==null){this.action('joke:'+(Number(code.at(-1))-1));used=true;}
    else if(['Digit1','Digit2'].includes(code)&&s.leo==='ask'){this.action(code==='Digit1'?'leo:yes':'leo:no');used=true;}
+   else if(['Digit1','Digit2','Digit3'].includes(code)&&s.cafe){this.action('snack:'+CAFE_MENU[Number(code.at(-1))-1].id);used=true;}
    else if(code==='Tab'){this.mouseFree=!!document.pointerLockElement;if(this.mouseFree)document.exitPointerLock();else this.captureMouse();return true;}
    else if(free&&code==='Space'){this.visual.jump();used=true;}
    else if(free&&code==='KeyC'){this.visual.crouch();used=true;}
@@ -336,7 +379,7 @@ export class ImmersiveMode {
   else if(s.phase==='crowd'){
    // A click on a supporter (or the registration circle) walks the pilot there (any key
    // takes over); while talking he stands.
-   const free=s.fan===null&&!s.desk&&!s.leo,steering=input.throttle||input.brake||input.left||input.right;let walking=free?input:still;
+   const free=s.fan===null&&!s.desk&&!s.leo&&!s.cafe,steering=input.throttle||input.brake||input.left||input.right;let walking=free?input:still;
    if(free&&this.walkToLeo){if(steering)this.walkToLeo=false;else walking=this.follow(this.walkToLeo,.6,true);}
    if(free&&this.walkToFan!==null&&this.walkToFan!==undefined){
     if(steering)this.walkToFan=null;
@@ -346,19 +389,26 @@ export class ImmersiveMode {
     if(steering)this.walkToDesk=null;
     else{walking=this.follow(this.walkToDesk,.3,false);if(!walking){this.walkToDesk=null;walking=still;}}
    }
-   if(this.visual.walk(walking,dt,{shift:!!this.shift,touch:touchScreen(),ground:this.walkGround}))s.emitSound('footstep');
+   // Sent to the café (its sign): at the counter the Tia's menu opens.
+   if(free&&this.walkToCafe?.length){
+    if(steering)this.walkToCafe=null;
+    else if(this.visual.nearCafe(2.4)){this.walkToCafe=null;walking=still;this.action('cafe');}
+    else walking=this.follow(this.walkToCafe,.3,true);
+   }
+   if(this.visual.walk(walking,dt,{shift:!!this.shift,touch:touchScreen(),ground:this.walkGround,arms:snackArms(this.cafe)}))s.emitSound('footstep');
+   stepSnack(this.cafe,dt,name=>s.emitSound(name));snackHead(this.cafe,this.visual.hero,dt);
    // Stepping into the circle at the team stand opens the registration (once per visit).
-   const atDesk=this.visual.atDesk();if(atDesk&&!this.deskInside&&s.fan===null&&!s.leo)this.action('desk');this.deskInside=atDesk;
+   const atDesk=this.visual.atDesk();if(atDesk&&!this.deskInside&&s.fan===null&&!s.leo&&!s.cafe)this.action('desk');this.deskInside=atDesk;
    // Leonardo Martins comes over with his offer the first time the pilot walks up to him.
-   if(s.fan===null&&!s.desk&&!s.leo&&(!this.leoAsked||this.walkToLeo)&&this.visual.nearLeo(this.walkToLeo?2.4:2.6))this.action('leo');
+   if(s.fan===null&&!s.desk&&!s.leo&&!s.cafe&&(!this.leoAsked||this.walkToLeo)&&this.visual.nearLeo(this.walkToLeo?2.4:2.6))this.action('leo');
    // A conversation frees the mouse for the jokes; closing it takes the mouse back.
-   if((s.fan!==null||s.desk||s.leo)&&this.footLock&&document.pointerLockElement)document.exitPointerLock();
+   if((s.fan!==null||s.desk||s.leo||s.cafe)&&this.footLock&&document.pointerLockElement)document.exitPointerLock();
    this.near=this.visual.nearestFan();}
   else if(s.phase==='starting')s.startEngine(input,dt);
   else if(s.phase==='grid'){const before=Math.ceil(s.countdown);s.countdown-=dt;if(s.countdown<=0){s.startRace();this.goTime=.85;}else if(Math.ceil(s.countdown)<before)s.emitSound('countdown');}
   else if(s.phase==='race'){
    const before=Math.hypot(c.vx,c.vy);c.step(input,dt);const speed=Math.hypot(c.vx,c.vy),L=this.data.meta.reconstructed_xy_m,impact=Math.max(c.wallImpactSpeed??0,c.crashImpactSpeed??0,before-speed);if(impact>4)this.wallImpact(impact);
-   let travel=c.surface.s-this.previousS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;this.raceProgress=Math.max(0,this.raceProgress+travel);this.previousS=c.surface.s;
+   this.raceProgress=Math.max(0,this.raceProgress+lapTravel(this.previousS,c.surface.s,L));this.previousS=c.surface.s;
    this.contacts(this.field.step(c,dt,this.storyLaps));
    s.position=1+this.rivals.filter(r=>r.progress>this.raceProgress).length;
    s.raceStep({speed,throttle:input.throttle,wheelspin:c.rearSlipSpeed,offTrack:c.surface.pit?0:Math.max(0,Math.abs(c.surface.d)-c.surface.width/2),collision:impact>4,finished:false,position:s.position},dt);
@@ -402,7 +452,7 @@ export class ImmersiveMode {
  wallImpact(speed){const c=this.car,side=Math.sign(c.surface.d);this.damageAt(speed,[c.x+c.surface.lx*side,c.y+c.surface.ly*side]);this.parts.burst({speed,point:[this.car.x+Math.cos(this.car.heading)*2,this.car.y+Math.sin(this.car.heading)*2]},this.car);}
  contacts(hits){for(const hit of hits){if(hit.player)this.damageAt(hit.speed,hit.point);this.parts.burst(hit,this.car);if(hit.player&&this.active)this.state.hitCar(Math.min(1.5,hit.speed/10));else{const dx=hit.point[0]-this.car.x,dy=hit.point[1]-this.car.y,d=Math.hypot(dx,dy);if(d<65)this.state.emitSound('collision',{strength:Math.min(1.5,hit.speed/10)*(1-d/65),pan:clamp((-dx*Math.sin(this.car.heading)+dy*Math.cos(this.car.heading))/Math.max(1,d),-1,1)});}}}
  stepFree(dt,input={}){if(this.freeFinished)return;const previous=this.freeFuel;this.freeFuel=Math.max(0,this.freeFuel-dt*((.002+Math.hypot(this.car.vx,this.car.vy)*.00045+(input.throttle||0)*.005+(this.car.rearSlipSpeed||0)*.0023)*3/this.freeTotalLaps+(this.car.condition?.factors.leak??0)));if(previous>=1&&this.freeFuel<1)this.state.emitSound('reserve');if(previous>0&&this.freeFuel===0)this.state.emitSound('fuelEmpty');this.contacts(this.field.step(this.car,dt,this.freeTotalLaps));
-  const L=this.data.meta.reconstructed_xy_m;let advance=this.car.surface.s-(this.freeLastS??0);if(advance<-L/2)advance+=L;if(advance>L/2)advance-=L;this.freePlayerProgress+=advance;this.freeLastS=this.car.surface.s;
+  const L=this.data.meta.reconstructed_xy_m;this.freePlayerProgress+=lapTravel(this.freeLastS??0,this.car.surface.s,L);this.freeLastS=this.car.surface.s;
   const progress=Math.min(this.freePlayerProgress,this.car.laps*L+this.car.surface.s+this.field.gridLeadIn);
   this.freePosition=1+this.rivals.filter(r=>r.progress>progress).length;
   if(this.car.laps>=this.freeTotalLaps&&!this.freeFinished){this.freeFinished=true;this.freePosition=1+this.rivals.filter(r=>r.finished).length;this.beginFinish(this.freePosition);}
@@ -413,21 +463,22 @@ export class ImmersiveMode {
  // A rival's engine and tyres as heard from its own car: its driver's last input and its tyres' slide.
  rivalSound(car){const i=this.rivals.findIndex(r=>r.car===car);return {command:this.rivals[i]?.input??{},skid:(this.rivalTrails[i]?.wheels.reduce((sum,w)=>sum+w.strength,0)??0)/4};}
  audioCommand(input){if(this.finishing)return {...input,throttle:0,reverse:0,handbrake:0,engineOff:false};return this.active?{...input,throttle:['race','grid'].includes(this.state.phase)?input.throttle:0,engineOff:!['race','grid','inspection'].includes(this.state.phase)||!!this.state.reason}:{...input,engineOff:this.freeFuel<=0};}
- update(dt,camera){this.camera=camera;this.parts.update(dt,this.car);if(!this.active){this.visual.updateFree(this.rivals,dt);return;}this.sync();this.visual.update(this.state,this.car,dt,this.rivals,this.projectile,this.towOrigin);this.visual.camera(camera,this.state,dt);if(this.state.phase==='starting')this.startSwitches(dt);this.ui();this.positionDialogue();}
+ update(dt,camera){this.camera=camera;this.parts.update(dt,this.car);if(!this.active){this.visual.updateFree(this.rivals,dt);return;}this.sync();this.visual.update(this.state,this.car,dt,this.rivals,this.projectile,this.towOrigin);if(this.state.phase==='crowd')showSnacks(this.snackHands,this.visual.hero,this.cafe);this.visual.camera(camera,this.state,dt);if(this.state.phase==='starting')this.startSwitches(dt);this.ui();this.positionDialogue();}
  button(action,label,primary=false,disabled=false){return `<button type="button" data-action="${action}" ${disabled?'disabled':''} class="${primary?'imm-primary':''}">${label}</button>`;}
  ui(){
-  const s=this.state;if(!s.active)return;const talking=s.phase==='crowd'&&(s.fan!==null||s.desk||!!s.leo);this.panel.classList.toggle('social-dialogue',talking);this.panel.classList.toggle('desk-dialogue',s.phase==='crowd'&&s.desk);this.panel.classList.toggle('leo-dialogue',s.phase==='crowd'&&!!s.leo);this.panel.classList.toggle('start-panel',s.phase==='starting');this.panel.classList.toggle('social-explore',s.phase==='crowd'&&!talking);if(s.phase!=='crowd'||s.fan===null&&!s.leo){this.panel.style.removeProperty('left');this.panel.style.removeProperty('top');this.panel.style.removeProperty('bottom');}this.hud.classList.remove('hidden');
+  const s=this.state;if(!s.active)return;const talking=s.phase==='crowd'&&(s.fan!==null||s.desk||!!s.leo||!!s.cafe);this.panel.classList.toggle('social-dialogue',talking);this.panel.classList.toggle('desk-dialogue',s.phase==='crowd'&&s.desk);this.panel.classList.toggle('leo-dialogue',s.phase==='crowd'&&!!s.leo);this.panel.classList.toggle('cafe-dialogue',s.phase==='crowd'&&!!s.cafe);this.panel.classList.toggle('start-panel',s.phase==='starting');this.panel.classList.toggle('social-explore',s.phase==='crowd'&&!talking);if(s.phase!=='crowd'||s.fan===null&&!s.leo){this.panel.style.removeProperty('left');this.panel.style.removeProperty('top');this.panel.style.removeProperty('bottom');}this.hud.classList.remove('hidden');
   const names={crowd:'VAQUINHA',starting:'PARTIDA',grid:'LARGADA',race:`${this.storyLaps} VOLTA${this.storyLaps>1?'S':''}`,broken:'SOCORRO',tow:'REBOQUE',snag:'FITA ENROSCADA',inspection:'PÓS-CORRIDA',podium:'SEXTO, SEMPRE',complete:'ATÉ A PRÓXIMA',disqualified:'A FOTO FICOU'};
   document.getElementById('dqScreen').classList.toggle('hidden',s.phase!=='disqualified');document.getElementById('dqCountdown').textContent='Nova vaquinha em '+Math.max(1,Math.ceil(s.disqualifiedTime))+' s';
   document.getElementById('immPhase').textContent=names[s.phase];document.getElementById('immFuel').textContent=s.fuel.toFixed(1)+' L';document.getElementById('immHealth').textContent=Math.ceil(s.health*100)+'%';document.getElementById('immGlass').textContent=Math.round((1-s.glass)*100)+'%';document.getElementById('immPosition').textContent=s.phase==='podium'?'6º no pódio':s.position+'º / '+GRID_SIZE;
-  document.getElementById('immAlert').textContent=s.phase==='podium'?(touchScreen()?'Arraste na cena para girar a câmera pelo pódio.':'Câmera livre: clique na cena e o mouse olha em volta · roda aproxima · W A S D passeia · Espaço ou E continua · Tab solta o mouse'):s.phase==='crowd'?(this.inCar?'F: sair do Opala · o mouse olha em volta':talking?'':this.carHint()||this.deskHint()):s.phase==='race'?(s.alertTime>0?s.alert:s.tankDetached?'Tanque solto · combustível vazando':s.fuel<1?'Reserva! A gasolina está acabando.':'Guarde distância: o carro da frente pode soltar peças.'):s.phase==='tow'?(s.towGap<3?'FREIE · FITA FROUXA':'Controle o freio quando o caminhão diminuir.'):'';
-  const spot=s.phase==='crowd'?this.visual.carAction():null,nearDesk=s.phase==='crowd'&&this.visual.nearDesk(),key=[s.phase,s.revision,this.near,s.fan,s.desk,s.leo,nearDesk,spot,spot&&this.visual.ownOpen(spot)].join(':');
+  document.getElementById('immAlert').textContent=s.phase==='podium'?(touchScreen()?'Arraste na cena para girar a câmera pelo pódio.':'Câmera livre: clique na cena e o mouse olha em volta · roda aproxima · W A S D passeia · Espaço ou E continua · Tab solta o mouse'):s.phase==='crowd'?(this.inCar?'F: sair do Opala · o mouse olha em volta':talking?'':this.carHint()||this.cafeHint()||this.deskHint()):s.phase==='race'?(s.alertTime>0?s.alert:s.tankDetached?'Tanque solto · combustível vazando':s.fuel<1?'Reserva! A gasolina está acabando.':'Guarde distância: o carro da frente pode soltar peças.'):s.phase==='tow'?(s.towGap<3?'FREIE · FITA FROUXA':'Controle o freio quando o caminhão diminuir.'):'';
+  const spot=s.phase==='crowd'?this.visual.carAction():null,nearDesk=s.phase==='crowd'&&this.visual.nearDesk(),cafe=s.phase==='crowd'?[this.actionKey(),this.visual.nearCafe(),snackLabel(this.cafe),!!this.cafe.using,this.cafe.feedback].join('/'):'',key=[s.phase,s.revision,this.near,s.fan,s.desk,s.leo,s.cafe,nearDesk,spot,spot&&this.visual.ownOpen(spot),cafe].join(':');
   if(key!==this.lastUI){this.lastUI=key;let body='';
    if(s.phase==='crowd'){
     if(s.fan!==null){const fan=FANS[s.fan];body=`<div class="social-person"><span class="social-avatar">${fan.name[0]}</span><div><span>CONVERSANDO COM</span><h2>${fan.name}</h2></div><b>◆</b></div><div class="speech-bubble fan-speech" role="status">${s.feedback||'“'+fan.hint+'”'}</div><div class="social-prompt">Escolha sua fala</div><div class="imm-jokes social-choices">${JOKES.map((j,i)=>`<button type="button" data-action="joke:${i}" class="speech-choice"><span>${i+1}</span><div><b>${['Família e boletos','Vida de oficina','Perrengues de piloto'][i]}</b><small>${j.text}</small></div></button>`).join('')}</div><div class="social-help">Clique em uma fala para contar a piada.</div>${this.button('close','Encerrar conversa (E)')}`;}
     else if(s.desk)body=this.deskPanel();
     else if(s.leo)body=this.leoPanel();
-    else body=`<div class="imm-eyebrow">ANTES DA CORRIDA</div><h2>Patrocínio? Só na risada.</h2><p>${touchScreen()?'Caminhe pelos boxes até a torcida. Toque em uma pessoa para conversar. Depois, toque na piada que quer contar.':'Ande à vontade pelos boxes, pela garagem do 99 e pela lanchonete da Tia. Chegue perto de um torcedor e aperte E para conversar; depois clique na piada (ou 1, 2, 3).'}</p><strong class="imm-cash">${money(s.cash)}</strong><p>Inscrição: ${money(COSTS.entry)} · gasolina: ${money(COSTS.litre)}/L · para largar: pelo menos ${money(COSTS.minimum)}.</p><p class="imm-desk-hint"><b>Inscrição com a equipe 99</b> nos computadores da barraca sobre o muro dos boxes: suba a escadinha ao lado dela e entre no círculo amarelo${touchScreen()?' (ou toque nele e o piloto vai sozinho)':''}.</p><p class="imm-controls">${touchScreen()?'Toque no torcedor · toque na fala para enviar':'W A S D anda · mouse gira a câmera · Shift corre · Espaço pula · C agacha · E ação (conversar; na barraca: inscrição; no Opala: capô na frente, porta-malas atrás, porta para entrar) · F entra no Opala · Tab solta o mouse'}</p>${spot?this.button('car',CAR_ACTIONS[spot](this.visual.ownOpen(spot))+(touchScreen()?'':' (E)')):nearDesk?this.button('desk','Falar com a equipe 99 · inscrição'+(touchScreen()?'':' (E)'),true):this.button('talk',this.near<0?'Aproxime-se de um torcedor ou do Opala':'Conversar com '+FANS[this.near].name+(touchScreen()?'':' (E)'),false,this.near<0)}<small>O sonho: ganhar para tirar a Blazer da oficina.</small>`;
+    else if(s.cafe)body=this.cafePanel();
+    else body=`<div class="imm-eyebrow">ANTES DA CORRIDA</div><h2>Patrocínio? Só na risada.</h2><p>${touchScreen()?'Caminhe pelos boxes até a torcida. Toque em uma pessoa para conversar. Depois, toque na piada que quer contar.':'Ande à vontade pelos boxes, pela garagem do 99 e pela lanchonete da Tia (café e quitutes, pagos da vaquinha). Chegue perto de um torcedor e aperte E para conversar; depois clique na piada (ou 1, 2, 3).'}</p><strong class="imm-cash">${money(s.cash)}</strong>${this.cafeButtons()}<p>Inscrição: ${money(COSTS.entry)} · gasolina: ${money(COSTS.litre)}/L · para largar: pelo menos ${money(COSTS.minimum)}.</p><p class="imm-desk-hint"><b>Inscrição com a equipe 99</b> nos computadores da barraca sobre o muro dos boxes: suba a escadinha ao lado dela e entre no círculo amarelo${touchScreen()?' (ou toque nele e o piloto vai sozinho)':''}.</p><p class="imm-controls">${touchScreen()?'Toque no torcedor · toque na fala para enviar · toque na placa da Tia para ir à lanchonete':'W A S D anda · mouse gira a câmera · Shift corre · Espaço pula · C agacha · E ação (conversar; na barraca: inscrição; no balcão da Tia: cardápio; com algo na mão: comer ou beber; no Opala: capô na frente, porta-malas atrás, porta para entrar) · F entra no Opala · Tab solta o mouse'}</p>${spot?this.button('car',CAR_ACTIONS[spot](this.visual.ownOpen(spot))+(touchScreen()?'':' (E)')):nearDesk?this.button('desk','Falar com a equipe 99 · inscrição'+(touchScreen()?'':' (E)'),true):this.button('talk',this.near<0?'Aproxime-se de um torcedor ou do Opala':'Conversar com '+FANS[this.near].name+(touchScreen()?'':' (E)'),false,this.near<0)}<small>O sonho: ganhar para tirar a Blazer da oficina.</small>`;
    }
    if(s.phase==='starting')body=this.startPanel();
    if(s.phase==='grid')body='';
@@ -445,5 +496,5 @@ export class ImmersiveMode {
   if(s.phase==='tow'){this.panel.querySelector('#immTowGap').value=s.towGap;this.panel.querySelector('#immTowText').textContent=`Folga útil: ${s.towGap.toFixed(1)} m · resgate ${Math.min(100,Math.floor(s.towDistance/105*100))}%`;}
   if(s.phase==='inspection'&&s.judging)this.panel.querySelector('#immInspection').value=s.inspection;
  }
- info(){return {...this.state.info(),freeFuel:this.freeFuel,freeTotalLaps:this.freeTotalLaps,storyLaps:this.storyLaps,laps:this.laps,freeFinished:this.freeFinished,finishing:this.finishing,finishElapsed:this.finishElapsed,finishTime:this.finishTime,freeResultReady:this.freeResultReady,freePosition:this.freePosition,nearFan:this.near,atDesk:this.visual.atDesk(),hero:this.visual.hero.position.toArray(),rivals:this.rivals.map(({car,...r})=>({...r,x:car.x,y:car.y})),field:this.field.info(),parts:this.parts.info(),projectile:!!this.projectile};}
+ info(){return {...this.state.info(),snacks:this.cafe.held.map(h=>[h.id,h.bites]),eating:!!this.cafe.using,nearCafe:this.visual.nearCafe(),freeFuel:this.freeFuel,freeTotalLaps:this.freeTotalLaps,storyLaps:this.storyLaps,laps:this.laps,freeFinished:this.freeFinished,finishing:this.finishing,finishElapsed:this.finishElapsed,finishTime:this.finishTime,freeResultReady:this.freeResultReady,freePosition:this.freePosition,nearFan:this.near,atDesk:this.visual.atDesk(),hero:this.visual.hero.position.toArray(),rivals:this.rivals.map(({car,...r})=>({...r,x:car.x,y:car.y})),field:this.field.info(),parts:this.parts.info(),projectile:!!this.projectile};}
 }

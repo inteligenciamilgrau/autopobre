@@ -1,7 +1,8 @@
 /* Car screen (Modo Corrida, before the track screen): the chosen Opala turning on the left, drawn by
    the game's canvas behind this screen's open middle (car-select.js), and the grid's cars on the right. */
-/* Only the canvas (the studio) and this screen show; the race's HUD and tools hide meanwhile. */
-body.cars-open>:not(#view):not(#cars):not(#rotatePhone):not(dialog){visibility:hidden!important}
+/* Only the canvas (the studio) and this screen show (and a multiplayer room's card); the race's HUD
+   and tools hide meanwhile. */
+body.cars-open>:not(#view):not(#cars):not(#rotatePhone):not(#mpRoom):not(dialog){visibility:hidden!important}
 #cars{z-index:30;align-items:stretch;justify-content:center;padding:22px 4vw;overflow:auto;backdrop-filter:none;
  background:radial-gradient(ellipse at 34% 58%,#20403a 0,#10231f 48%,#060d0c 100%)}
 /* With the studio drawn, only the edges darken (the head and the cards keep their own backgrounds). */
@@ -30,6 +31,11 @@ body.cars-open>:not(#view):not(#cars):not(#rotatePhone):not(dialog){visibility:h
 .car-cards svg{width:100%;max-width:120px;height:auto;aspect-ratio:100/34}
 .car-cards span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:700;color:#e6ecdf}
 .car-cards button[aria-checked=true] span{color:#f4d055}
+/* In a multiplayer room: a car another pilot has, under that pilot's name (lime, as on the track). */
+.car-cards button.taken{cursor:not-allowed;border-style:dashed;background:#0b1715e0}
+.car-cards button.taken:hover{border-color:#88978c45;background:#0b1715e0}
+.car-cards button.taken svg{opacity:.45}
+.car-cards button.taken span{color:#e2fb57}
 .car-note{margin:0;font-size:11px;line-height:1.45;color:#aebdb2}
 #cars .primary{margin:0;padding:14px 16px;border-radius:8px;border:0;background:#f4ce39;color:#171c15;font-size:15px;font-weight:900;text-align:left}
 #cars .primary:hover{background:#ffe574}

@@ -81,15 +81,17 @@ $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked})
 // standings pace, the harder levels the pilots' table.
 // The player's car is the 99 or, in Modo Corrida, the car screen's choice, whose driver then sits out
 // and the 99 races in its seat (race-roster.js fieldRoster).
-// The car of the next race: Modo Corrida's choice; the story and a multiplayer room race the 99, so
-// they skip the car screen.
-const menuCar=()=>menuMode==='historia'||roomWanted?'99':preferences.values.car;
-const carScreen=()=>menuMode==='corrida'&&!roomWanted;
+// The car of the next race: Modo Corrida's choice (in a multiplayer room, the car the room gave this
+// window, multiplayer.js car); the story races the 99, so it skips the car screen.
+const menuCar=()=>menuMode==='historia'?'99':multiplayer?.car()??preferences.values.car;
+const carScreen=()=>menuMode==='corrida';
 // The settings' grid list: the field racing now or, between races, the next one. Rebuilt each time
 // the settings open (openSettings).
 function showRoster(){
  const roster=$('gridRoster'),mine=sessionStarted?raceCar:menuCar(),you=mine==='99'?PLAYER_ENTRY:carEntry(mine);roster.replaceChildren();
- for(const entry of [...fieldRoster(mine),you]){const row=document.createElement('li');row.textContent=entry===you&&mine!=='99'?`#${mine} · VOCÊ, no carro de ${you.name}`:`#${entry.number} · ${entry.name}${entry===you?' · VOCÊ':entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':preferences.values.aiLevel==='facil'?` · Ritmo ${entry.level}/100`:` · Nível ${entry.skill}/10`}`;roster.append(row);}
+ // A multiplayer guest races in the host's field (raceGrid): in its own car's seat, the host's car at the back.
+ const back=sessionStarted?raceGrid:mine,host=back===mine?null:back==='99'?PLAYER_ENTRY:carEntry(back);
+ for(const entry of [...fieldRoster(back).map(e=>host&&e.number===mine?you:e),host??you]){const row=document.createElement('li');row.textContent=entry===host?`#${back} · ANFITRIÃO${back==='99'?'':`, no carro de ${host.name}`}`:entry===you&&mine!=='99'?`#${mine} · VOCÊ, no carro de ${you.name}`:`#${entry.number} · ${entry.name}${entry===you?' · VOCÊ':entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':preferences.values.aiLevel==='facil'?` · Ritmo ${entry.level}/100`:` · Nível ${entry.skill}/10`}`;roster.append(row);}
 }
 // Koyzinho Indestrutível: taken at the next start (RaceField.reset), like the race length.
 $('aceKoyzinho').checked=preferences.values.aceKoyzinho;
@@ -230,9 +232,16 @@ let sessionStarted=false,loading=false,loadedCircuit=null;
 const MULTIPLAYER=true;
 const roomWanted=MULTIPLAYER&&new URLSearchParams(window.location.hash.slice(1)).has('sala');let multiplayer=null;
 let pitstop,immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
-// The car raced now ('99', or Modo Corrida's choice), its paint on the player's model, and the track
-// branding's Old Stock ads that car 70 carries on its doors.
-let raceCar='99',oldStockMaterial=null,modelLoading=null;const carLivery=new CarLivery();
+// The car raced now ('99', or Modo Corrida's choice), the car at the back of its grid whose driver
+// sits out (the same, or a multiplayer host's: seatCar), whether it is the recon lap, its paint on
+// the player's model, and the track branding's Old Stock ads that car 70 carries on its doors.
+let raceCar='99',raceGrid='99',reconLap=false,oldStockMaterial=null,modelLoading=null;const carLivery=new CarLivery();
+// clone(model) with the player's model as loaded: the paint it may wear (car-livery.js) comes off for
+// the clone and goes back on after it.
+function withCleanModel(clone){
+ const painted=carLivery.number;if(painted==='99')return clone(model);
+ carLivery.clear();try{return clone(model);}finally{carLivery.apply(model,carEntry(painted),immersive.visual,{doorAds:oldStockMaterial});}
+}
 // The story's grid countdown is shown from behind the car; the engine start before it
 // ('starting') is played in the cockpit (ImmersiveMode switches the view).
 const gridPreview=()=>immersive?.active&&immersive.state.phase==='grid';
@@ -794,7 +803,7 @@ const pilotLine=()=>[pilotPicker.profiles.selected&&`Piloto: ${pilotPicker.profi
 // Modo Corrida's car screen (car-select.js): the studio needs the renderer and the car's model, both
 // kept for the race.
 const carSelect=new CarSelect({root:$('cars'),value:preferences.values.car,carRoot,
- onPick:number=>{preferences.update({car:number});updateMenuLabels();if(ready)showRoster();},onNext:()=>showScreen('tracks'),onBack:()=>showScreen('opening')});
+ onPick:number=>{preferences.update({car:number});multiplayer?.choose(number);updateMenuLabels();if(ready)showRoster();},onNext:()=>showScreen('tracks'),onBack:()=>showScreen('opening')});
 function openCarScreen(){
  $('carsPilot').textContent=pilotPicker.profiles.selected?`Piloto: ${pilotPicker.profiles.selected}`:'';if(model&&carSelect.studio.template===model&&activeLivery===$('livery').value)return;
  // No WebGL: the screen says so and the choice still counts.
@@ -872,8 +881,8 @@ async function beginRace(restart=false,tour=false,story=preferences.values.immer
  // A championship round races the championship's laps; everything else the chosen ones.
  if(tour)championshipRace=null;storyRound=null;raceResults.championship=null;
  immersive.laps=championshipRace?championshipRace.championship.laps:preferences.values.laps;
- // The car: Modo Corrida's choice; the story, the recon lap and a multiplayer room race the 99.
- raceCar=preferences.values.immersive||tour||roomWanted?'99':preferences.values.car;
+ // The car: Modo Corrida's choice, or the room's (multiplayer.js); the story and the recon lap race the 99.
+ raceCar=preferences.values.immersive||tour?'99':multiplayer?.car()??preferences.values.car;reconLap=tour;
  immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[duelRivalFor(raceCar,preferences.values.duelRival)];
  seatCar();
  document.querySelector('.session').childNodes[1].textContent=championshipRace?` CAMPEONATO · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total} `:immersive.lineup?.length===0?' TREINO SOLO ':immersive.lineup?` 1x1 · #${immersive.lineup[0]} `:' PISTA LIVRE ';
@@ -891,7 +900,7 @@ function returnToMainMenu(){
  if(!sessionStarted){updateMenuLabels();return;}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  pitstop?.reset();
- if(ready){immersive.disable();reset();}carLivery.clear();
+ carLivery.clear();if(ready){immersive.disable();reset();}
  sessionStarted=false;automatic=false;watched=0;championshipRace=storyRound=null;raceResults.root.hidden=true;screen='tracks';menu(true);showCircuitSelection();
 }
 // Scores the championship round when its race is over (once, before the result sheet shows):
@@ -907,8 +916,7 @@ function recordChampionshipRound(){
 // running order and the player last, with no points.
 function storyRows(){
  if(immersive.state.result?.position&&immersive.freeOrder)return resultRows(immersive);
- const rivals=[...immersive.rivals].sort((a,b)=>(a.finishTime??Infinity)-(b.finishTime??Infinity)||!!a.retired-!!b.retired||b.progress-a.progress);
- return [...rivals.map(r=>({...r.entry,bestLap:r.car.best,totalTime:r.finished?r.finishTime:null,finished:r.finished,...(r.retired?{dnf:true,breakdown:r.broken?.kind}:{})})),
+ return [...immersive.field.classification(immersive.storyLaps),
   {...PLAYER_ENTRY,name:immersive.pilotName||PLAYER_ENTRY.name,bestLap:car.best,totalTime:null,finished:false,player:true,dnf:true}];
 }
 function startChampionshipRound(mode=menuMode){
@@ -930,10 +938,11 @@ function nextStoryRound(){
 function chooseMode(mode){if(sessionStarted||loading||!pilotPicker.commit())return;menuMode=mode;showScreen(carScreen()?'cars':'tracks');}
 // The chosen car on track: the field with the 99 in its seat (RaceField's roster, the rivals' models)
 // and the player's result rows under its number; set before the grid. The model goes back to the 99
-// first, since the 99 that Stevan Gaipo races is cloned from it.
+// first, since the 99 that Stevan Gaipo races is cloned from it. A multiplayer guest's field is the
+// host's (gridCar: the host's car sits out of it); the guest's own car takes its seat (multiplayer.js).
 function seatCar(){
- carLivery.clear();const entry=raceCar==='99'?null:carEntry(raceCar);
- immersive.field.roster=fieldRoster(raceCar);immersive.visual.seatOpala99(model,raceCar);
+ carLivery.clear();const entry=raceCar==='99'?null:carEntry(raceCar),grid=raceGrid=multiplayer?.gridCar()??raceCar;
+ immersive.field.roster=fieldRoster(grid);immersive.visual.seatOpala99(model,grid);
  immersive.playerEntry=entry?{...entry,name:immersive.pilotName,shortName:immersive.pilotName}:undefined;
 }
 // Once the grid is set: the player's Opala in that car's colours (car-livery.js), the map's legend, and
@@ -1107,7 +1116,12 @@ window.interlagos={ready:false,audioInfo:()=>carAudio.info()};
 // The multiplayer room reaches into the game only through these hooks.
 if(roomWanted)import('./multiplayer.js').then(({startMultiplayer})=>{multiplayer=startMultiplayer({
  session:()=>({started:sessionStarted,paused,loading,circuit:circuit.id}),
- immersive:()=>immersive,template:()=>model,
+ immersive:()=>immersive,template:()=>model,withTemplate:withCleanModel,
+ // The race being set up is a room's kind: Modo Corrida with the whole grid (not the story, the
+ // recon lap, Treino solo or 1x1).
+ fullGrid:()=>!preferences.values.immersive&&!reconLap&&immersive?.lineup==null,
+ // The car screen's choice is the car asked for in the room; the room's answer comes back to it.
+ wantedCar:()=>preferences.values.car,roomCars:state=>{carSelect.setRoom(state);updateMenuLabels();},
  pilotName:()=>(pilotPicker.input.hidden?pilotPicker.select.value:pilotPicker.input.value.trim())||pilotPicker.profiles.selected||'',
  command:()=>automatic?pilot():input(),
  autopilot:on=>{if(on!==undefined&&ready&&sessionStarted&&!immersive.active){if(on)automatic=true;else takeWheel();}return automatic;},

@@ -30,6 +30,9 @@
 #mpRoom.mp-racing,#mpRoom.mp-tracks{left:50%;right:auto;transform:translateX(-50%);display:flex;align-items:center;gap:12px;width:auto;max-width:min(680px,80vw);padding:6px 13px;border-radius:20px}
 #mpRoom.mp-racing{top:74px;bottom:auto}
 #mpRoom.mp-tracks{bottom:12px}
+/* The car screen keeps that bottom edge free for it (the chosen car's plate sits low on the stage). */
+body.mp-room #cars{padding-bottom:58px}
+@media(max-height:520px){body.mp-room #cars{padding-bottom:48px}}
 #mpRoom:is(.mp-racing,.mp-tracks) .mp-status{margin:0;font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 #mpRoom:is(.mp-racing,.mp-tracks) :is(.mp-players,.mp-net){display:none}
 #mpRoom:is(.mp-racing,.mp-tracks) :is(.mp-head,.mp-auto){white-space:nowrap}

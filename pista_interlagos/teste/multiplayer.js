@@ -2,29 +2,32 @@
 // (net-link.js, sala-cloudflare), or windows of one browser through a BroadcastChannel (&local=1)
 // (net-room.js, net-cars.js). Nothing in the menus leads here; main.js loads this module only when
 // the address asks for a room:
-//   index.html#sala=NOME     the first in a room hosts it and races the Opala 99; the next ones
-//                            take the first free rival's car (or the one in &carro=73). Online, the
-//                            group key opens the door and the host lets each guest in
+//   index.html#sala=NOME     the first in a room hosts it; every pilot races the car chosen on
+//                            Modo Corrida's car screen (or the one in &carro=73) if nobody else has
+//                            it, else the first free one. Online, the group key opens the door and
+//                            the host lets each guest in
 //   &local=1                 this browser's windows only, no server; &servidor=local: wrangler dev
 //   &auto=1                  the automatic pilot drives this window's car from the start
 //   &fantasmas=1             (host) humans pass through each other instead of colliding
 //   &lag=150&perda=5         simulate 150 ms of network delay and 5% of lost car messages
 // The host picks the track and presses Corrida única: the grid waits on 3, every guest in the room
 // (and whoever joins meanwhile) loads it, and the lights go out for everyone when the host presses
-// Largar. The host's game drives the bots and passes every car on; each window
+// Largar. The host's car starts at the back of the grid, as Modo Corrida's chosen car does, and the
+// driver of that car sits out (the 99 races in its seat, race-roster.js fieldRoster); each guest's
+// car starts in its own seat. The host's game drives the bots and passes every car on; each window
 // drives its own car and places the others where their owners say they are (RaceField's remote
 // cars). Every window resolves a contact for its own car only, against where it shows the other
 // one; the other window does the same from its side. Modo Corrida only.
-import {Room,roomParams,HOST_NUMBER} from './net-room.js';
+import {Room,roomParams} from './net-room.js';
 import {ServerLink,ROOM_SERVER,LOCAL_SERVER} from './net-link.js';
 import {RemoteCar,packCar,readCar} from './net-cars.js';
-import {RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
+import {PLAYER_ENTRY,carEntry} from './race-roster.js';
 // Car messages a second; after crossing the line, how long the results wait for the others (s).
 const SEND=1/30,RESULTS_WAIT=60;
-// The host's Opala 99 as the guests see it: black, the yellow stripe and its number.
-const HOST_PAINT={color:0x17191b,stripe:0xf0cd1f};
-const hostEntry=name=>({...PLAYER_ENTRY,mark:PLAYER_ENTRY.color,name,shortName:name,human:true});
-const seatIndex=number=>RIVAL_ROSTER.findIndex(e=>e.number===number);
+// The host's car under the host's name (the 99 as the player's own: lime on the map).
+const hostEntry=(car,name)=>({...(car==='99'?{...PLAYER_ENTRY,mark:PLAYER_ENTRY.color}:carEntry(car)),name,shortName:name,human:true});
+// A car's place in the field's roster (the rivals' order, the same in every window).
+const seatIndex=(field,number)=>field.roster.findIndex(e=>e.number===number);
 const clock=()=>performance.now()/1000;
 // The group key, typed once on this browser (the server keeps the real one as a secret).
 const KEY_STORE='autopobre-chave-grupo';
@@ -35,14 +38,15 @@ const PROBLEMS={conectando:'Conectando ao servidor da sala…',reconectando:'Con
  cheia:'Sala cheia.',recusado:'O anfitrião recusou sua entrada.',expulso:'Você foi removido da sala.',excesso:'Conexão encerrada: mensagens demais.',
  ocupada:'Muitas tentativas com a chave errada · tente de novo em um minuto.','outra-aba':'Esta sala foi aberta em outra aba.',origem:'Endereço não autorizado.',
  fora:'Sem conexão com o servidor da sala (internet, ou o limite do dia do servidor).',saiu:'Você saiu da sala.'};
-// game: main.js hooks (session, immersive, template, pilotName, command, autopilot, startRace, hasCircuit).
+// game: main.js hooks (session, immersive, fullGrid, template, withTemplate, pilotName, wantedCar,
+// roomCars, command, autopilot, startRace, hasCircuit).
 export function startMultiplayer(game,hash=location.hash){const params=roomParams(hash);return params?new Multiplayer(game,params):null;}
 class Multiplayer {
  constructor(game,params){
   this.game=game;this.params=params;this.autopilot=params.auto;this.autopilotOn=false;
   const link=params.local?null:new ServerLink({url:params.server==='local'?LOCAL_SERVER:ROOM_SERVER,room:params.room,key:readKey,name:()=>this.room?.name??game.pilotName()});
-  this.room=new Room({room:params.room,name:game.pilotName(),want:params.car,lag:params.lag,loss:params.loss,link});
-  this.race=null;this.phase='lobby';this.holding=false;this.remotes=new Map();this.seq=0;this.sendClock=0;this.readyClock=0;this.finishedAt=null;this.panelClock=0;this.immersive=null;this.rows='';
+  this.room=new Room({room:params.room,name:game.pilotName(),want:params.car??game.wantedCar(),lag:params.lag,loss:params.loss,link});
+  this.race=null;this.phase='lobby';this.holding=false;this.remotes=new Map();this.seq=0;this.sendClock=0;this.readyClock=0;this.finishedAt=null;this.panelClock=0;this.immersive=null;this.rows='';this.cars='';
   // A new race from the host: load its track and start (false: busy loading, asked again later).
   this.room.on('race',race=>this.game.hasCircuit(race.circuit)&&this.game.startRace(race.circuit)).on('go',race=>this.go(race))
    .on('state',(id,m)=>this.heardCar(id,m)).on('snap',m=>this.heardField(m)).on('leave',p=>this.left(p)).on('change',()=>this.render())
@@ -58,11 +62,7 @@ class Multiplayer {
  // Each circuit load makes a new ImmersiveMode: its free race learns the room's seats and start.
  attach(immersive){
   if(immersive.multiplayer===this)return;
-  immersive.multiplayer=this;this.immersive=immersive;const visual=immersive.visual;this.originals=[...visual.rivals];
-  // The host's car as the guests see it, cloned while the player's model still stands at rest.
-  const template=this.game.template();
-  this.hostObject=template?visual.rivalCar(template,HOST_PAINT.color,HOST_NUMBER,'',{driven:true,stripe:HOST_PAINT.stripe}):null;
-  if(this.hostObject)visual.root.add(this.hostObject);
+  immersive.multiplayer=this;this.immersive=immersive;this.hostObject=null;this.swap=null;
   const resetField=immersive.resetField.bind(immersive),beginCountdown=immersive.beginCountdown.bind(immersive),step=immersive.step.bind(immersive),stepFree=immersive.stepFree.bind(immersive);
   immersive.resetField=()=>{this.plan(immersive);resetField();this.seat(immersive);};
   immersive.beginCountdown=()=>{beginCountdown();this.countdown();};
@@ -72,35 +72,64 @@ class Multiplayer {
   immersive.stepFree=(dt,input)=>{if(immersive.freeFinished&&this.phase==='racing'){immersive.contacts(immersive.field.step(immersive.car,dt,immersive.freeTotalLaps));return;}stepFree(dt,input);};
  }
  myNumber(race=this.race){return race?.seats.find(s=>s.id===this.room.id)?.number??null;}
+ // main.js: the car this window races in the room (its seat in the host's race it is loading, else
+ // its seat in the room; null: none yet, the car screen's choice then).
+ car(){return this.myNumber(this.loading())??this.room.number;}
+ // The car screen's choice (main.js): this window's car in the room from now on, if nobody has it.
+ choose(number){this.room.choose(number);this.render();}
+ // main.js seatCar: in the host's race this guest sets up, the car at the back of its grid (the
+ // host's), whose driver sits out; null for any other race (the field is then this window's own).
+ gridCar(){const race=this.hostRace();return race&&this.myNumber(race)?race.car:null;}
+ loading(){const room=this.room,race=room.race;return room.role==='guest'&&race?.state==='waiting'&&race.seats.some(s=>s.id===room.id)?race:null;}
+ // The host's race, if the race this guest sets up is it: announced and waiting, on this track, and
+ // a room's kind of race (main.js fullGrid: Modo Corrida with the whole grid, not the story, the
+ // recon lap, Treino solo or 1x1).
+ hostRace(){const room=this.room,race=room.race;return room.role==='guest'&&race?.state==='waiting'&&race.circuit===this.game.session().circuit&&this.game.fullGrid()?race:null;}
+ // The host's car as a guest shows it, in that car's colours (the 99 in its own livery), cloned from
+ // the player's model as loaded (main.js withTemplate takes another car's paint off it meanwhile);
+ // cloned again when that model changed (another livery of the 99).
+ hostCar(car){
+  const visual=this.immersive.visual,e=carEntry(car);if(!e||!this.game.template())return null;
+  if(this.hostObject?.userData.car===car&&this.hostTemplate===this.game.template())return this.hostObject;
+  if(this.hostObject){this.hostObject.removeFromParent();visual.disposeCar(this.hostObject,this.hostTemplate);}
+  this.hostObject=this.game.withTemplate(template=>{this.hostTemplate=template;return visual.rivalCar(template,e.color,e.number,'',{driven:true,stripe:e.stripe,finish:e.finish,livery99:car==='99'});});
+  this.hostObject.userData.car=car;visual.root.add(this.hostObject);return this.hostObject;
+ }
  // Before the field resets: the race it is for. The host makes a new one each time (announced only
  // when its countdown begins); a guest takes the one the host announced for this track. A room
- // race is the full grid (seat = roster index): the host's Treino solo or 1x1 stays its own.
+ // race is the full grid (seat = roster index): Treino solo, 1x1, the recon lap and the story stay
+ // this window's own.
  plan(immersive){
   this.phase='lobby';this.holding=false;this.finishedAt=null;this.autopilotOn=false;
-  const room=this.room,circuit=this.game.session().circuit,grid=immersive.lineup==null;
-  const field=immersive.field;
-  this.race=room.role==='host'?grid?room.planRace({circuit,laps:immersive.laps,ace:!!field.ace,level:field.level,retirements:field.retirements!==false,ghosts:this.params.ghosts}):null
-   :room.role==='guest'&&room.race?.state==='waiting'&&room.race.circuit===circuit?room.race:null;
+  const room=this.room,field=immersive.field;
+  this.race=room.role==='host'?this.game.fullGrid()?room.planRace({circuit:this.game.session().circuit,laps:immersive.laps,ace:!!field.ace,level:field.level,retirements:field.retirements!==false,ghosts:this.params.ghosts}):null
+   :this.hostRace();
   field.seed=this.race?.seed;
   if(this.race){immersive.laps=this.race.laps;field.ace=this.race.ace;if(this.race.level)field.level=this.race.level;field.retirements=this.race.retirements;}
  }
- // After the field resets (same seed, same grid in every window): who drives which car.
+ // After the field resets (same seed, same grid in every window): who drives which car. The field's
+ // roster and the 99's model in the host's car's seat are main.js's (seatCar, from gridCar).
  seat(immersive){
   const field=immersive.field,visual=immersive.visual,car=immersive.car,race=this.race;
-  this.remotes.clear();car.ghost=false;immersive.playerEntry=undefined;
-  visual.rivals.splice(0,visual.rivals.length,...this.originals);for(const obj of this.originals){obj.userData.entry=RIVAL_ROSTER[this.originals.indexOf(obj)];this.label(obj,null);}
+  this.remotes.clear();car.ghost=false;
+  // A guest's seat showed the host's car: its own model goes back there (main.js's seatCar puts every
+  // model back before a race; a reset alone does not).
+  if(this.swap&&visual.rivals[this.swap.i]===this.hostObject)visual.rivals[this.swap.i]=this.swap.obj;this.swap=null;
+  visual.rivals.forEach((obj,k)=>{obj.userData.entry=field.roster[k];this.label(obj,null);});
   const me=this.myNumber();if(!me)return;
   car.ghost=!!race.ghosts;
-  if(me===HOST_NUMBER){this.seatHumans();return;}
-  const i=seatIndex(me),slot=field.rivals[i],back={x:car.x,y:car.y,heading:car.heading},name=race.seats.find(s=>s.number===me).name;
-  // This window's car takes its own seat on the grid...
+  if(me===race.car){this.seatHumans();return;}
+  const i=seatIndex(field,me),slot=field.rivals[i],back={x:car.x,y:car.y,heading:car.heading},name=race.seats.find(s=>s.number===me).name;
+  // This window's car takes its own seat on the grid (the field's measure of its race distance too,
+  // for the estimated times, RaceField classification)...
   car.x=slot.car.x;car.y=slot.car.y;car.heading=slot.car.heading;car.settle();
   immersive.freeLastS=car.surface.s;immersive.freePlayerProgress=slot.progress;immersive.playerEntry={...slot.entry,name,shortName:name,human:true};
-  // ...and that seat shows the host's Opala 99, at the back where the host's car starts.
-  slot.car.x=back.x;slot.car.y=back.y;slot.car.heading=back.heading;slot.car.settle();slot.lastS=slot.car.surface.s;slot.progress=0;
-  if(this.hostObject)visual.rivals[i]=this.hostObject;
+  Object.assign(field.playerRun,{progress:slot.progress,lastS:null});
+  // ...and that seat shows the host's car, at the back where the host's car starts.
+  slot.car.x=back.x;slot.car.y=back.y;slot.car.heading=back.heading;slot.car.settle();slot.lastS=slot.car.surface.s;slot.progress=slot.start=0;
+  const host=this.hostCar(race.car);if(host){this.swap={i,obj:visual.rivals[i]};visual.rivals[i]=host;}
   // The host's game drives every other car: here all of them come over the network.
-  field.rivals.forEach((r,k)=>this.remote(r,k===i?HOST_NUMBER:r.entry.number,false));
+  field.rivals.forEach((r,k)=>this.remote(r,k===i?race.car:r.entry.number,false));
   this.seatHumans();
  }
  // Which of the other cars humans drive, and their names: at the reset, and again whenever a seat
@@ -108,12 +137,12 @@ class Multiplayer {
  // seat left back into a bot); every window names the humans (ghosts in a race without contact).
  seatHumans(){
   const immersive=this.immersive,field=immersive.field,visual=immersive.visual,race=this.race,me=this.myNumber();if(!race||!me)return;
-  const humans=new Map(race.seats.map(s=>[s.number,s])),mine=me===HOST_NUMBER?-1:seatIndex(me);
+  const humans=new Map(race.seats.map(s=>[s.number,s])),host=me===race.car,mine=host?-1:seatIndex(field,me);
   field.rivals.forEach((r,k)=>{
-   const number=k===mine?HOST_NUMBER:RIVAL_ROSTER[k].number,seat=humans.get(number),obj=visual.rivals[k];
-   if(me===HOST_NUMBER){if(seat&&!r.puppet)this.remote(r,number,true);else if(!seat&&r.puppet)this.release(r);}
+   const number=k===mine?race.car:field.roster[k].number,seat=humans.get(number),obj=visual.rivals[k];
+   if(host){if(seat&&!r.puppet)this.remote(r,number,true);else if(!seat&&r.puppet)this.release(r);}
    r.car.ghost=!!seat&&!!race.ghosts;
-   r.entry=!seat?RIVAL_ROSTER[k]:number===HOST_NUMBER?hostEntry(seat.name):{...RIVAL_ROSTER[k],name:seat.name,shortName:seat.name,human:true};
+   r.entry=!seat?field.roster[k]:number===race.car?hostEntry(number,seat.name):{...field.roster[k],name:seat.name,shortName:seat.name,human:true};
    obj.userData.entry=r.entry;this.label(obj,seat?.name??null);
   });
  }
@@ -130,8 +159,8 @@ class Multiplayer {
  // Host: a guest gone (or never ready) leaves a bot in its seat, from where the car is. The human's
  // best lap goes with them: only the bot's own full laps may reach the AI records (ai-records.js).
  release(r){
-  const i=this.immersive.field.rivals.indexOf(r),obj=this.immersive.visual.rivals[i];
-  this.remotes.delete(r.seat);r.puppet=null;r.seat=null;r.car.remote=r.car.ghost=false;r.car.best=null;r.lastS=r.car.surface.s;r.entry=RIVAL_ROSTER[i];
+  const field=this.immersive.field,i=field.rivals.indexOf(r),obj=this.immersive.visual.rivals[i];
+  this.remotes.delete(r.seat);r.puppet=null;r.seat=null;r.car.remote=r.car.ghost=false;r.car.best=null;r.lastS=r.car.surface.s;r.entry=field.roster[i];
   obj.userData.entry=r.entry;this.label(obj,null);
  }
  // Name tags: a human's name in lime over the car; null puts the driver's own tag back.
@@ -143,10 +172,10 @@ class Multiplayer {
   u.mpOriginal=u.nameLabel??null;u.mpOriginal?.removeFromParent();
   u.mpLabel=u.nameLabel=this.immersive.visual.tag(obj,name,[0,2.08,0],2.7,.30,'#e2fb57','#172a2ddb');
  }
- // The countdown began: the host announces the race; either side holds on 3 until the start
- // (a host's race outside the room, Treino solo or 1x1, just runs).
+ // The countdown began: the host announces the race; either side holds on 3 until the start (a
+ // guest's grid race waits for the host's; a race outside the room, Treino solo or 1x1, just runs).
  countdown(){
-  if(this.room.role==='host'&&!this.race){this.render();return;}
+  if(!this.race&&(this.room.role==='host'||!this.game.fullGrid())){this.render();return;}
   this.holding=true;this.phase='waiting';this.readyClock=0;this.sendClock=0;if(this.race&&this.room.role==='host')this.room.openRace(this.race);this.render();
  }
  // The host may give the start while its race waits (the Largar button, or Enter).
@@ -196,7 +225,7 @@ class Multiplayer {
   const mine=packCar(car,{progress,finished:immersive.freeFinished,finishTime:immersive.finishTime,brake:command.brake??0,throttle:command.throttle??0,still});this.seq++;
   if(room.role==='guest'){room.sendState(mine,this.seq);return;}
   // The host passes a guest's car on as that guest sent it, with its age; the rest it drives.
-  const cars=[[HOST_NUMBER,0,mine]];
+  const cars=[[this.myNumber(),0,mine]];
   for(const r of immersive.field.rivals){
    const remote=r.puppet?this.remotes.get(r.seat):null;
    cars.push(remote?.raw?[r.seat,Math.min(remote.age,5),remote.raw]:[r.entry.number,0,packCar(r.car,{progress:r.progress,finished:r.finished,retired:!!r.retired,finishTime:r.finishTime,brake:r.input?.brake??0,throttle:r.input?.throttle??0,still})]);
@@ -208,15 +237,16 @@ class Multiplayer {
   const immersive=this.immersive;if(this.phase!=='racing'||!immersive?.freeFinished||immersive.finishing)return false;
   const now=clock();this.finishedAt??=now;
   if(this.stillRacing()&&now-this.finishedAt<RESULTS_WAIT)return true;
-  // Everyone is in, or the wait ran out: the order as it stands now.
+  // Everyone is in, or the wait ran out: the order as it stands now (estimated times for whoever still races).
   this.phase='finished';
-  immersive.freeOrder=[...immersive.rivals].sort((a,b)=>!!a.retired-!!b.retired||(a.finishTime??Infinity)-(b.finishTime??Infinity)||b.progress-a.progress).map(r=>({...r.entry,bestLap:r.car.best,totalTime:r.finished?r.finishTime:null,finished:r.finished,laps:r.car.laps,...(r.retired?{dnf:true,breakdown:r.broken?.kind}:{})}));
+  immersive.freeOrder=immersive.field.classification(immersive.freeTotalLaps,immersive.finishTime);
   this.render();return false;
  }
  stillRacing(){const me=this.myNumber();return this.race?.seats.filter(s=>s.number!==me&&!this.remotes.get(s.number)?.state?.finished).length??0;}
  buildPanel(){
-  const link=document.createElement('link');link.rel='stylesheet';link.href='./multiplayer.css';document.head.append(link);
-  const root=document.createElement('section');root.id='mpRoom';root.setAttribute('aria-label','Sala multiplayer');
+  // The release's version (preparar_publicacao.py tags this module's address) keeps a cached old sheet out.
+  const link=document.createElement('link');link.rel='stylesheet';link.href='./multiplayer.css'+new URL(import.meta.url).search;document.head.append(link);
+  const root=document.createElement('section');root.id='mpRoom';root.setAttribute('aria-label','Sala multiplayer');document.body.classList.add('mp-room');
   const add=(tag,className,parent=root)=>{const e=document.createElement(tag);if(className)e.className=className;parent.append(e);return e;};
   const head=add('div','mp-head');add('b','',head).textContent='SALA';
   this.panel={root,room:add('span','mp-name',head),role:add('small','mp-role',head),status:add('p','mp-status'),list:add('ol','mp-players')};
@@ -268,7 +298,7 @@ class Multiplayer {
   return race?.state==='racing'&&!race.seats.some(x=>x.id===room.id)?'Corrida em andamento: você entra na próxima largada.':'Esperando o anfitrião escolher a pista e largar…';
  }
  // Host, while its race waits: guests seated in it, and how many of them have it loaded.
- readiness(){const r=this.room.race,guests=r?r.seats.filter(x=>x.number!==HOST_NUMBER):[];return {guests:guests.length,ready:guests.filter(x=>this.room.ready.has(x.id)).length};}
+ readiness(){const r=this.room.race,guests=r?r.seats.filter(x=>x.id!==this.room.id):[];return {guests:guests.length,ready:guests.filter(x=>this.room.ready.has(x.id)).length};}
  render(){
   const p=this.panel;if(!p)return;const room=this.room,s=this.game.session(),me=room.number;
   p.start.hidden=!this.canStart();
@@ -277,15 +307,20 @@ class Multiplayer {
   if(this.holding){const caption=document.getElementById('countdownCaption');if(caption&&caption.textContent!=='AGUARDANDO A LARGADA')caption.textContent='AGUARDANDO A LARGADA';}
   // Out of the way of the result sheet; under the circuits on the track screen; one line on track.
   const results=document.getElementById('raceResults');p.root.hidden=!!results&&!results.hidden;
-  p.root.classList.toggle('mp-racing',s.started&&!s.paused);p.root.classList.toggle('mp-tracks',!document.getElementById('tracks')?.classList.contains('hidden'));
+  const shown=id=>!document.getElementById(id)?.classList.contains('hidden');
+  p.root.classList.toggle('mp-racing',s.started&&!s.paused);p.root.classList.toggle('mp-tracks',shown('tracks')||shown('cars'));
+  // The car screen (main.js roomCars): the cars other pilots have, this window's car once the host
+  // has answered its last choice, and the car still being asked for.
+  const taken=room.members.filter(m=>m.id!==room.id&&m.number).map(m=>[m.number,m.name]),mine=room.settled?me:null,asking=room.settled?null:room.want,cars=JSON.stringify([taken,mine,asking]);
+  if(cars!==this.cars){this.cars=cars;this.game.roomCars({taken:new Map(taken),mine,asking});}
   p.room.textContent=room.room;
-  p.role.textContent=room.role==='host'?'anfitrião · #99':room.pending?'na porta':room.role==='guest'?(me?`convidado · #${me}`:'assistindo'):'…';
+  p.role.textContent=room.role==='host'?`anfitrião · #${me}`:room.pending?'na porta':room.role==='guest'?(me?`convidado · #${me}`:'assistindo'):'…';
   p.status.textContent=this.statusText(s);
   // The key form when the server asks for it; knocks and kicks for an online host. Names only ever
   // reach the page as text.
   p.key.hidden=!(room.online&&room.problem==='chave');
   const knocks=room.role==='host'?[...room.knocks.values()]:[],kickable=room.online&&room.role==='host'&&!(s.started&&!s.paused);
-  const rows=room.members.map(m=>({id:m.id,text:`#${m.number??'—'} ${m.name}${m.number===HOST_NUMBER?' (anfitrião)':''}${m.id===room.id?' · você':''}`,kick:kickable&&m.id!==room.id}));
+  const rows=room.members.map(m=>({id:m.id,text:`#${m.number??'—'} ${m.name}${m.id===room.hostId?' (anfitrião)':''}${m.id===room.id?' · você':''}`,kick:kickable&&m.id!==room.id}));
   const key=JSON.stringify([rows,knocks]);
   if(key!==this.rows){
    this.rows=key;

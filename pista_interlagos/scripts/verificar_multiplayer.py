@@ -1,7 +1,9 @@
 """Multiplayer test version (teste/multiplayer.js) in the browser. Three windows of one browser join
-the room of index.html#sala=...: the host picks Corrida única, which waits on the grid; one guest was
-in the room already, the other arrives during that wait and is seated too; the host gives the start
-(the Largar button). They race one lap of Interlagos on the automatic pilot, every window shows the
+the room of index.html#sala=...: the host takes the 73 on Modo Corrida's car screen (the guest's car
+shows there under her name) and picks Corrida única, which waits on the grid; one guest was in the
+room already (she asked for the 64), the other arrives during that wait, is seated too and gets the
+first free car, the 99; the host gives the start (the Largar button). Each window paints its own car
+as its own. They race one lap of Interlagos on the automatic pilot, every window shows the
 others' cars where they really are (solid: humans collide unless the host asks for ghosts), and every
 result sheet lists all three pilots. Then the host reloads (F5): it hosts again under the same
 identity and the guests keep their cars. A window opened without #sala shows nothing of it and does
@@ -36,9 +38,10 @@ SERVER_KEY = 'chave-de-teste-local'
 SHOTS = Path(os.environ.get('INTERLAGOS_SHOTS') or tempfile.gettempdir()) / 'verificar_multiplayer'
 SHOTS.mkdir(parents=True, exist_ok=True)
 ROOM = f'verif{random.randrange(10**6)}'
-# Who races which car: the host always the 99; the first guest asks for the 64, the late one gets
-# the first free car (the 73).
-PILOTS = {'host': ('Ana Anfitriã', '99'), 'guest': ('Bia Convidada', '64'), 'late': ('Caio Atrasado', '73')}
+# Who races which car: the host takes the 73 on the car screen (it starts at the back, the 73's
+# driver sits out and the 99 has his seat); the first guest asks for the 64 (&carro=64); the late one
+# asks for nothing and gets the first free car, the 99, in that seat.
+PILOTS = {'host': ('Ana Anfitriã', '73'), 'guest': ('Bia Convidada', '64'), 'late': ('Caio Atrasado', '99')}
 OPENING = "window.interlagos&&!document.querySelector('#start').disabled&&!document.querySelector('#pilotName').hidden"
 PROBE = "()=>{const s=interlagosSala.info();return {t:performance.timeOrigin+performance.now(),me:s.me,cars:s.cars};}"
 FPS = "new Promise(done=>{let n=0;const t=performance.now();const f=()=>{n++;if(performance.now()-t<1000)requestAnimationFrame(f);else done(n);};requestAnimationFrame(f);})"
@@ -94,10 +97,23 @@ def race_room(context, host, pages):
     host.fill('#pilotName', PILOTS['host'][0])
     guest = guest_window(context, host, pages, 'guest', PILOTS['guest'][1])
     wait_js(host, f"interlagosSala.info().members.some(m=>m.name==={PILOTS['guest'][0]!r})", timeout=10000)
-    # A room always races the 99: Modo Corrida skips the car screen.
+    # Modo Corrida's car screen: the guest's 64 under her name, out of reach; the host takes the 73.
     host.click('#start')
-    assert host.is_visible('#tracks') and not host.is_visible('#cars') and host.inner_text('#tracksBack') == '← Início'
-    assert 'Opala #99' in host.inner_text('#tracksPilot'), host.inner_text('#tracksPilot')
+    wait_js(host, f"interlagosCarros.info().taken['64']==={PILOTS['guest'][0]!r}", timeout=30000)
+    card = host.locator('#carCards [data-car="64"]')
+    assert 'taken' in card.get_attribute('class') and card.locator('span').inner_text() == PILOTS['guest'][0], card.inner_text()
+    # (aria-disabled: Playwright would wait for it to be enabled; a mouse still clicks it)
+    card.click(force=True)
+    assert host.evaluate('interlagosCarros.info().value') == '99', 'a taken car is not picked'
+    assert PILOTS['guest'][0] in host.inner_text('#cars .car-note'), host.inner_text('#cars .car-note')
+    host.click('#carCards [data-car="73"]')
+    wait_js(host, "interlagosSala.info().number==='73'&&interlagosCarros.info().value==='73'", timeout=10000)
+    wait_js(guest, "interlagosSala.info().hostNumber==='73'", timeout=10000)
+    assert host.is_visible('#mpRoom'), 'the room card shows on the car screen'
+    host.screenshot(path=str(SHOTS / '1_anfitriao_carros.png'))
+    host.click('#carsNext')
+    assert host.is_visible('#tracks') and host.inner_text('#tracksBack') == '← Carro'
+    assert 'Opala #73' in host.inner_text('#tracksPilot'), host.inner_text('#tracksPilot')
     host.screenshot(path=str(SHOTS / '1_anfitriao_pistas.png'))
     guest.screenshot(path=str(SHOTS / '1_convidado_espera.png'))
     host.click('#singleRace')
@@ -120,11 +136,15 @@ def race_room(context, host, pages):
         wait_js(page, "window.interlagos?.ready&&document.querySelector('#raceCountdown').hidden", timeout=60000)
     info = {name: page.evaluate('interlagosSala.info()') for name, page in pages.items()}
     assert len({i['raceId'] for i in info.values()}) == 1
-    assert [s['number'] for s in info['host']['race']['seats']] == ['99', '64', '73'], info['host']['race']['seats']
+    assert [s['number'] for s in info['host']['race']['seats']] == ['73', '64', '99'], info['host']['race']['seats']
+    assert all(i['race']['car'] == '73' for i in info.values()), 'every window builds the grid around the host\'s car'
     # Host: only the guests' seats come over the network. Guests: every other car does.
-    assert sorted(c['number'] for c in info['host']['cars'] if c['remote']) == ['64', '73'], info['host']['cars']
+    assert sorted(c['number'] for c in info['host']['cars'] if c['remote']) == ['64', '99'], info['host']['cars']
     for name in ('guest', 'late'):
-        assert all(c['remote'] for c in info[name]['cars']) and '99' in [c['number'] for c in info[name]['cars']]
+        assert all(c['remote'] for c in info[name]['cars']) and '73' in [c['number'] for c in info[name]['cars']]
+    # Each window's own car wears its own paint (car-livery.js; the 99 as loaded).
+    painted = {name: page.evaluate('interlagosCarros.info().painted') for name, page in pages.items()}
+    assert painted == {name: number for name, (_, number) in PILOTS.items()}, painted
     # Every window shows the other two humans, named, drawn and solid (humans collide by default).
     for name, own in info.items():
         for other, (pilot, number) in PILOTS.items():

@@ -8,6 +8,72 @@ const money=n=>'R$ '+n.toFixed(2).replace('.',','),pct=n=>Math.round(n*100)+'%';
 const idle={throttle:0,brake:1,left:0,right:0,reverse:0,handbrake:0},still={throttle:0,brake:0,left:0,right:0};
 export const CAFE_MENU=Object.freeze([{id:'cafe',name:'Café',price:4,bites:3,verb:'beber',portion:'gole'},{id:'pao',name:'Pão de queijo',price:6,bites:2,verb:'comer',portion:'mordida'},{id:'doce',name:'Doce de leite',price:5,bites:3,verb:'comer',portion:'colherada'}]);
 const clamp=(v,a,b)=>Math.max(a,Math.min(b,v));
+// What the pilot buys at the Tia's café goes into a free hand (one item per hand) until it is
+// eaten or drunk, sip by sip. Shared by the stroll at a pit stop and the story's paddock
+// (immersive-mode.js): s is the walker's {held, using, snackTime, feedback}; pay(price) spends
+// (false: not enough), emit(name) plays a sound, touch words the hint for touch screens.
+export const snackState=(extra={})=>({held:[],using:null,snackTime:0,feedback:'',...extra});
+const snackItem=id=>CAFE_MENU.find(item=>item.id===id);
+// An item in the free hand, paid or not (Leonardo's coffee in the paddock); null with both hands busy.
+export function giveSnack(s,id){const item=snackItem(id);if(!item||s.held.length>=2)return null;const held={id,bites:item.bites,side:s.held.some(h=>h.side===1)?-1:1};s.held.push(held);return held;}
+export function buySnack(s,id,{pay,emit,touch=false}){
+ const item=snackItem(id);if(!item)return false;
+ if(s.held.length>=2){s.feedback='As duas mãos estão ocupadas: coma ou beba primeiro (E).';return false;}
+ if(!pay(item.price))return false;
+ giveSnack(s,id);s.snackTime=4;s.feedback=`${item.name} na mão! ${money(item.price)} pagos. ${touch?'Toque em':'Aperte E para'} ${item.verb}, sô!`;emit('pitCoffee');return true;
+}
+// One sip or bite: the hand goes to the mouth; the last one finishes the item.
+export function useSnack(s){if(s.menu||s.using||!s.held.length)return false;s.using={item:s.held[0],t:0,taken:false};return true;}
+export function stepSnack(s,dt,emit){
+ s.snackTime=Math.max(0,s.snackTime-dt);const u=s.using;if(!u)return;u.t+=dt;const item=snackItem(u.item.id);
+ if(!u.taken&&u.t>.55){u.taken=true;u.item.bites--;emit(item.id==='cafe'?'sip':'bite');s.feedback=u.item.bites>0?`Hum! Mais ${u.item.bites} ${item.portion}${u.item.bites>1?'s':''} de ${item.name.toLowerCase()}.`:item.id==='cafe'?'Cafezinho da Tia: coisa boa demais!':`${item.name} acabou. Delícia, uai!`;}
+ if(u.t>1.25){s.using=null;if(u.item.bites<=0)s.held.splice(s.held.indexOf(u.item),1);}
+}
+// What is in hand, for the walking HUD: 'Café (3 goles) + Pão de queijo (2 mordidas)'.
+export const snackLabel=s=>s.held.map(h=>{const m=snackItem(h.id);return `${m.name} (${h.bites} ${m.portion}${h.bites>1?'s':''})`;}).join(' + ');
+// What the action key does with the first item in hand: 'beber café', 'comer pão de queijo' ('' with empty hands).
+export const snackVerb=s=>{const m=s.held[0]&&snackItem(s.held[0].id);return m?`${m.verb} ${m.name.toLowerCase()}`:'';};
+const sipLift=s=>s.using?Math.sin(Math.min(1,s.using.t/1.25)*Math.PI):0;
+// stepOnFoot's arms (on-foot.js): a hand holding something stays out in front; to reach the mouth
+// the forearm turns in about the upper arm (the elbow stays out), bringing the hand in front of the
+// face instead of swinging the whole arm sideways.
+export function snackArms(s){
+ const u=s.using,lift=sipLift(s);
+ return (side,{swing,run,rig})=>{
+  const holding=s.held.some(h=>h.side===side),eating=u?.item.side===side;if(!holding&&!eating)return null;
+  let raise=holding?.4-swing*side*.3:-swing*side*(run?.85:1),bend=holding?1.1:run?1.35:.18,twist=0;
+  if(eating){raise+=((rig?1.2:1.8)-raise)*lift;bend+=(2.25-bend)*lift;twist=side*.6*lift;}
+  return [raise,bend,twist];
+ };
+}
+// The head tips back for a sip of coffee, less for a bite.
+export function snackHead(s,hero,dt){const rig=hero.userData.rig;if(rig)rig.head.rotation.z+=((s.using?.item.id==='cafe'?.3:.1)*sipLift(s)-rig.head.rotation.z)*(1-Math.exp(-dt*18));}
+// Snacks in hand: a cup of coffee, a pão de queijo, a pot of doce de leite with its spoon, in each
+// of the hero's hands (a rigged person's, else the simple figure's arm); hidden until held.
+export function snackHands(hero){
+ const snackMaterial=color=>new THREE.MeshStandardMaterial({color,roughness:.6}),cupMaterial=snackMaterial(0xf5f1e6),hands={};
+ for(const side of [-1,1]){
+  const holder=new THREE.Group(),rig=hero.userData.rig;holder.position.set(rig?.03:.05,rig?-.08:-.6,0);(rig?.limbs[side].hand??hero.getObjectByName('Membro_braco_'+side)).add(holder);holder.visible=false;
+  const cafe=new THREE.Group(),doce=new THREE.Group();cafe.add(new THREE.Mesh(new THREE.CylinderGeometry(.036,.027,.08,14),cupMaterial));const drink=new THREE.Mesh(new THREE.CylinderGeometry(.033,.033,.004,14),snackMaterial(0x3b2314));drink.position.y=.034;cafe.add(drink);
+  const pao=new THREE.Mesh(new THREE.SphereGeometry(.042,12,9),snackMaterial(0xe0ac55));pao.scale.y=.82;
+  const spoon=new THREE.Mesh(new THREE.BoxGeometry(.008,.1,.016),snackMaterial(0xc9ced1));spoon.position.set(.012,.05,0);spoon.rotation.z=-.3;doce.add(spoon,new THREE.Mesh(new THREE.CylinderGeometry(.042,.036,.048,14),snackMaterial(0x9a6232)));
+  holder.add(cafe,pao,doce);hands[side]={holder,items:{cafe,pao,doce}};
+ }
+ return hands;
+}
+// Each frame: what is held shows upright in its hand, the pão de queijo shrinks bite by bite, the
+// pot empties and the cup tips toward the mouth for a sip. s: null when nobody walks.
+const upright=new THREE.Quaternion(),handTurn=new THREE.Quaternion();
+export function showSnacks(hands,hero,s){
+ const held=s?.held??[],u=s?.using;hero.updateMatrixWorld(true);hero.getWorldQuaternion(upright);
+ for(const side of [-1,1]){
+  const hand=hands[side],item=held.find(h=>h.side===side);hand.holder.visible=!!item;if(!item)continue;
+  for(const [id,mesh] of Object.entries(hand.items))mesh.visible=id===item.id;
+  const full=snackItem(item.id).bites,left=item.bites;hand.items.pao.scale.setScalar(.45+.55*left/full);hand.items.doce.children[0].visible=left>0;
+  hand.holder.parent.getWorldQuaternion(handTurn).invert();hand.holder.quaternion.copy(handTurn).multiply(upright);
+  if(u?.item===item&&item.id==='cafe')hand.holder.rotateZ(1.1*Math.sin(Math.min(1,u.t/1.25)*Math.PI));
+ }
+}
 const jobName=job=>job.id==='fuel'?'Gasolina':CAR_PARTS.find(p=>p.id===job.id).name;
 export class PitStop {
  // layout (optional): another circuit's box. anchor {x,y,z,heading} places the station;
@@ -75,7 +141,7 @@ export class PitStop {
  toggleOpening(which){const o=this.openings,name=OPENINGS[which];if(!this.opened||!o?.has(name))return false;o.toggle(name);this.render();return true;}
  get touch(){return document.body.classList.contains('touch-device');}
  // Out of the car: the camera starts behind the driver, looking where he faces.
- visitCafe(){if(!this.opened||this.coffee)return;this.openings?.pulse(OPENINGS.driverDoor,1.6);const yaw=this.layout?.heroHeading??this.station.rotation.y+Math.PI/2;this.coffee=footState(yaw,{elapsed:0,menu:false,snackTime:0,held:[],using:null,repairs:!this.touch,floor:this.heroStart().y});this.hero.visible=true;this.hero.position.copy(this.heroStart());this.hero.rotation.y=yaw;this.message='Passeio grátis. Chegue perto da Tia para ver o cardápio.';this.onClose?.();this.captureMouse();this.render();}
+ visitCafe(){if(!this.opened||this.coffee)return;this.openings?.pulse(OPENINGS.driverDoor,1.6);const yaw=this.layout?.heroHeading??this.station.rotation.y+Math.PI/2;this.coffee=footState(yaw,snackState({elapsed:0,menu:false,repairs:!this.touch,floor:this.heroStart().y}));this.hero.visible=true;this.hero.position.copy(this.heroStart());this.hero.rotation.y=yaw;this.message='Passeio grátis. Chegue perto da Tia para ver o cardápio.';this.onClose?.();this.captureMouse();this.render();}
  captureMouse(){const view=document.getElementById('view');if(this.touch||!view?.requestPointerLock||document.pointerLockElement===view)return;try{view.requestPointerLock()?.catch?.(()=>{});}catch{}}
  releaseMouse(){if(document.pointerLockElement)document.exitPointerLock();}
  turnView(dx,dy){if(this.coffee)turnFootView(this.coffee,dx,dy);}
@@ -106,35 +172,18 @@ export class PitStop {
  returnCar(){if(!this.coffee||this.interaction()!=='car')return false;this.openings?.pulse(OPENINGS.driverDoor,1.2);this.coffee=null;this.mode.state.emitSound('engineCatch');this.leave();return true;}
  // What is bought goes into a free hand (one item per hand) until it is eaten or drunk.
  buySnack(id){
-  const item=CAFE_MENU.find(item=>item.id===id),s=this.coffee;if(!item||!s?.menu||this.interaction()!=='cafe')return false;
-  if(s.held.length>=2){s.feedback='As duas mãos estão ocupadas: coma ou beba primeiro (E).';this.render();return false;}
-  if(!this.spend(item.price))return false;
-  s.held.push({id,bites:item.bites,side:s.held.some(h=>h.side===1)?-1:1});s.snackTime=4;s.feedback=`${item.name} na mão! ${money(item.price)} pagos. ${this.touch?'Toque em':'Aperte E para'} ${item.verb}, sô!`;this.mode.state.emitSound('pitCoffee');this.render();return true;
+  const s=this.coffee;if(!s?.menu||this.interaction()!=='cafe')return false;
+  const bought=buySnack(s,id,{pay:price=>this.spend(price),emit:name=>this.mode.state.emitSound(name),touch:this.touch});this.render();return bought;
  }
- // One sip or bite: the hand goes to the mouth; the last one finishes the item.
- useSnack(){const s=this.coffee;if(!s||s.menu||s.using||!s.held.length)return false;s.using={item:s.held[0],t:0,taken:false};return true;}
- stepSnack(dt){
-  const s=this.coffee,u=s.using;if(!u)return;u.t+=dt;const item=CAFE_MENU.find(m=>m.id===u.item.id);
-  if(!u.taken&&u.t>.55){u.taken=true;u.item.bites--;this.mode.state.emitSound(item.id==='cafe'?'sip':'bite');s.feedback=u.item.bites>0?`Hum! Mais ${u.item.bites} ${item.portion}${u.item.bites>1?'s':''} de ${item.name.toLowerCase()}.`:item.id==='cafe'?'Cafezinho da Tia: coisa boa demais!':`${item.name} acabou. Delícia, uai!`;}
-  if(u.t>1.25){s.using=null;if(u.item.bites<=0)s.held.splice(s.held.indexOf(u.item),1);}
- }
+ useSnack(){return !!this.coffee&&useSnack(this.coffee);}
  walk(input,dt){
-  const s=this.coffee;if(!s)return;s.elapsed+=dt;s.snackTime=Math.max(0,s.snackTime-dt);this.stepSnack(dt);
+  const s=this.coffee;if(!s)return;s.elapsed+=dt;stepSnack(s,dt,name=>this.mode.state.emitSound(name));
   // The walk itself is on-foot.js (free to go anywhere; the Opala at the box is solid,
   // the crew at work round it is not, so it never pins the pilot at the door).
   // Here the hands hold the snacks in front and bring them to the mouth.
   this.footGround??=this.layout?.walk?footGround({car:this.car,pit:this.layout.pit,layout:this.layout,blocked:pos=>this.againstCar(pos),crew:false}):pos=>this.stationFloor(pos);
-  const u=s.using,lift=u?Math.sin(Math.min(1,u.t/1.25)*Math.PI):0;
-  const arms=(side,{swing,run,rig})=>{
-   const holding=s.held.some(h=>h.side===side),eating=u?.item.side===side;if(!holding&&!eating)return null;
-   // To reach the mouth the forearm turns in about the upper arm (the elbow stays out),
-   // bringing the hand in front of the face instead of swinging the whole arm sideways.
-   let raise=holding?.4-swing*side*.3:-swing*side*(run?.85:1),bend=holding?1.1:run?1.35:.18,twist=0;
-   if(eating){raise+=((rig?1.2:1.8)-raise)*lift;bend+=(2.25-bend)*lift;twist=side*.6*lift;}
-   return [raise,bend,twist];
-  };
-  if(stepOnFoot(s,this.hero,s.menu?still:input,dt,{touch:this.touch,shift:!!this.shift,ground:this.footGround,arms}))this.mode.state.emitSound('footstep');
-  const rig=this.hero.userData.rig;if(rig)rig.head.rotation.z+=((u?.item.id==='cafe'?.3:.1)*lift-rig.head.rotation.z)*(1-Math.exp(-dt*18));
+  if(stepOnFoot(s,this.hero,s.menu?still:input,dt,{touch:this.touch,shift:!!this.shift,ground:this.footGround,arms:snackArms(s)}))this.mode.state.emitSound('footstep');
+  snackHead(s,this.hero,dt);
  }
  // The Opala parked at the box is solid for the pilot on foot.
  againstCar(pos){const c=this.car,dx=pos.x-c.x,dz=pos.z+c.y,h=c.heading;return Math.abs(dx*Math.cos(h)-dz*Math.sin(h))<2.65&&Math.abs(dx*Math.sin(h)+dz*Math.cos(h))<1.25;}
@@ -180,7 +229,7 @@ export class PitStop {
   if(walking){
    const action=this.interaction(),touch=this.touch,s=this.coffee,first=s.held[0],firstItem=first&&CAFE_MENU.find(m=>m.id===first.id),hud=id=>this.walkHud.querySelector('#'+id);
    hud('pitWalkJob').textContent=busy?'Equipe: '+jobs.map(j=>`${jobName(j)} ${Math.ceil(j.seconds-j.elapsed)} s`).join(' · ')+(this.service.queue.length?` · +${this.service.queue.length} na fila`:''):'Opala pronto. Volte quando quiser.';
-   hud('pitWalkHold').hidden=!first;hud('pitWalkHold').textContent='Na mão: '+s.held.map(h=>{const m=CAFE_MENU.find(x=>x.id===h.id);return `${m.name} (${h.bites} ${m.portion}${h.bites>1?'s':''})`;}).join(' + ');
+   hud('pitWalkHold').hidden=!first;hud('pitWalkHold').textContent='Na mão: '+snackLabel(s);
    const lid=SPOT_OPENING[action]?this.openingLabel(action):'',eText=firstItem?`${firstItem.verb} ${firstItem.name.toLowerCase()}`:action==='cafe'?'cardápio':action==='car'?'entrar no Opala':lid?lid[0].toLowerCase()+lid.slice(1):'interagir';
    hud('pitWalkHint').textContent=`Saldo: ${money(this.wallet)} · `+(touch?'Caminhe até a Tia ou o carro.':`Mouse: câmera · W/A/S/D: andar · Shift: correr · Espaço: pular · C: agachar · E: ${eText} · F: ${action==='car'?'entrar no Opala':'sair/entrar no carro'} · Tab: mouse no menu`);
    hud('pitRepairs').textContent=s.repairs?'Esconder consertos':'Consertos do Opala';
@@ -190,7 +239,9 @@ export class PitStop {
  }
  update(dt,camera,visible){
   this.cameraRef=camera;const walking=!!this.coffee,menu=!!this.coffee?.menu;
-  this.layout?.animate?.(dt,{camera,opened:this.opened,walking,departing:this.departing,job:this.service.job,jobs:this.service.jobs,queue:this.service.queue,car:this.car,hero:this.hero.position,snack:this.coffee?.snackTime??0});this.hud.hidden=!visible||!this.racing||this.opened||!this.condition.enabled;this.panel.hidden=!visible||!this.opened||(walking&&!menu&&!this.coffee.repairs);this.walkHud.hidden=!visible||!walking||menu;this.panel.classList.toggle('cafe-menu',menu);this.panel.classList.toggle('walking',walking&&!menu);
+  // In the story's paddock the Tia greets and serves its pilot (ImmersiveMode.cafeGuest).
+  const guest=this.opened?null:this.mode.cafeGuest?.();
+  this.layout?.animate?.(dt,{camera,opened:this.opened,walking:walking||!!guest,departing:this.departing,job:this.service.job,jobs:this.service.jobs,queue:this.service.queue,car:this.car,hero:guest?.hero??this.hero.position,snack:guest?.snack??this.coffee?.snackTime??0});this.hud.hidden=!visible||!this.racing||this.opened||!this.condition.enabled;this.panel.hidden=!visible||!this.opened||(walking&&!menu&&!this.coffee.repairs);this.walkHud.hidden=!visible||!walking||menu;this.panel.classList.toggle('cafe-menu',menu);this.panel.classList.toggle('walking',walking&&!menu);
   document.body.classList.toggle('pit-open',visible&&this.opened);document.body.classList.toggle('pit-walking',visible&&walking);document.body.classList.toggle('pit-cafe-menu',visible&&menu);document.body.classList.toggle('pit-repairs',visible&&walking&&!menu&&!!this.coffee?.repairs);
   if(this.viewShifted&&(!visible||this.panel.hidden)){camera.clearViewOffset();this.viewShifted=false;}
   if(this.savedFov!==undefined&&(!visible||!walking)){camera.fov=this.savedFov;camera.updateProjectionMatrix();this.savedFov=undefined;}
@@ -198,7 +249,7 @@ export class PitStop {
   for(const p of CAR_PARTS)this.hud.querySelector(`[data-health="${p.id}"]`).value=this.condition.quality[p.id];
   this.hud.querySelector('#pitHint').textContent=this.car.surface.pit?'BOX 99 · pare no retângulo amarelo':'P no mapa · pitstop na reta principal';
   this.markers.visible=this.opened&&!walking;this.cafePrompt.visible=visible&&walking&&!menu&&this.interaction()!=='cafe';this.markers.children.forEach((m,i)=>m.material.color.setHSL(this.condition.quality[CAR_PARTS[i].id]*.32,.85,.52));
-  if(!this.opened)return;this.render();this.driver.root.visible=!walking;this.showSnacks();
+  if(!this.opened)return;this.render();this.driver.root.visible=!walking;showSnacks(this.hands,this.hero,this.coffee);
   if(!visible)return;
   const c=this.car,forward=new THREE.Vector3(Math.cos(c.heading),0,-Math.sin(c.heading)),inside=new THREE.Vector3(-Math.sin(c.heading),0,-Math.cos(c.heading));
   const v=this.view??=this.startView(),flat=Math.cos(v.elev)*v.distance,target=new THREE.Vector3(c.x,c.surface.z+1,-c.y),eye=target.clone().addScaledVector(forward,Math.cos(v.angle)*flat).addScaledVector(inside,Math.sin(v.angle)*flat).add(new THREE.Vector3(0,Math.sin(v.elev)*v.distance,0));
@@ -211,16 +262,6 @@ export class PitStop {
   // the car it orbits. Either way a wall in between brings it in front of the wall.
   if(walking)this.walkFollow=placeFootCamera(camera,this.coffee,this.hero.position,{layout:this.layout,obstacles:this.obstacles,ground:this.groundAt,dt,follow:this.walkFollow??camera.position.clone(),body:this.hero});
   else{this.walkFollow=null;camera.position.lerp(eye,1-Math.exp(-Math.max(dt,.016)*12));clearView(target,camera.position,this.obstacles,this.groundAt);camera.up.set(0,1,0);camera.lookAt(target);}
- }
- showSnacks(){
-  const held=this.coffee?.held??[],u=this.coffee?.using;this.hero.updateMatrixWorld(true);this.hero.getWorldQuaternion(this.upright);
-  for(const side of [-1,1]){
-   const hand=this.hands[side],item=held.find(h=>h.side===side);hand.holder.visible=!!item;if(!item)continue;
-   for(const [id,mesh] of Object.entries(hand.items))mesh.visible=id===item.id;
-   const full=CAFE_MENU.find(m=>m.id===item.id).bites,left=item.bites;hand.items.pao.scale.setScalar(.45+.55*left/full);hand.items.doce.children[0].visible=left>0;
-   hand.holder.parent.getWorldQuaternion(this.handTurn).invert();hand.holder.quaternion.copy(this.handTurn).multiply(this.upright);
-   if(u?.item===item&&item.id==='cafe')hand.holder.rotateZ(1.1*Math.sin(Math.min(1,u.t/1.25)*Math.PI));
-  }
  }
  buildScene(){
   const v=this.mode.visual,anchor=this.layout?.anchor??trackPoint(this.data,20,20);this.anchor=anchor;const h=anchor.heading;
@@ -245,15 +286,7 @@ export class PitStop {
    for(const [x,color] of [[1,0x815031],[2,0xeee9dc]]){const jar=new THREE.Mesh(new THREE.CylinderGeometry(.2,.2,.45,12),new THREE.MeshStandardMaterial({color}));jar.position.set(x,1.4,-9.7);this.station.add(jar);}
   }
   this.hero=this.layout?.makeHero?.()??v.human(0xd82125);if(!this.layout?.makeHero)v.tag(this.hero,'99',[.19,1.15,0],.3,.25);const helmet=this.driver.root.getObjectByName('Capacete_preto_vermelho_balaclava');if(helmet&&!this.layout?.makeHero){this.hero.userData.head.visible=false;const copy=helmet.clone();copy.position.set(0,1.62,0);this.hero.add(copy);}this.hero.visible=false;this.root.add(this.hero);
-  // Snacks in hand: a cup of coffee, a pão de queijo, a pot of doce de leite with its spoon.
-  const snackMaterial=color=>new THREE.MeshStandardMaterial({color,roughness:.6}),cupMaterial=snackMaterial(0xf5f1e6);this.upright=new THREE.Quaternion();this.handTurn=new THREE.Quaternion();this.hands={};
-  for(const side of [-1,1]){
-   const holder=new THREE.Group(),rig=this.hero.userData.rig;holder.position.set(rig?.03:.05,rig?-.08:-.6,0);(rig?.limbs[side].hand??this.hero.getObjectByName('Membro_braco_'+side)).add(holder);holder.visible=false;
-   const cafe=new THREE.Group(),doce=new THREE.Group();cafe.add(new THREE.Mesh(new THREE.CylinderGeometry(.036,.027,.08,14),cupMaterial));const drink=new THREE.Mesh(new THREE.CylinderGeometry(.033,.033,.004,14),snackMaterial(0x3b2314));drink.position.y=.034;cafe.add(drink);
-   const pao=new THREE.Mesh(new THREE.SphereGeometry(.042,12,9),snackMaterial(0xe0ac55));pao.scale.y=.82;
-   const spoon=new THREE.Mesh(new THREE.BoxGeometry(.008,.1,.016),snackMaterial(0xc9ced1));spoon.position.set(.012,.05,0);spoon.rotation.z=-.3;doce.add(spoon,new THREE.Mesh(new THREE.CylinderGeometry(.042,.036,.048,14),snackMaterial(0x9a6232)));
-   holder.add(cafe,pao,doce);this.hands[side]={holder,items:{cafe,pao,doce}};
-  }
+  this.hands=snackHands(this.hero);
   this.station.updateMatrixWorld(true);
   // The Interlagos café is behind walls: its sign shows through them as a guide.
   if(this.layout?.cafeSeat){this.cafeSeat=this.layout.cafeSeat.clone();this.cafePrompt=v.tag(this.root,'CARDÁPIO DA TIA',this.layout.cafeSign.toArray(),2.6,.4,'#ffe2a0','#754627');this.cafePrompt.material.depthTest=false;this.cafePrompt.renderOrder=90;}

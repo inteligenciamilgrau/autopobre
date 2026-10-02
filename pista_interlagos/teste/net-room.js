@@ -4,15 +4,17 @@
 //   guest in once the host admits it, and relays: this module then takes its word for the roles;
 // - same machine (&local=1): windows of one browser talk through a BroadcastChannel, with no server
 //   and no network; the windows elect their host among themselves.
-// The first window in a room hosts it: it gives out the seats (the host races the Opala 99, each
-// guest a rival's car), announces each race and holds its start until the host gives it: whoever
-// joins meanwhile is seated too, and whoever is still loading then races the next one. During the
-// race the host relays the whole field. Everything received is checked before use, and a sender
-// that floods is cut off. No DOM here: testar_multiplayer.mjs runs two rooms in Node.
-import {RIVAL_ROSTER} from './race-roster.js';
+// The first window in a room hosts it: it gives out the seats (a seat is one of the grid's 15 cars:
+// each pilot gets the one chosen on the car screen when nobody else has it, else the first free
+// one), announces each race and holds its start until the host gives it: whoever joins meanwhile is
+// seated too, and whoever is still loading then races the next one. The host's car starts at the
+// back of the grid (race.car: the field is race-roster.js fieldRoster of it). During the race the
+// host relays the whole field. Everything received is checked before use, and a sender that floods
+// is cut off. No DOM here: testar_multiplayer.mjs runs two rooms in Node.
+import {CAR_CHOICES} from './race-roster.js';
 import {readCar} from './net-cars.js';
-export const HOST_NUMBER='99';
-export const SEATS=Object.freeze([HOST_NUMBER,...RIVAL_ROSTER.map(e=>e.number)]);
+// The seats, the 99 first: the car of a pilot who asks for none (or for one already taken).
+export const SEATS=Object.freeze(CAR_CHOICES.map(e=>e.number));
 // Seconds: a silent player (or host) is gone after SILENT; a window hosts once ELECTION passes
 // with no host heard; a guest seated in a race that waits for its start (loading it, or drawing its
 // first frames) may stay silent up to READY_WAIT; online the server says when a connection closes,
@@ -44,25 +46,27 @@ export function roomName(value){
 // overrides, zero-width), at most 24 characters. It is only ever shown as text.
 export function playerName(value){return String(value??'').replace(/\p{C}/gu,'').replace(/\s+/g,' ').trim().slice(0,24);}
 // index.html#sala=NOME[&carro=73][&auto=1][&fantasmas=1][&local=1][&servidor=local][&lag=150][&perda=5];
-// null without a room. fantasmas: the host's races let humans pass through each other (by default
-// they collide). local: this browser's windows only, no server. servidor=local: wrangler dev here.
+// null without a room. carro: the car asked for, instead of the car screen's choice. fantasmas: the
+// host's races let humans pass through each other (by default they collide). local: this browser's
+// windows only, no server. servidor=local: wrangler dev here.
 export function roomParams(hash){
  const q=new URLSearchParams(String(hash??'').replace(/^#/,'')),room=roomName(q.get('sala'));if(!room)return null;
  const num=(key,hi)=>{const v=Number(q.get(key));return Number.isFinite(v)?clamp(v,0,hi):0;},car=q.get('carro');
- return {room,car:SEATS.includes(car)&&car!==HOST_NUMBER?car:null,auto:q.get('auto')==='1',ghosts:q.get('fantasmas')==='1',local:q.get('local')==='1',server:q.get('servidor')==='local'?'local':null,lag:num('lag',1000),loss:num('perda',50)/100};
+ return {room,car:SEATS.includes(car)?car:null,auto:q.get('auto')==='1',ghosts:q.get('fantasmas')==='1',local:q.get('local')==='1',server:q.get('servidor')==='local'?'local':null,lag:num('lag',1000),loss:num('perda',50)/100};
 }
 const validSeat=s=>s&&typeof s==='object'&&isId(s.id)&&typeof s.name==='string'&&s.name.length<=64&&SEATS.includes(s.number);
 const validSeats=v=>Array.isArray(v)&&v.length<=SEATS.length&&v.every(validSeat);
+const validPick=v=>v===undefined||isInt(v,0,1e9);
 function validRace(r){
- return r===null||r&&typeof r==='object'&&isId(r.id)&&typeof r.circuit==='string'&&/^[a-z0-9_-]{1,32}$/.test(r.circuit)&&isInt(r.laps,1,50)&&isInt(r.seed,0,4294967295)
+ return r===null||r&&typeof r==='object'&&isId(r.id)&&typeof r.circuit==='string'&&/^[a-z0-9_-]{1,32}$/.test(r.circuit)&&isInt(r.laps,1,50)&&isInt(r.seed,0,4294967295)&&SEATS.includes(r.car)
   &&typeof r.ace==='boolean'&&typeof r.retirements==='boolean'&&typeof r.ghosts==='boolean'&&(r.level===null||typeof r.level==='string'&&/^[a-z]{1,16}$/.test(r.level))&&validSeats(r.seats)&&['waiting','racing'].includes(r.state);
 }
 export function validMessage(m){
  if(!m||typeof m!=='object'||typeof m.t!=='string'||!isId(m.from))return false;
  switch(m.t){
-  case 'hello':return typeof m.name==='string'&&m.name.length<=64&&(m.want===null||SEATS.includes(m.want));
+  case 'hello':return typeof m.name==='string'&&m.name.length<=64&&(m.want===null||SEATS.includes(m.want))&&validPick(m.pick);
   case 'bye':return true;
-  case 'lobby':return typeof m.name==='string'&&m.name.length<=64&&isNum(m.age,0,1e7)&&Array.isArray(m.players)&&m.players.length<=32&&m.players.every(p=>p&&isId(p.id)&&typeof p.name==='string'&&p.name.length<=64&&(p.number===null||SEATS.includes(p.number)))&&validRace(m.race);
+  case 'lobby':return typeof m.name==='string'&&m.name.length<=64&&isNum(m.age,0,1e7)&&Array.isArray(m.players)&&m.players.length<=32&&m.players.every(p=>p&&isId(p.id)&&typeof p.name==='string'&&p.name.length<=64&&(p.number===null||SEATS.includes(p.number))&&validPick(p.pick))&&validRace(m.race);
   case 'ready':return isId(m.race);
   case 'go':return isId(m.race)&&validSeats(m.seats);
   case 'ping':return isInt(m.n,0,1e9);
@@ -98,9 +102,12 @@ export class Room {
  // replaceable in tests); lag (ms) and loss (share of car messages dropped) simulate a network on the
  // receiving side.
  // link: the room server's connection (net-link.js); without it, the same-machine BroadcastChannel.
+ // want: the car this window asks for (the car screen's choice); pick marks the last choice made here
+ // (a new random number each time, so a reloaded tab's 0 is never mistaken for a newer choice), acked
+ // the last one the host has answered (granted, or refused for a car already taken).
  constructor({room,name='',want=null,lag=0,loss=0,channel=null,link=null,clock=()=>performance.now()/1000,random=Math.random,storage=sessionStore()}={}){
   this.online=!!link;if(this.online)storage=null;
-  Object.assign(this,{room,want,lag,loss,clock,random,storage,link});this.name=playerName(name)||'Piloto';
+  Object.assign(this,{room,want:SEATS.includes(want)?want:null,lag,loss,clock,random,storage,link});this.name=playerName(name)||'Piloto';this.pick=this.acked=0;
   this.knocks=new Map();this.pending=false;this.problem=null;this.trail=[];
   // The identity this tab had before a reload, if any: its id, its seat, and whether it hosted.
   const saved=this.restored=readSaved(storage,room);this.id=saved?.id??randomId(random);this.lastNumber=saved?.number??null;
@@ -117,9 +124,24 @@ export class Room {
  // The room's last events (who came, who went, the connection), for the checks and a bug report.
  note(text){this.trail.push(`${this.clock().toFixed(2)} ${text}`);if(this.trail.length>40)this.trail.shift();}
  emit(name,...args){return this.events[name]?.(...args);}
- // This window's seat: the host always races the 99; a guest's comes from the host (null: none free).
- get number(){return this.role==='host'?HOST_NUMBER:this.lobby?.players.find(p=>p.id===this.id)?.number??null;}
+ // This window's seat, the car it races (a guest's comes from the host; null: none free), and the host's.
+ get number(){return this.role==='host'?this.players.get(this.id)?.number??null:this.lobby?.players.find(p=>p.id===this.id)?.number??null;}
+ get hostNumber(){return this.role==='host'?this.number:this.lobby?.players.find(p=>p.id===this.hostId)?.number??null;}
  get members(){return this.role==='host'?[...this.players.values()]:this.lobby?.players??[];}
+ // Whether the host has answered this window's last choice (number is then its verdict); with no
+ // choice made in this tab yet (pick 0: new, or back from a reload) there is nothing to answer.
+ get settled(){return this.role==='host'||!this.pick||this.pick===this.acked;}
+ // The car to ask a host for: the last choice not answered yet, else the seat this window had (a
+ // host back from a reload, or a new host, gives it again), else the choice.
+ asking(){return this.pick&&this.pick!==this.acked?this.want:this.lastNumber??this.want;}
+ // The player picked a car on the car screen: the host takes it at once if nobody has it; a guest
+ // asks the host, who gives it now or when the race that guest is in ends (grant).
+ choose(number){
+  if(!SEATS.includes(number))return;this.want=number;const last=this.pick;this.pick=1+Math.floor(this.random()*1e9);if(this.pick===last)this.pick=last%1e9+1;
+  if(this.role==='host'){this.acked=this.pick;const p=this.players.get(this.id);p.pick=p.done=this.pick;p.wish=number;this.grant();this.beacon();}
+  else if(this.role==='guest'&&!this.pending)this.hello();
+  this.emit('change');
+ }
  // A host back from a reload takes its room again at once, as old as it was; anyone else elects.
  start(){
   // Online the server says who hosts (welcome): nothing to elect.
@@ -157,7 +179,7 @@ export class Room {
  deny(id){if(this.role!=='host')return;this.knocks.delete(id);this.send({t:'deny',to:id});this.emit('change');}
  kick(id){if(this.role!=='host'||id===this.id)return;this.knocks.delete(id);this.send({t:'kick',to:id});this.drop(id);}
  // The tab's identity, for a reload: id, seat, whether it hosts and since when (wall clock).
- save(){try{this.storage?.setItem(SAVED+this.room,JSON.stringify({id:this.id,host:this.role==='host',since:this.role==='host'?this.hostEpoch:null,number:this.number??this.lastNumber,at:Date.now()}));}catch{}}
+ save(){this.lastNumber=this.number??this.lastNumber;try{this.storage?.setItem(SAVED+this.room,JSON.stringify({id:this.id,host:this.role==='host',since:this.role==='host'?this.hostEpoch:null,number:this.lastNumber,at:Date.now()}));}catch{}}
  // Another live window has this identity (a duplicated tab): this one takes a new id and elects.
  renew(){this.id=randomId(this.random);this.restored=null;this.twinUntil=0;this.lastNumber=null;this.save();this.elect();}
  // A guest whose host said goodbye and has not come back yet.
@@ -165,8 +187,8 @@ export class Room {
  // A guest still at the door (online) says its new name too: the host sees who is knocking.
  setName(value){const name=playerName(value)||'Piloto';if(name===this.name)return;this.name=name;if(this.role==='host'){this.players.get(this.id).name=name;this.beacon();}else if(this.role==='guest')this.hello();}
  send(m){m.from=this.id;if(this.online){this.link.send(m);return;}try{this.channel.postMessage(m);}catch{}}
- // The seat it had (a host back from a reload gives it again) or the one the address asks for.
- hello(){this.helloAt=this.clock();this.nextHello=this.helloAt+HELLO;this.send({t:'hello',name:this.name,want:this.lastNumber&&this.lastNumber!==HOST_NUMBER?this.lastNumber:this.want});}
+ // The car asked for (asking) and the choice it answers (pick: the host acts on a new one only).
+ hello(){this.helloAt=this.clock();this.nextHello=this.helloAt+HELLO;this.send({t:'hello',name:this.name,want:this.asking(),pick:this.pick});}
  elect(){this.role=null;this.hostId=null;this.lobby=null;this.electUntil=this.clock()+ELECTION+this.lag/500;this.hello();this.emit('change');}
  arrive(m){
   if(this.loss&&(m?.t==='state'||m?.t==='snap')&&this.random()<this.loss)return;
@@ -182,7 +204,7 @@ export class Room {
   const now=this.clock();if(!this.allow(m.from,now))return;
   const host=this.role==='host',fromHost=this.role==='guest'&&m.from===this.hostId;
   switch(m.t){
-   case 'hello':if(host)this.join(m.from,m.name,m.want,now);break;
+   case 'hello':if(host)this.join(m.from,m.name,m.want,m.pick??0,now);break;
    case 'bye':if(host){this.note('bye '+m.from);this.drop(m.from);}else if(fromHost){this.hostLeft=now;this.emit('change');}break;
    case 'lobby':this.heardHost(m,now);break;
    case 'ready':if(host&&this.race?.id===m.race&&this.race.state==='waiting'&&this.race.seats.some(s=>s.id===m.from)&&!this.ready.has(m.from)){this.touch(m.from,now);this.ready.add(m.from);this.emit('change');}break;
@@ -209,7 +231,8 @@ export class Room {
   const joined=this.role!=='guest'||this.hostId!==m.from;
   if(joined){this.race=null;this.players.clear();this.ready.clear();}
   this.role='guest';this.hostId=m.from;this.hostSeen=now;this.hostLeft=undefined;this.lobby=m;
-  const mine=m.players.find(p=>p.id===this.id)?.number;if(mine&&mine!==this.lastNumber){this.lastNumber=mine;this.save();}
+  const me=m.players.find(p=>p.id===this.id),mine=me?.number;if(mine&&mine!==this.lastNumber){this.lastNumber=mine;this.save();}
+  if(me?.pick!==undefined)this.acked=me.pick;
   // Not in the host's list (new here, or the host is back from a reload): say hello again, soon.
   if(!m.players.some(p=>p.id===this.id)&&(joined||now-(this.helloAt??-Infinity)>=.5))this.hello();
   const race=m.race,seated=race?.seats.some(s=>s.id===this.id);
@@ -226,24 +249,43 @@ export class Room {
  // epoch: when this tab began hosting (wall clock), kept across a reload.
  becomeHost(now,epoch=Date.now()){
   this.role='host';this.hostId=this.id;this.hostEpoch=epoch;this.hostSince=now-Math.max(0,(Date.now()-epoch)/1000);this.lobby=null;this.race=null;this.ready.clear();this.players.clear();
-  this.players.set(this.id,{id:this.id,name:this.name,number:HOST_NUMBER,seen:now});this.save();this.beacon(now);this.emit('change');
+  // Its car: a choice the host it replaces had not answered yet, else the one it had (back from a
+  // reload, or as a guest of that host), else its choice.
+  const number=this.asking()??SEATS[0];this.acked=this.pick;
+  this.players.set(this.id,{id:this.id,name:this.name,number,pick:this.pick,done:this.pick,seen:now});this.save();this.beacon(now);this.emit('change');
   // The server's doorman stays on: every guest waits until the host lets it in.
   if(this.online)this.send({t:'config',porteiro:true});
  }
- join(id,name,want,now){
+ // pick: the guest's last choice on its car screen; a new one is a wish for want (grant). 0 is no
+ // choice yet (a tab back from a reload asks for the seat it had): any wish it left still stands.
+ join(id,name,want,pick,now){
   const p=this.players.get(id);
-  if(p){p.name=playerName(name)||p.name;p.seen=now;}
-  else{this.players.set(id,{id,name:playerName(name)||'Piloto',number:this.freeSeat(want),seen:now});this.note('entrou '+id);}
+  if(p){p.name=playerName(name)||p.name;p.seen=now;if(pick&&pick!==p.pick){p.pick=pick;p.wish=want;this.grant();}}
+  else{this.players.set(id,{id,name:playerName(name)||'Piloto',number:this.freeSeat(want),pick,done:pick,seen:now});this.note('entrou '+id);}
   this.seatEveryone();this.beacon(now);this.emit('change');
  }
- // While a race waits for its start, everyone in the room has a seat in it, under their current name.
+ // Host: the cars asked for on the car screens. A car nobody else has is the pilot's from now on; one
+ // that is taken stays with whoever has it (the pilot keeps its own). Either way the lobby tells the
+ // pilot it was answered (done). Whoever is in a race under way (the host: in any race of its own)
+ // keeps its car until that race ends: closeRace and openRace grant what waited.
+ grant(){
+  const busy=new Set(this.race?.state==='racing'?this.race.seats.map(s=>s.id):[]);if(this.race)busy.add(this.id);
+  for(const p of this.players.values()){
+   if(!('wish' in p)||busy.has(p.id))continue;
+   const want=p.wish;delete p.wish;p.done=p.pick;
+   if(want&&![...this.players.values()].some(o=>o!==p&&o.number===want))p.number=want;
+  }
+  this.save();this.seatEveryone();
+ }
+ // While a race waits for its start, everyone in the room has a seat in it, in their current car and
+ // under their current name.
  seatEveryone(){
   const r=this.race;if(this.role!=='host'||r?.state!=='waiting')return;
   const before=seatKey(r.seats);
-  for(const p of this.players.values()){if(!p.number)continue;const seat=r.seats.find(s=>s.id===p.id);if(seat)seat.name=p.name;else r.seats.push({id:p.id,name:p.name,number:p.number});}
+  for(const p of this.players.values()){if(!p.number)continue;const seat=r.seats.find(s=>s.id===p.id);if(seat){seat.name=p.name;seat.number=p.number;}else r.seats.push({id:p.id,name:p.name,number:p.number});}
   if(seatKey(r.seats)!==before)this.emit('seats',r);
  }
- // The seat asked for when free, else the first free rival's car; null when all 15 are taken.
+ // The seat asked for when free, else the first free car; null when all 15 are taken.
  freeSeat(want){const taken=new Set([...this.players.values()].map(p=>p.number));return want&&!taken.has(want)?want:SEATS.find(n=>!taken.has(n))??null;}
  drop(id){
   const p=this.players.get(id);if(!p||id===this.id)return;
@@ -254,17 +296,18 @@ export class Room {
  touch(id,now){const p=this.players.get(id);if(p)p.seen=now;}
  beacon(now=this.clock()){
   if(this.role!=='host')return;this.nextBeacon=now+BEACON;const r=this.race;
-  this.send({t:'lobby',name:this.name,age:Math.round((now-this.hostSince)*100)/100,players:[...this.players.values()].map(({id,name,number})=>({id,name,number})),race:r&&{id:r.id,circuit:r.circuit,laps:r.laps,seed:r.seed,ace:r.ace,level:r.level,retirements:r.retirements,ghosts:r.ghosts,seats:r.seats,state:r.state}});
+  this.send({t:'lobby',name:this.name,age:Math.round((now-this.hostSince)*100)/100,players:[...this.players.values()].map(({id,name,number,done})=>({id,name,number,pick:done})),race:r&&{id:r.id,circuit:r.circuit,laps:r.laps,seed:r.seed,car:r.car,ace:r.ace,level:r.level,retirements:r.retirements,ghosts:r.ghosts,seats:r.seats,state:r.state}});
  }
  // Host: the next race with everyone seated now; announced only when its countdown begins. The
- // seed and RaceField's settings (the ace, the rivals' level, breakdowns) give every window the
- // same grid and field; ghosts, whether its humans pass through each other.
+ // seed, the host's car (car: the one at the back of the grid, whose driver sits out) and RaceField's
+ // settings (the ace, the rivals' level, breakdowns) give every window the same grid and field;
+ // ghosts, whether its humans pass through each other.
  planRace({circuit,laps,ace=false,level=null,retirements=true,ghosts=false}){
   const seats=[...this.players.values()].filter(p=>p.number).map(({id,name,number})=>({id,name,number}));
-  return {id:randomId(this.random),circuit,laps,ace:!!ace,level:level??null,retirements:!!retirements,ghosts:!!ghosts,seed:Math.floor(this.random()*4294967296),seats,state:'waiting'};
+  return {id:randomId(this.random),circuit,laps,car:this.number,ace:!!ace,level:level??null,retirements:!!retirements,ghosts:!!ghosts,seed:Math.floor(this.random()*4294967296),seats,state:'waiting'};
  }
- openRace(race){if(this.role!=='host')return;this.race=race;this.ready=new Set([this.id]);this.seatEveryone();this.beacon();this.emit('change');}
- closeRace(){if(this.role!=='host'||!this.race)return;this.race=null;this.beacon();this.emit('change');}
+ openRace(race){if(this.role!=='host')return;this.race=race;this.ready=new Set([this.id]);this.grant();this.beacon();this.emit('change');}
+ closeRace(){if(this.role!=='host'||!this.race)return;this.race=null;this.grant();this.beacon();this.emit('change');}
  // Host: lights out. Whoever has not loaded the race yet leaves it (and races the next one).
  lightsOut(){
   const r=this.race;if(this.role!=='host'||r?.state!=='waiting')return;
@@ -296,5 +339,5 @@ export class Room {
   if(now>=this.nextPing){this.nextPing=now+PING;this.pings.set(++this.pingN,now);if(this.pings.size>8)this.pings.delete(this.pings.keys().next().value);this.send({t:'ping',n:this.pingN});}
   if(now>=this.nextHello&&!this.pending)this.hello();
  }
- info(){return {room:this.room,trail:[...this.trail],online:this.online,problem:this.problem,pending:this.pending,knocks:[...this.knocks.values()],id:this.id,role:this.role,number:this.number,name:this.name,latency:this.latency,ready:[...this.ready],members:this.members.map(({id,name,number})=>({id,name,number})),race:this.race&&{...this.race,seats:this.race.seats.map(s=>({...s}))}};}
+ info(){return {room:this.room,trail:[...this.trail],online:this.online,problem:this.problem,pending:this.pending,knocks:[...this.knocks.values()],id:this.id,role:this.role,number:this.number,name:this.name,latency:this.latency,want:this.want,settled:this.settled,hostNumber:this.hostNumber,ready:[...this.ready],members:this.members.map(({id,name,number})=>({id,name,number})),race:this.race&&{...this.race,seats:this.race.seats.map(s=>({...s}))}};}
 }

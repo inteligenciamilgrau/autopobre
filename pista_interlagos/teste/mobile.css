@@ -45,3 +45,5 @@ html:has(body.touch-device),.touch-device,.touch-device *{touch-action:pan-x pan
 .touch-device #immersivePanel.leo-dialogue .social-prompt,.touch-device #immersivePanel.leo-dialogue .social-choices small{display:none}
 .touch-device #immersivePanel.leo-dialogue .speech-bubble{padding:9px 12px}
 .touch-device #immersivePanel.leo-dialogue .social-choices button{margin:5px 0}
+/* The Tia's menu in the paddock: as the team's panel, taller and without the speech bubble or the notes under the items (the prompt says what is in hand). */
+.touch-device #immersivePanel.cafe-dialogue{top:36px;max-height:calc(100dvh - 100px)}.touch-device #immersivePanel.cafe-dialogue .speech-bubble{display:none}.touch-device #immersivePanel.cafe-dialogue .social-person{margin-bottom:8px}.touch-device #immersivePanel.cafe-dialogue .social-prompt{margin:6px 0}.touch-device #immersivePanel.cafe-dialogue .social-choices button{margin:5px 0}.touch-device #immersivePanel.cafe-dialogue .social-choices small{display:none}

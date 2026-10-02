@@ -6,6 +6,8 @@ const axes=c=>[[Math.cos(c.heading),Math.sin(c.heading)],[-Math.sin(c.heading),M
 const center=c=>[c.x+.08*Math.cos(c.heading),c.y+.08*Math.sin(c.heading)];
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1];
 const cross=(a,b)=>a[0]*b[1]-a[1]*b[0];
+// Sectors per lap of the split times behind an estimated finish (classification).
+const SPLITS=64;
 // Stable personalities: braking envelopes, corner pace, how much road they use (lineUse),
 // apex timing in 2 m samples (apex > 0 is later), gap they sit at before a move (followTime),
 // appetite to attack, to cover the inside, and lap-to-lap consistency.
@@ -181,7 +183,10 @@ export function pitRoute(data){
 }
 // Seeded (mulberry32) so a check or a reference run can replay one race exactly.
 function random(seed){let t=seed>>>0;return ()=>{t=t+0x6D2B79F5>>>0;let r=Math.imul(t^t>>>15,1|t);r=r+Math.imul(r^r>>>7,61|r)^r;return ((r^r>>>14)>>>0)/4294967296;};}
-const trackGap=(from,to,L)=>{let gap=to.surface.s-from.surface.s;if(gap>L/2)gap-=L;if(gap<-L/2)gap+=L;return gap;};
+// The way from s0 to s1 along a lap of L, the short way round (negative backwards): a car's travel
+// between two steps, across the line too.
+export const lapTravel=(s0,s1,L)=>{let d=s1-s0;if(d>L/2)d-=L;if(d<-L/2)d+=L;return d;};
+const trackGap=(from,to,L)=>lapTravel(from.surface.s,to.surface.s,L);
 // Multiplayer (multiplayer.js): a remote car is placed from its owner's messages, so two of them
 // never push each other here; in a room raced with ghosts the humans' cars pass through one another.
 const apart=(a,b)=>a.remote&&b.remote||a.ghost&&b.ghost;
@@ -196,6 +201,8 @@ export class RaceField {
  // race-roster.js fieldRoster with the Opala 99 in that car's seat.
  reset(startS=0,{grid=false,seed=this.seed,entrants=null}={}){
   this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;this.hero=null;
+  // The player's race distance and split times, measured here too: a reference pace (classification).
+  this.playerRun={progress:0,lastS:null,splits:[]};
   // A fresh seed per start: the same grid never races the same way twice.
   this.raceSeed=seed??Math.floor(Math.random()*4294967296);const rand=this.random=random(this.raceSeed),pick=(lo,hi)=>lo+(hi-lo)*rand();
   this.gridLeadIn=grid?(this.data.meta.reconstructed_xy_m-startS)%this.data.meta.reconstructed_xy_m:0;
@@ -211,7 +218,7 @@ export class RaceField {
    const car=new TestCar(this.data);car.reset(index);car.awaitingStart=grid;car.engineScale=style.engineScale;if(style.heavy)car.contactMass=style.heavy;
    const lane=gridSlot(slot).lane;car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);
    const rating=levelRating(entry,level);
-   const rival={car,entry,rosterIndex:field.indexOf(entry),style,level,progress,lastS:car.surface.s,finished:false,finishTime:null,stun:0,
+   const rival={car,entry,rosterIndex:field.indexOf(entry),style,level,progress,start:progress,splits:[],lastS:car.surface.s,finished:false,finishTime:null,stun:0,
     // Personal line: share of the road used, apex timing and a slow wander of a few decimetres.
     lineUse:clamp(style.lineUse*pick(.95,1.04),.8,1),apex:style.apex+Math.round(pick(-1.4,1.4)),
     wander:{amp:pick(.08,.3)*(1.4-rating),rate:pick(.06,.14)*2*Math.PI,phase:pick(0,2*Math.PI)},
@@ -244,9 +251,12 @@ export class RaceField {
    for(const o of bodies){if(o===c)continue;const dx=o.x-c.x,dy=o.y-c.y,f=dx*fx+dy*fy,side=Math.abs(dy*fx-dx*fy);if(f>4&&f<35&&side<1.9)c.draft=Math.max(c.draft,.38*(1-f/35)*(1-side/3.8));}
   }
   // One physics step for a rival, then its race distance and the flag.
-  const drive=(r,input)=>{const c=r.car;r.tow=c.draft;c.step(input,dt);commands.push(input);let travel=c.surface.s-r.lastS;if(travel<-L/2)travel+=L;if(travel>L/2)travel-=L;r.progress+=travel;r.lastS=c.surface.s;if(totalLaps&&!r.finished&&!r.retired&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}};
+  const drive=(r,input)=>{const c=r.car;r.tow=c.draft;c.step(input,dt);commands.push(input);r.progress+=lapTravel(r.lastS,c.surface.s,L);r.lastS=c.surface.s;if(totalLaps&&!r.finished&&!r.retired&&r.progress>=L*totalLaps+this.gridLeadIn){r.finished=true;r.finishTime=this.time;}};
   // A seat raced over the network (r.puppet, multiplayer.js) is placed, not driven: it returns the pedals.
   for(const r of this.rivals){if(r.puppet){commands.push(r.puppet(r,dt));continue;}drive(r,r.pit?this.pitInput(r,bodies,dt):this.decide(r,bodies,driverOf,player,dt,totalLaps));}
+  // Split times: when each car first reached each of the race's sectors (classification).
+  const me=this.playerRun;me.lastS??=player.surface.s;me.progress+=lapTravel(me.lastS,player.surface.s,L);me.lastS=player.surface.s;
+  if(totalLaps&&Number.isFinite(totalLaps)){const split=L/SPLITS,last=totalLaps*SPLITS;for(const r of [me,...this.rivals]){const k=Math.min(last,Math.floor((r.progress-this.gridLeadIn)/split));while(r.splits.length<=k)r.splits.push(t);}}
   for(let iteration=0;iteration<4;iteration++)for(let i=0;i<bodies.length;i++)for(let j=i+1;j<bodies.length;j++){
    if(Math.abs((bodies[i].z??bodies[i].surface.z)-(bodies[j].z??bodies[j].surface.z))>1.6||apart(bodies[i],bodies[j]))continue;
    const hit=resolveContact(bodies[i],bodies[j]);if(!hit)continue;
@@ -546,6 +556,28 @@ export class RaceField {
   r.blocked=speed<1.2&&target>3?(r.blocked??0)+dt:0;if(r.blocked>2.5){r.recover=1.2;r.blocked=0;}
   if(r.recover>0){r.recover-=dt;Object.assign(input,{reverse:1,throttle:0,brake:0,left:alpha<0?1:0,right:alpha>0?1:0});}
   return input;
+ }
+ // The rivals in result order (race-results.js resultRows): who crossed the line, by time, then
+ // the cars still racing in running order, retirements last. A car still on the track gets the
+ // total time it would take to the flag (estimated: true): the rest of this lap as long as the
+ // same stretch took it on the lap before (the run to the line is the fast part of a lap), plus
+ // its last lap for each lap it is down. On its first lap there is no lap before: the rest as
+ // long as it took a car already in (the slowest, the player included), scaled by how much
+ // longer this car took to get where it is; with nobody in yet, its average pace so far.
+ // Never ahead of the car in front, nor of after (the player's own finish time).
+ classification(totalLaps,after=-Infinity){
+  const L=this.data.meta.reconstructed_xy_m,goal=L*totalLaps+this.gridLeadIn,t=this.time,S=SPLITS,split=L/S,G=totalLaps*S;let ahead=after??-Infinity;
+  const ref=Number.isFinite(G)?[this.playerRun,...this.rivals].filter(q=>q?.splits?.length>G).sort((a,b)=>b.splits[G]-a.splits[G])[0]:null;
+  return [...this.rivals].sort((a,b)=>(a.finishTime??Infinity)-(b.finishTime??Infinity)||!!a.retired-!!b.retired||b.progress-a.progress).map(r=>{
+   const row={...r.entry,bestLap:r.car.best,totalTime:r.finished?r.finishTime:null,finished:r.finished,laps:r.car.laps,...(r.retired?{dnf:true,breakdown:r.broken?.kind}:{})};
+   if(r.finished||r.retired||!Number.isFinite(goal)||t<=0)return row;
+   const at=Math.max(0,(r.progress-this.gridLeadIn)/split),k=Math.floor(at),lap=Math.floor(k/S),p=r.splits??[];let left;
+   if(lap>=1&&lap<totalLaps&&p.length>lap*S){const lapTime=p[lap*S]-p[(lap-1)*S];left=p[lap*S]-p[k-S]-(at-k)*(p[k-S+1]-p[k-S])+(totalLaps-lap-1)*lapTime;}
+   else if(ref&&ref.splits[k]+(at-k)*(ref.splits[k+1]-ref.splits[k])>0){const q=ref.splits,refAt=q[k]+(at-k)*(q[k+1]-q[k]);left=t/refAt*(q[G]-refAt);}
+   else left=Math.max(0,goal-r.progress)/clamp((r.progress-(r.start??0))/t,8,90);
+   ahead=Math.max(t+Math.max(0,left),ahead+.2);
+   return {...row,totalTime:ahead,estimated:true};
+  });
  }
  info(){return {collisions:this.collisions,rivals:this.rivals.map(r=>({number:r.entry.number,name:r.entry.name,level:r.entry.level,style:r.style.name,x:r.car.x,y:r.car.y,heading:r.car.heading,speed:Math.hypot(r.car.vx,r.car.vy),progress:r.progress,finished:r.finished,pit:r.pit?(r.pit.parked?'parked':'lane'):null,retired:!!r.retired,breakdown:r.broken?.kind??null,mode:r.mode,blend:r.blend,draft:r.tow,mistakes:r.mistakes,passes:r.passes}))};}
 }

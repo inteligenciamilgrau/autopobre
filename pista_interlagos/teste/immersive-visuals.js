@@ -37,18 +37,62 @@ export function numberSticker(number){
  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=200;const ctx=canvas.getContext('2d');ctx.font='italic 900 170px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=16;ctx.strokeStyle='#101314';ctx.strokeText(number,128,108,228);ctx.fillStyle='#f4f3ee';ctx.fillText(number,128,108,228);
  const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;return new THREE.MeshStandardMaterial({map,transparent:true,depthWrite:false,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
 }
-// A sticker grid bent onto a car body: from center (car-local), w along right and h along up,
-// each vertex cast inward onto the body meshes (world space; the clone keeps the model's own
-// transform) and kept 6 mm off the paint, stored car-local.
-const stickerRay=new THREE.Raycaster();
-function bendOnBody(detail,body,center,right,up,w,h){
- const normal=right.clone().cross(up),inward=normal.clone().negate(),nx=12,ny=6,pos=[],uv=[],index=[],scale=detail.matrixWorld.getMaxScaleOnAxis();
+// The meshes a sticker is bent onto: what shows of the car under root, but the stickers themselves.
+// Meshes under a hidden group are left out: the brake lights' halos (brake-lights.js), hidden while
+// the brake is off, stand 4 cm off the tail where the small number goes, and lifted half of it.
+function shownBody(root){
+ const body=[],walk=o=>{if(o!==root&&!o.visible)return;if(o.isMesh&&!o.name.startsWith('Numero_'))body.push(o);o.children.forEach(walk);};
+ walk(root);return body;
+}
+// Those meshes as triangles in the car's frame (detail's), once for all of a car's stickers; each
+// range keeps the faces a raycaster would hit (front ones only unless the material is double-sided,
+// turned for a back-sided material or a mirrored mesh). Skinned and instanced meshes (drivers) are
+// left out: their geometry is not where they show.
+function bodyTriangles(detail,body){
+ const toCar=detail.matrixWorld.clone().invert(),m=new THREE.Matrix4(),v=new THREE.Vector3();
+ return body.filter(o=>!o.isSkinnedMesh&&!o.isInstancedMesh).map(o=>{
+  const g=o.geometry,p=g.attributes.position,count=g.index?g.index.count:p.count,range=g.drawRange,mats=[o.material].flat(),pos=new Float32Array(p.count*3);
+  m.multiplyMatrices(toCar,o.matrixWorld);for(let i=0;i<p.count;i++)v.fromBufferAttribute(p,i).applyMatrix4(m).toArray(pos,i*3);
+  const mirrored=m.determinant()<0,groups=Array.isArray(o.material)?g.groups:[{start:0,count:Infinity,materialIndex:0}];
+  return {pos,index:g.index?.array??null,ranges:groups.map(r=>{const side=mats[r.materialIndex]?.side??THREE.FrontSide;
+   return {start:Math.max(r.start,range.start),end:Math.min(count,r.start+r.count,range.start+range.count),cull:side!==THREE.DoubleSide,turn:side!==THREE.DoubleSide&&(side===THREE.BackSide)!==mirrored};})};
+ });
+}
+// A sticker grid bent onto a car body (bodyTriangles): from center (car frame), w along right and h
+// along up in nx×ny cells, each vertex cast inward from 1.5 m out (1.8 m reach) and kept 6 mm off
+// the face it lands on. A vertex whose ray misses the body takes its row's hits: in between them over
+// a gap, the nearest past the body's edge, so the sticker ends on the paint, not on a flap in the air.
+const stickerRay=new THREE.Ray(),stickerHit=new THREE.Vector3(),stickerOffset=new THREE.Vector3();
+function bendOnBody(body,center,right,up,w,h,nx=12,ny=6){
+ const normal=right.clone().cross(up),lift=1.5,reach=1.8,slack=1e-4,near=[],d=new THREE.Vector3(),points=[],hits=[],uv=[],index=[];
+ // The triangles under the sticker within the rays' reach, with their extent across it: each vertex
+ // is placed across the sticker once, and only the triangles kept get a box and corners.
+ for(const {pos,index:order,ranges} of body){
+  const count=pos.length/3,across=new Float32Array(count),along=new Float32Array(count),out=new Float32Array(count);
+  for(let i=0;i<count;i++){d.fromArray(pos,i*3).sub(center);across[i]=d.dot(right);along[i]=d.dot(up);out[i]=d.dot(normal);}
+  for(const {start,end,cull,turn} of ranges)for(let k=start;k+2<end;k+=3){
+   const i0=order?order[k]:k,i1=order?order[k+1]:k+1,i2=order?order[k+2]:k+2;
+   const a0=Math.min(across[i0],across[i1],across[i2]),a1=Math.max(across[i0],across[i1],across[i2]);if(a1<-w/2-slack||a0>w/2+slack)continue;
+   const b0=Math.min(along[i0],along[i1],along[i2]),b1=Math.max(along[i0],along[i1],along[i2]);if(b1<-h/2-slack||b0>h/2+slack)continue;
+   const n0=Math.min(out[i0],out[i1],out[i2]),n1=Math.max(out[i0],out[i1],out[i2]);if(n1<lift-reach||n0>lift)continue;
+   near.push({box:[a0,a1,b0,b1,n0,n1],cull,corners:(turn?[i2,i1,i0]:[i0,i1,i2]).map(i=>new THREE.Vector3().fromArray(pos,i*3))});
+  }
+ }
+ stickerRay.direction.copy(normal).negate();
  for(let j=0;j<=ny;j++)for(let i=0;i<=nx;i++){
-  const p=center.clone().addScaledVector(right,(i/nx-.5)*w).addScaledVector(up,(j/ny-.5)*h);stickerRay.set(detail.localToWorld(p.clone().addScaledVector(normal,1.5)),inward.clone().transformDirection(detail.matrixWorld));stickerRay.far=1.8*scale;
-  const hit=stickerRay.intersectObjects(body,false)[0];if(hit)p.copy(detail.worldToLocal(hit.point.clone())).addScaledVector(normal,.006);pos.push(p.x,p.y,p.z);uv.push(i/nx,j/ny);
+  const a=(i/nx-.5)*w,b=(j/ny-.5)*h,p=center.clone().addScaledVector(right,a).addScaledVector(up,b);stickerRay.origin.copy(p).addScaledVector(normal,lift);
+  let best=reach,face=null;
+  for(const t of near){const box=t.box;if(a<box[0]-slack||a>box[1]+slack||b<box[2]-slack||b>box[3]+slack||!stickerRay.intersectTriangle(...t.corners,t.cull,stickerHit))continue;const far=stickerHit.distanceTo(stickerRay.origin);if(far<best){best=far;face=t;p.copy(stickerHit);}}
+  if(face){const [A,B,C]=face.corners;stickerOffset.subVectors(B,A).cross(d.subVectors(C,A)).normalize();if(stickerOffset.dot(normal)<0)stickerOffset.negate();p.addScaledVector(stickerOffset,.006);}
+  points.push(p);hits.push(!!face);uv.push(i/nx,j/ny);
   if(i&&j){const a=(j-1)*(nx+1)+i-1,c=j*(nx+1)+i-1;index.push(a,a+1,c+1,a,c+1,c);}
  }
- const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(index);g.computeVertexNormals();return g;
+ for(let j=0;j<=ny;j++){
+  const row=j*(nx+1),landed=[];for(let i=0;i<=nx;i++)if(hits[row+i])landed.push(i);if(!landed.length)continue;
+  for(let i=0;i<=nx;i++){if(hits[row+i])continue;const before=landed.findLast(k=>k<i),after=landed.find(k=>k>i);
+   if(before!==undefined&&after!==undefined)points[row+i].lerpVectors(points[row+before],points[row+after],(i-before)/(after-before));else points[row+i].copy(points[row+(before??after)]);}
+ }
+ const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(points.flatMap(p=>[p.x,p.y,p.z]),3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(index);g.computeVertexNormals();return g;
 }
 const leanRotation=new THREE.Quaternion(),leanEuler=new THREE.Euler(),poseForward=new THREE.Vector3(),poseUp=new THREE.Vector3(),poseSide=new THREE.Vector3(),poseMatrix=new THREE.Matrix4();
 export function trackPoint(data,s,offset=0){
@@ -101,8 +145,9 @@ export class ImmersiveVisuals {
   // Leonardo Martins, of the #19 (gold and black), with his coffee at the door of his team's garage
   // (the roller door painted 19), where one of his crew stands in the race: the crewman steps
   // out of the paddock while he is there (leoDoor, pit-building.js). He offers the pilot a coffee
-  // when he walks up (ImmersiveMode; state.offerCoffee). The pilot's own cup, in his right hand,
-  // shows once he has taken it. Without that door (no pit block) he waits by the Tia's café.
+  // when he walks up (ImmersiveMode; state.offerCoffee); the cup he gives goes into one of the
+  // pilot's hands, as a snack from the Tia's café would. Without that door (no pit block) he waits
+  // by the Tia's café.
   {const entry=RIVAL_ROSTER.find(r=>r.number==='19'),door=scene.getObjectByName('Porta_equipe_19');let pos,yaw;
    if(door){pos=door.getWorldPosition(new THREE.Vector3()).sub(this.crowd.position);const f=new THREE.Vector3(1,0,0).applyQuaternion(door.getWorldQuaternion(new THREE.Quaternion()));yaw=Math.atan2(-f.z,f.x);this.leoDoor=door;}
    else{const front=pit?.box99?pit.box99.front:L.spotD+2.5;pos=L.point(-7.2,front-1.1);yaw=Math.atan2(-(this.heroStart.z-pos.z),this.heroStart.x-pos.x);}
@@ -110,7 +155,6 @@ export class ImmersiveVisuals {
    person.position.copy(pos);person.rotation.y=yaw;setPose(person,POSES.stand);this.crowd.add(person);
    const cup=this.people.carry('cup',person.userData.rig.limbs[1].hand);
    this.leo={pos,person,cup,yaw,label:this.tag(this.crowd,'Leonardo Martins · #19',[pos.x,pos.y+2.1,pos.z],2.6,.3),idler:new Idler(person,'counter',{props:{cup},seed:.57})};}
-  this.heroCup=this.people.carry('cup',this.hero.userData.rig.limbs[1].hand);
   this.banner(this.crowd,'PADDOCK · VAQUINHA ANTES DA LARGADA',L.point(12,L.bounds.d1-.1,6.3),L.heading,9,.55,'#f5d279','#1a292b');
   this.truck=this.truckModel();this.root.add(this.truck);
   const strapGeometry=new THREE.BufferGeometry();strapGeometry.setAttribute('position',new THREE.BufferAttribute(new Float32Array(25*2*3),3));const indices=[];for(let i=0;i<24;i++)indices.push(i*2,i*2+1,i*2+2,i*2+1,i*2+3,i*2+2);strapGeometry.setIndex(indices);
@@ -163,6 +207,33 @@ export class ImmersiveVisuals {
  // The way to the circle: to the foot of the steps, up onto the wall, then to the circle
  // (the first legs are skipped once he is on the steps or up there).
  deskRoute(){if(!this.desk)return null;const [foot,top,spot]=this.desk.route,y=this.hero.position.y;return (y>top.y-.15?[spot]:y>foot.y+.2?[top,spot]:[foot,top,spot]).map(v=>v.clone());}
+ // The Tia's café (pit-box99.js layout: cafeSeat, where a customer stands at her counter, and route,
+ // from Box 99's door through the garage to it): its sign, seen through walls as in the pit stop's
+ // stroll, shows the way. Points are kept local.
+ addCafe(layout){
+  if(!layout?.cafeSeat)return;const o=this.crowd.position,local=v=>v.clone().sub(o);
+  const sign=this.tag(this.crowd,'CARDÁPIO DA TIA',local(layout.cafeSign??layout.cafeSeat.clone().setY(layout.cafeSeat.y+2.9)).toArray(),2.6,.4,'#ffe2a0','#754627');sign.material.depthTest=false;sign.renderOrder=90;sign.visible=false;
+  // The route goes straight into the garage from its door before turning to the café: the Box 99
+  // crew waits along the door (solid people in the paddock) and a corner cut there runs into them.
+  const route=(layout.route??[layout.cafeSeat]).map(local);if(route.length>1){const door=this.lane.lane(route[0]),inside=this.lane.point(door.x,door.d+1.4);inside.y=route[0].y;route.splice(1,0,inside);}
+  this.cafe={seat:local(layout.cafeSeat),route,sign};
+ }
+ // With the menu open the pilot turns to the Tia (behind the counter, under the sign) and the camera
+ // looks at both from a little to the side, clear of her menu, which stands on the right.
+ faceCafe(){if(!this.cafe)return;const h=this.hero.position,t=this.cafe.sign.position,face=Math.atan2(-(t.z-h.z),t.x-h.x);this.hero.rotation.y=face;this.foot.yaw=face-.35;this.foot.pitch=.22;}
+ // At the counter, as at the pit stop: close enough for the menu.
+ nearCafe(radius=2.6){return !!this.cafe&&!this.inCar&&this.hero.position.distanceTo(this.cafe.seat)<radius;}
+ // The way on foot to the counter: on along the route from where the pilot is on it, inside the
+ // garage or the café (layout.walk gives a floor there; the team stand is another level, outside the
+ // walls it gives none), else round the parked cars to Box 99's door and in.
+ cafeRoute(){
+  if(!this.cafe)return null;const path=this.cafe.route,h=this.hero.position,at=this.hero.getWorldPosition(new THREE.Vector3()),walk=this.layout?.walk;let k=0;
+  if(!walk||typeof walk(at)==='number'&&!this.layout.overWalls?.(at)){
+   path.forEach((p,i)=>{if(p.distanceTo(h)<path[k].distanceTo(h))k=i;});
+   if(k<path.length-1&&h.distanceTo(path[k+1])<path[k].distanceTo(path[k+1]))k++;
+  }
+  return k>0?path.slice(k).map(p=>p.clone()):[...this.routeTo(path[0]),...path.slice(1).map(p=>p.clone())];
+ }
  // At the desk the pilot turns to the engineer and the camera frames the two of them and the screens.
  faceDesk(){if(!this.desk)return;this.hero.rotation.y=this.desk.face;this.foot.yaw=this.desk.look;this.foot.pitch=.32;}
  // Paddock frame at the Box 99 service box: local points (unturned group) from lane
@@ -177,12 +248,13 @@ export class ImmersiveVisuals {
  // Where the rivals' numbers go, from the Opala 99's own stickers (Adesivo_*_99 on the
  // rear quarters, Decal_teto_99 read from the driver's side, the small 99 left of centre
  // on the tail). A grid is cast onto the body once per model, so each sticker follows
- // its curves 6 mm off the paint.
+ // its curves 6 mm off the paint. The quarters' numbers wrap round the body's rear corner
+ // (the 99's do too): a ray every 1.6 cm across them, or the corner cuts into the sticker.
  numberPlates(template,detail){
   this.plateShapes??=new WeakMap();let list=this.plateShapes.get(template);if(list)return list;
-  const body=[];detail.parent.updateMatrixWorld(true);detail.traverse(o=>{if(o.isMesh&&o.visible)body.push(o);});
-  const V=(x,y,z)=>new THREE.Vector3(x,y,z),bend=(...args)=>bendOnBody(detail,body,...args);
-  list=[bend(V(-1.835,.667,-.86),V(-1,0,0),V(0,1,0),.57,.45),bend(V(-1.906,.67,.86),V(1,0,0),V(0,1,0),.57,.45),bend(V(-.19,1.3,0),V(-1,0,0),V(0,0,1),.94,.74),bend(V(-2.18,.69,-.29),V(0,0,1),V(0,1,0),.2,.156)];
+  detail.parent.updateMatrixWorld(true);const body=bodyTriangles(detail,shownBody(detail));
+  const V=(x,y,z)=>new THREE.Vector3(x,y,z),bend=(...args)=>bendOnBody(body,...args);
+  list=[bend(V(-1.835,.667,-.86),V(-1,0,0),V(0,1,0),.57,.45,36),bend(V(-1.906,.67,.86),V(1,0,0),V(0,1,0),.57,.45,36),bend(V(-.19,1.3,0),V(-1,0,0),V(0,0,1),.94,.74),bend(V(-2.18,.69,-.29),V(0,0,1),V(0,1,0),.2,.156)];
   this.plateShapes.set(template,list);return list;
  }
  // A sponsor sticker on both doors of a rival (car 70's Old Stock ads): on the door skin below the
@@ -191,8 +263,8 @@ export class ImmersiveVisuals {
  // body: the meshes to bend onto, for a car that is not a rival's clone (the player's, car-livery.js).
  doorStickers(obj,material,{x=.3,y=.47,w=.52,h=.35,body=null}={}){
   const detail=obj.userData.detail??(body?obj:null);if(!detail)return [];
-  detail.parent.updateMatrixWorld(true);if(!body){body=[];detail.traverse(o=>{if(o.isMesh&&o.visible&&!o.name.startsWith('Numero_'))body.push(o);});}
-  return [-1,1].map(side=>{const sticker=new THREE.Mesh(bendOnBody(detail,body,new THREE.Vector3(x,y,side*.9),new THREE.Vector3(side,0,0),new THREE.Vector3(0,1,0),w,h),material);sticker.renderOrder=2;detail.add(sticker);return sticker;});
+  detail.parent.updateMatrixWorld(true);const triangles=bodyTriangles(detail,body??shownBody(detail));
+  return [-1,1].map(side=>{const sticker=new THREE.Mesh(bendOnBody(triangles,new THREE.Vector3(x,y,side*.9),new THREE.Vector3(side,0,0),new THREE.Vector3(0,1,0),w,h),material);sticker.renderOrder=2;detail.add(sticker);return sticker;});
  }
  // The team's own Opala for the paddock: the player's model, livery and cage.
  ownCar(template){
@@ -358,7 +430,8 @@ export class ImmersiveVisuals {
  reset(){this.fans.forEach(f=>{f.cheerUntil=0;f.reaction.visible=false;f.dollar.visible=true;});this.followPosition=null;this.hero.rotation.y=this.heroYaw;this.hero.position.copy(this.heroStart);this.foot=footState(this.heroYaw,{floor:this.crowd.position.y+this.heroStart.y});this.leakCount=this.leakCursor=this.leakTimer=0;this.leak.geometry.setDrawRange(0,0);this.lastGlass=-1;this.ownOpenings?.closeAll(true);}
  // On foot in the paddock (on-foot.js), as in the pit stop's stroll: free to walk
  // anywhere, into Box 99 and the café too; ground is ImmersiveMode's footGround.
- walk(input,dt,{shift=false,touch=false,ground=null}={}){return stepOnFoot(this.foot,this.hero,input,dt,{shift,touch,ground,origin:this.crowd.position});}
+ // arms: what the hands hold (the café's snacks, pitstop.js snackArms).
+ walk(input,dt,{shift=false,touch=false,ground=null,arms=null}={}){return stepOnFoot(this.foot,this.hero,input,dt,{shift,touch,ground,arms,origin:this.crowd.position});}
  // The rivals parked at their garages, the Opala in Box 99 and the supporters are
  // solid (world positions; a step away from a supporter is always allowed).
  blocked(pos,from=pos){
@@ -444,7 +517,10 @@ export class ImmersiveVisuals {
   if(this.leo){const l=this.leo,h=this.hero.position,target=!this.inCar&&h.distanceTo(l.pos)<6?Math.atan2(-(h.z-l.pos.z),h.x-l.pos.x):l.yaw;
    l.person.rotation.y+=Math.atan2(Math.sin(target-l.person.rotation.y),Math.cos(target-l.person.rotation.y))*Math.min(1,dt*4);
    if(this.crowd.visible)l.idler.update(dt,'stand',{calm:!!state.leo});l.cup.visible=true;}
-  this.heroCup.visible=!!state.coffee;this.leoDoor?.scale.setScalar(state.phase==='crowd'?1e-4:1);
+  this.leoDoor?.scale.setScalar(state.phase==='crowd'?1e-4:1);
+  // The café's sign shows the way while the pilot walks the paddock, fading as the camera comes near.
+  if(this.cafe){const sign=this.cafe.sign,show=state.phase==='crowd'&&!this.inCar&&!state.cafe&&!this.nearCafe();sign.visible=show;
+   if(show){const far=this.viewCamera?this.viewCamera.position.distanceTo(sign.getWorldPosition(this.signPosition??=new THREE.Vector3())):99;sign.material.opacity=THREE.MathUtils.clamp((far-5)/4,0,1);sign.visible=far>5;}}
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);
   this.tankTethers.visible=state.tankDetached;const ta=this.tankTethers.geometry.attributes.position;for(let i=0;i<2;i++){ta.setXYZ(i*2,-1.6,.24,(i-.5)*.6);ta.setXYZ(i*2+1,this.tank.position.x+.24,this.tank.position.y,(i-.5)*.6);}ta.needsUpdate=true;
   this.drawCracks(state.glass);this.crackedGlass.visible=state.glass>0;
