@@ -13,7 +13,10 @@ with sync_playwright() as p:
   open_menu(page)
   check('fullscreen_available_on_opening',page.is_visible('#startFullscreen'));page.tap('#startFullscreen');wait_js(page,'!!document.fullscreenElement');check('opening_fullscreen_enters',True);page.tap('#startFullscreen');wait_js(page,'!document.fullscreenElement')
   page.tap('#settingsButton');page.select_option('#camera','aerial');page.tap('#settingsClose');enter_track(page,tap=True)
-  wait_js(page,"interlagos.state.mode==='chase'");check('normal_starts_with_rear_camera',True)
+  # The race starts in the camera the player last chose (players' request), here the aerial picked
+  # above; the menu then takes it back to the rear camera for the touch checks.
+  wait_js(page,"interlagos.state.mode==='aerial'");check('normal_starts_with_players_camera',True)
+  page.evaluate("()=>{const s=document.querySelector('#camera');s.value='chase';s.dispatchEvent(new Event('change'))}");wait_js(page,"interlagos.state.mode==='chase'")
   wait_js(page,"document.querySelector('#lap').textContent==='1 / 3'");page.wait_for_selector('#touchControls:not(.hidden)');check('three_laps_and_visible_position',page.is_visible('#racePosition') and page.inner_text('#racePosition')=='15º / 15')
   def check_control_layout(width):
    report.setdefault('layouts',{})[str(width)]=page.evaluate("()=>['#touchSteering','#touchPedals','#touchReverse','#touchHandbrake'].map(s=>({selector:s,...document.querySelector(s).getBoundingClientRect().toJSON()}))")

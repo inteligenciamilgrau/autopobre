@@ -34,7 +34,12 @@ export function curveloPitFrame(data){
   block:P.block,sink:1.6,stand:{d:-7.6,thickness:3.2,top:.42}};
 }
 
-// Surveyed pit lane (Interlagos): its own centre line, paved band, profile and walls.
+// Surveyed pit lane (Interlagos): its own centre line, paved band, profile and walls. Its
+// stations always keep the garages on their left (d > 0). With the garages on the cars' right
+// (Brasília, clockwise, boxes inside the main straight) the block runs from the lane's exit to
+// its entry and says `reversed: true`: turned half round, never mirrored, so the garage row,
+// Box 99 and the walls are built the same way; pitRoute (race-field.js) and the lane paint
+// (interlagos-pit.js) follow the cars instead.
 // Segments are bucketed in a coarse grid so every surface query stays cheap.
 const CELL=20,cache=new WeakMap();
 const key=(ix,iy)=>ix*65536+iy;
@@ -76,7 +81,8 @@ export function locatePit(geo,x,y){
  const px=mix(c.x),py=mix(c.y),along=(x-px)*ux+(y-py)*uy,d=(x-px)*lx+(y-py)*ly,s=mix(c.s)+along;
  // Beyond the first or last station the lane has ended.
  if(s<0||s>geo.length)return null;
- let m0=p[c.main_s],m1=q[c.main_s];const L=geo.lapLength;if(m1-m0<-L/2)m1+=L;
+ // main_s grows along the stations, or shrinks on a block written against the cars (data.pit.reversed).
+ let m0=p[c.main_s],m1=q[c.main_s];const L=geo.lapLength;if(m1-m0<-L/2)m1+=L;else if(m1-m0>L/2)m1-=L;
  const grade=mix(c.grade),bank=mix(c.bank);
  return {i:hit,u:hu,s,d,lo:mix(c.lo),hi:mix(c.hi),laneLo:mix(c.lane_lo),laneHi:mix(c.lane_hi),z:mix(c.z)+grade*along,bank,grade,tx:ux,ty:uy,lx,ly,mainS:((m0+(m1-m0)*hu)%L+L)%L};
 }

@@ -30,8 +30,9 @@ const START_DIAL=(()=>{
 export class ImmersiveMode {
  // layout: the circuit's Box 99 (pit-box99.js), whose garage and café the pilot can walk
  // into before the race; obstacles: walls the walking camera must not pass through.
- constructor({scene,carRoot,car,data,driver,rivalTemplate,skidMarks,resetVehicle,releaseMouse,onNormal,layout=null,obstacles=[],setView=null,getView=null}){
-  Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal,setView,getView});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
+ // playerView: the camera the player last chose (main.js), the one the race is driven in.
+ constructor({scene,carRoot,car,data,driver,rivalTemplate,skidMarks,resetVehicle,releaseMouse,onNormal,layout=null,obstacles=[],setView=null,getView=null,playerView=null}){
+  Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal,setView,getView,playerView});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
   this.freeCountdown=0;this.goTime=0;this.freeFuel=12;this.laps=3;this.lineup=null;this.freeLineup=null;this.freeTotalLaps=3;this.storyLaps=3;this.freeFinished=false;this.freePosition=GRID_SIZE;this.freePlayerProgress=0;this.rivalTrails=RIVAL_ROSTER.map(()=>skidMarks?.createTrail());this.field=new RaceField(data,{onStep:(r,i,input,dt)=>{r.input=input;this.rivalTrails[i]?.update(r.car,input,dt);},onReset:()=>this.rivalTrails.forEach(t=>t?.breakTrails())});this.parts=new CrashParts(scene);this.state=new ImmersiveState(profile);this.visual=new ImmersiveVisuals(scene,carRoot,data,driver,car,rivalTemplate);this.lastPhase='off';this.lastUI='';this.near=-1;this.rivals=this.field.rivals;this.projectile=null;this.towOrigin=0;this.prepLitres=this.fuelChoice=6;this.prepFilm=false;
   this.brand=document.querySelector('.wordmark');this.baseBrand=this.brand.innerHTML;this.baseTitle=document.title;
   this.controls=document.querySelector('footer>div');this.baseControls=this.controls.innerHTML;
@@ -270,9 +271,10 @@ export class ImmersiveMode {
  disable(){if(this.lastPhase==='starting'){this.restoreStartView();this.startSwitches(1,true);}document.body.classList.remove('start-scene');this.finishElapsed=null;this.state.disable();this.visual.restoreCamera();this.visual.root.visible=this.visual.damage.visible=false;this.carRoot.visible=true;this.panel.classList.add('hidden');this.hud.classList.add('hidden');document.getElementById('dqScreen').classList.add('hidden');document.body.classList.remove('disqualified-scene','podium-scene','tow-scene');document.body.classList.remove('immersive-mode','immersive-stage');this.brand.innerHTML=this.baseBrand;this.controls.innerHTML=this.baseControls;document.title=this.baseTitle;this.lastPhase='off';}
  sync(){
   const s=this.state;if(s.phase===this.lastPhase)return;const previous=this.lastPhase;this.lastPhase=s.phase;this.lastUI='';
-  // The engine start is played in the cockpit; the view chosen before comes back after it.
+  // The engine start is played in the cockpit.
   if(s.phase==='starting'){this.startView=this.getView?.()??'chase';this.setView?.('cockpit');this.switches=null;}
-  else if(previous==='starting'){this.restoreStartView();this.startSwitches(1,true);this.state.starter=false;}
+  // The engine caught: on to the grid in the player's own camera (the view before the start otherwise).
+  else if(previous==='starting'){if(s.phase==='grid'&&this.playerView){this.startView=null;this.setView?.(this.playerView());}else this.restoreStartView();this.startSwitches(1,true);this.state.starter=false;}
   document.body.classList.toggle('start-scene',s.phase==='starting');
   // With a classification the sheet comes first (it needs the cursor); its Continue frees the podium camera.
   this.podiumCamera=s.phase==='podium'&&!this.freeOrder;

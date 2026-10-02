@@ -157,15 +157,18 @@ export function pitRoute(data){
  const track=s=>{s=((s%L)+L)%L;let lo=0,hi=a.length-1;while(lo<hi){const m=(lo+hi+1)>>1;if(a[m][0]<=s)lo=m;else hi=m-1;}const p=a[lo],q=a[(lo+1)%a.length],u=(s-p[0])/((lo===a.length-1?L:q[0])-p[0]);return p.map((v,k)=>v+(q[k]-v)*u);};
  // Stations along the lane (u from its entry): centre, direction, and the centres of the fast
  // lane and of the working lane on the garage side (d to the lane's left).
- let st,entryS,u0,limit;
+ let st,entryS,u0,limit;const rev=!!frame.reversed,len=frame.length_m??0,U=s=>rev?len-s:s;
  if(curvelo){
   // Curvelo's service lane is an offset of the main straight, 300 m from its entry (pitLane).
   entryS=L-150;u0=150;limit={from:60,to:300};st=[];
   for(let u=0;u<=300;u+=2){const p=track(u-150),lane=pitLane(data,u-150),blend=lane.offset/CURVELO_PIT.offset;st.push({u,x:p[1]+p[9]*lane.offset,y:p[2]+p[10]*lane.offset,fast:-lane.halfWidth/2*blend,work:lane.halfWidth/2});}
   st.forEach((q,i)=>{const p=st[Math.max(0,i-1)],r=st[Math.min(st.length-1,i+1)],len=Math.hypot(r.x-p.x,r.y-p.y);q.tx=(r.x-p.x)/len;q.ty=(r.y-p.y)/len;});
  }else{
-  const c=Object.fromEntries(frame.columns.map((k,i)=>[k,i]));entryS=frame.entry_main_s;u0=0;limit=frame.limit;
-  st=frame.samples.map(p=>{const n=Math.hypot(p[c.tx],p[c.ty]);return {u:p[c.s],x:p[c.x],y:p[c.y],tx:p[c.tx]/n,ty:p[c.ty]/n,fast:(p[c.lane_lo]+p[c.fast_hi])/2,work:(p[c.fast_hi]+p[c.lane_hi])/2};});
+  const c=Object.fromEntries(frame.columns.map((k,i)=>[k,i]));entryS=frame.entry_main_s;u0=0;
+  // A block written against the cars (pit-lane.js, Brasília): its stations in reverse, u from the
+  // entry, the direction turned round and the offsets to the cars' left negated.
+  const k=rev?-1:1,lim=frame.limit;limit=rev&&lim?{...lim,from:len-lim.to,to:len-lim.from}:lim;
+  st=(rev?[...frame.samples].reverse():frame.samples).map(p=>{const n=Math.hypot(p[c.tx],p[c.ty]);return {u:rev?len-p[c.s]:p[c.s],x:p[c.x],y:p[c.y],tx:k*p[c.tx]/n,ty:k*p[c.ty]/n,fast:k*(p[c.lane_lo]+p[c.fast_hi])/2,work:k*(p[c.fast_hi]+p[c.lane_hi])/2};});
  }
  // Corner speed of each station over 12 m chords, gentle (4.5 m/s² sideways).
  st.forEach((q,i)=>{const p=st[Math.max(0,i-3)],r=st[Math.min(st.length-1,i+3)],turn=Math.abs(wrap(Math.atan2(r.ty,r.tx)-Math.atan2(p.ty,p.tx)))/Math.max(1,r.u-p.u);q.v=Math.min(PIT_PACE,Math.sqrt(4.5/Math.max(turn,1e-4)));});
@@ -174,10 +177,13 @@ export function pitRoute(data){
  // Parking slots, first taken first: from the end of the garage row back to Box 99's way out,
  // then from before the café back to where the working lane begins. A slot stays clear of the
  // walls a metre either way along the lane (the lane narrows where the garage row ends).
- const b=frame.box99,half=b.bay/2,first=(curvelo?80-u0:frame.garages[0])+2.9,slots=[],geo=pitGeometry(data);
+ // In the cars' order (U): the garage row, and Box 99 with the café, kept clear from 6.4 m before
+ // the first of them to 8.5 m past the other (the café comes first where the garages are on the left).
+ const b=frame.box99,half=b.bay/2,g0=Math.min(U(frame.garages[0]),U(frame.garages[1])),g1=Math.max(U(frame.garages[0]),U(frame.garages[1]));
+ const first=(curvelo?80-u0:g0)+2.9,slots=[],geo=pitGeometry(data),boxFrom=Math.min(U(b.s),U(b.cafe_s))-half,boxTo=Math.max(U(b.s),U(b.cafe_s))+half;
  const clear=u=>[-1.2,-.6,0,.6,1.2].every(du=>{const p=at(u+du);return !wallContact(geo,p.x-p.ty*p.work,p.y+p.tx*p.work,Math.atan2(p.ty,p.tx));});
  const take=(from,to)=>{for(let u=from+u0;u>=to+u0;u-=.2)if(clear(u)&&!(slots.at(-1)-u<SLOT_GAP))slots.push(u);};
- take(frame.garages[1]-2.9,b.s+half+8.5);take(b.cafe_s-half-6.4,first);
+ take(g1-2.9,boxTo+8.5);take(boxFrom-6.4,first);
  const route={stations:st,at,entryS,entryD,limit,slots:slots.map(u=>({u,d:at(u).work}))};
  routes.set(data,route);return route;
 }

@@ -35,8 +35,8 @@ with sync_playwright() as p:
   page.click('[data-records-source="ai"]');assert page.locator('#lapRecords tbody tr').count()==14;assert 'Kleber Eletric' in page.inner_text('#lapRecords tbody')
   page.click('[data-records-source="all"]');assert page.locator('#lapRecords tbody tr').count()==16
   page.click('[data-records-source="human"]');assert page.locator('#lapRecords tbody tr').count()==2
-  page.click('[data-records-circuit="interlagos"]');assert page.locator('#lapRecords tbody tr').count()==0
-  page.click('[data-records-circuit="curvelo"]');page.click('[data-records-mode="immersive"]');assert page.locator('#lapRecords tbody tr').count()==0
+  page.click('#recordsCircuitPick');page.click('[data-records-circuit="interlagos"]');assert page.locator('#lapRecords tbody tr').count()==0
+  page.click('#recordsCircuitPick');page.click('[data-records-circuit="curvelo"]');page.click('[data-records-mode="immersive"]');assert page.locator('#lapRecords tbody tr').count()==0
   page.click('[data-records-mode="normal"]');assert 'Ana <99>' in page.inner_text('#lapRecords tbody');page.screenshot(path=str(ROOT/f'renders/recordes_automaticos_{mobile}.png'));page.click('#recordsClose')
   page.reload(wait_until='domcontentloaded');wait_js(page,'window.interlagos');assert not page.evaluate('interlagos.ready');assert page.input_value('#pilotSelect')=='Bruno';assert page.is_hidden('#pilotName')
   page.select_option('#pilotSelect','Ana <99>');choose_race(page,story=True);wait_js(page,'interlagos.ready')

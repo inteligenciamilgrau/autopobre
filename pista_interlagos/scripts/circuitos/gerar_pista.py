@@ -9,6 +9,8 @@ Entradas (fontes/<circuito>/, ver baixar_fontes.py e refinar_eixo.py):
   worldcover.tif       cobertura do solo 2021 (ESA, 10 m)
   sentinel2_rgb.tif    cor real (Sentinel-2 L2A, 10 m) para a cor do chao ao longe
   osm.json, edificios_microsoft.geojson   vias, matas, agua e edificacoes
+  mdt_idedf.tif, idedf_*.geojson          (Brasilia) MDT de 1 m, edificacoes com altura, arvores e
+                                          o horizonte do cadastro do DF, no lugar do ANADEM e do OSM
 
 O formato segue dados/pista.json de Interlagos (mesmas colunas, bloco `pit`,
 grade `terrain`), com `scenery` a mais: cobertura do solo em grade, edificacoes
@@ -90,6 +92,35 @@ EXTRA = {
         'pit_sintetico': {'lado': 1, 'inicio': .05, 'antes_do_fim': 130, 'entrada': 60, 'saida': 60, 'largura': 7.6,
                           'fonte': 'Pit lane modelado diante do prédio dos boxes medido no Sentinel-2 (23/09/2026): '
                                    'o OSM ainda não traz a faixa dos boxes de Chapecó.'},
+    },
+    'brasilia': {
+        # 16 curvas publicadas, 9 a direita e 7 a esquerda, sem planta numerada: a deteccao acha 12
+        # trechos (6 e 6) e quatro deles tem dois apices separados, cada um uma curva na contagem
+        # oficial: o canto de baixo a direita (R 34 m e 125 m), o laco (dois apices de ~65 m), o grampo
+        # a direita do miolo (R 44 m e 95 m) e o grampo a esquerda (R 31 m e 75 m). Fecha 9 + 7. A reta
+        # de largada, a longa (803 m, do lado leste) e a oposta (do miolo) estao entre elas.
+        'trechos': {260: 'Curva 1 · de alta, inclinada a 5°', 1180: 'Curvas 2 e 3', 1548: 'Curva 4',
+                    1854: 'Curvas 5 e 6 · o laço', 2310: 'Curva 7', 2639: 'Curva 8', 2908: 'Curva 9',
+                    3444: 'Curvas 10 e 11 · grampo', 3715: 'Curva 12', 3987: 'Curvas 13 e 14 · grampo',
+                    4453: 'Curva 15', 4905: 'Curva 16'},
+        'depois': {260: 'Reta longa · 803 m', 1180: 'Reta de baixo', 2908: 'Reta oposta', 4905: 'Reta de largada'},
+        'reta': 'Reta de largada',
+        # Curva 1: "de alta velocidade, com 207 metros e inclinacao de 5 graus" (tan 5 = 8,75%).
+        'caimento_extra': {'Curva 1 · de alta, inclinada a 5°': .0875},
+        # Arquibancadas fixas recuperadas do lado de fora da reta de largada (norte), de frente para os
+        # boxes: na imagem, a estrutura antiga diante da linha e os assentos azuis ate ~250 m depois
+        # dela, a ~25 m do asfalto, alem do escape e do alambrado.
+        'arquibancadas': [{'antes_da_chegada': 60, 'blocos': 11, 'lado': 1, 'recuo': 18}],
+        'linha_chegada': 'meio_boxes',
+        'zebras': ['#c8201e', '#f1efe8'],
+        'fonte_boxes': ('Pit lane: OSM (vias 1450655789, 1450655791 e 32900119, 2025-2026) refinado sobre a imagem '
+                        'aérea de 2025; garagens ao longo do pátio de concreto medido na imagem (o prédio antigo '
+                        'foi demolido na reforma; 40 boxes novos previstos para 2026).'),
+        'eixo_fonte': ('OSM (highway=raceway, via 32900091 redesenhada em fev/2026) refinado sobre a imagem aérea '
+                       'de 2025, já com o asfalto novo (scripts/circuitos/refinar_eixo.py)'),
+        'ressalva': ('Reconstrução para jogo. Eixo medido sobre imagem aérea; larguras publicadas (15 m na reta de '
+                     'largada, 14 m no resto); perfil do MDT de 1 m do DF (IDE/DF, SEDUH) suavizado; caimento, '
+                     'zebras e muros são escolhas de modelagem; a inclinação de 5° da curva 1 é a publicada.'),
     },
 }
 
@@ -226,11 +257,16 @@ def main():
     pasta, eixo = carregar(nome)
     epsg = c['epsg']
     anadem = Raster(pasta / 'anadem.tif', epsg)
-    # Superficie das vias: o ANADEM suavizado em 2D (~18 m). Trechos vizinhos da volta leem
-    # a mesma superficie e ficam coerentes entre si; o terreno longe das vias usa o original.
+    # Relevo: o ANADEM (30 m) ou, em Brasilia, o MDT de 1 m do DF numa grade de 2 m (baixar_fontes.py
+    # --idedf), que entao serve a pista e ao terreno; o ANADEM fica so para comparar.
+    local = c.get('relevo_local') == 'idedf_mdt_1m'
+    relevo = Raster(pasta / 'mdt_idedf.tif', epsg) if local else anadem
+    # Superficie das vias: o relevo suavizado em 2D (~18 m no ANADEM, 4 m no MDT local). Trechos
+    # vizinhos da volta leem a mesma superficie e ficam coerentes entre si; o terreno longe das
+    # vias usa o original.
     from scipy.ndimage import gaussian_filter
-    vias_dem = Raster(pasta / 'anadem.tif', epsg)
-    vias_dem.a = gaussian_filter(vias_dem.a, .6, mode='nearest')
+    vias_dem = Raster(pasta / ('mdt_idedf.tif' if local else 'anadem.tif'), epsg)
+    vias_dem.a = gaussian_filter(vias_dem.a, 2.0 if local else .6, mode='nearest')
     cop = Raster(pasta / 'copernicus_dsm.tif', epsg)
 
     # O eixo medido ondula (nos do OSM, ruido da deteccao): suaviza o rumo, forte nas retas.
@@ -293,8 +329,10 @@ def main():
 
     # --- Relevo: ANADEM ao longo do eixo, suavizado; Copernicus so para comparar.
     z_anadem = anadem(P[:, 0], P[:, 1])
+    z_relevo = relevo(P[:, 0], P[:, 1], ordem=1) if local else z_anadem
     z_cop = cop(P[:, 0], P[:, 1])
-    z_abs = gaussian_filter1d(vias_dem(P[:, 0], P[:, 1]), 12 / DS, mode='wrap')
+    # Ao longo da volta: 12 m no ANADEM; 6 m no MDT de 1 m, que resolve as ondulacoes da pista.
+    z_abs = gaussian_filter1d(vias_dem(P[:, 0], P[:, 1]), (6 if local else 12) / DS, mode='wrap')
     desnivel_terreno = float(np.ptp(z_abs))
     if c.get('desnivel_m'):
         # Pista mais nova que os modelos de terreno (ANADEM e Copernicus sao de antes da obra): a
@@ -303,13 +341,13 @@ def main():
         # projeto de 2023 citava, para os 18,5 m da pista pronta).
         media = float(z_abs.mean())
         z_abs = media + (z_abs - media) * (c['desnivel_m'] / desnivel_terreno)
-    piso = anadem.a[anadem.a > -1000]
+    piso = relevo.a[relevo.a > -1000]
     if c.get('base_na_grade'):
         # So o relevo da caixa do terreno do jogo: um vale fundo alem dela (Chapeco: o rio a 264 m,
         # 1,5 km ao sul, 300 m abaixo da pista) deixaria a pista a 330 m de altura local.
         gx_, gy_ = (np.arange(P[:, k].min() - MARGEM, P[:, k].max() + MARGEM, 30.0) for k in (0, 1))
         GX, GY = np.meshgrid(gx_, gy_)
-        piso = anadem(GX.ravel(), GY.ravel(), ordem=1)
+        piso = relevo(GX.ravel(), GY.ravel(), ordem=1)
     base = math.floor((min(z_abs.min(), np.percentile(piso, 1)) - 5) / 10) * 10
     origem = np.array([round(float(P[:, 0].mean()) / 10) * 10, round(float(P[:, 1].mean()) / 10) * 10, float(base)])
     xy = P - origem[:2]
@@ -328,6 +366,14 @@ def main():
     s = np.r_[0, np.cumsum(ds[:-1])]
     L = float(ds.sum())
     T, E = quadro(xy)
+    if c.get('largura_publicada'):
+        # Larguras publicadas no lugar das medidas (Brasilia: 15 m na reta de largada, 14 m no resto):
+        # na imagem as areas de escape pavimentadas encostam no asfalto e alargam a medida. Transicao
+        # de 40 m nas pontas da reta.
+        resto, reta = c['largura_publicada']
+        sr = np.where(s > L / 2, s - L, s)
+        na_reta = np.clip(np.minimum(sr - reta_s[0] * escala, reta_s[1] * escala - sr) / 40 + .5, 0, 1)
+        largura = resto + (reta - resto) * na_reta
     grade = (np.roll(z, -1) - np.roll(z, 1)) / (ds + np.roll(ds, 1))
     kappa = curvatura(xy)
 
@@ -430,7 +476,9 @@ def main():
     validacao = {
         'anadem_menos_copernicus_mediana_m': float(np.median(z_anadem - z_cop)),
         'anadem_menos_copernicus_p95_abs_m': float(np.percentile(np.abs(z_anadem - z_cop), 95)),
-        'suavizacao_residuo_rms_m': float(np.sqrt(np.mean((z_anadem - z_abs) ** 2))),
+        'suavizacao_residuo_rms_m': float(np.sqrt(np.mean((z_relevo - z_abs) ** 2))),
+        **({'mdt_local_menos_anadem_mediana_m': float(np.median(z_relevo - z_anadem)),
+            'mdt_local_menos_anadem_p95_abs_m': float(np.percentile(np.abs(z_relevo - z_anadem), 95))} if local else {}),
     }
 
     # --- Pit lane.
@@ -448,8 +496,9 @@ def main():
         pxy = (Pb - origem[:2]) * escala
         pw = np.clip(np.array(boxes['largura_m']), 6.0, 9.5) * escala
         pit = montar_pit(pxy, pw, xy, z, E, T, bank, largura, s, L, superficie, vias_dem, origem, base, escala,
-                         fonte='Pit lane: OSM (way 628049496) refinado sobre imagem aérea de 2025; garagens sob a cobertura, medidas nos transectos.',
-                         garagens_s=boxes['garagens_s'])
+                         fonte=x.get('fonte_boxes', 'Pit lane: OSM (way 628049496) refinado sobre imagem aérea de 2025; '
+                                                    'garagens sob a cobertura, medidas nos transectos.'),
+                         garagens_s=boxes['garagens_s'], lado=c.get('lado_boxes', 1), folga_min=c.get('folga_minima_boxes_m'))
     elif x.get('pit_sintetico'):
         cfg = dict(x['pit_sintetico'])
         if cfg.get('garagens'):
@@ -467,7 +516,7 @@ def main():
     gy = y0 + np.arange(ny) * PASSO
     XX, YY = np.meshgrid(gx, gy)
     q = np.column_stack([XX.ravel(), YY.ravel()])
-    dem = anadem(q[:, 0] / escala + origem[0], q[:, 1] / escala + origem[1]) - base
+    dem = relevo(q[:, 0] / escala + origem[0], q[:, 1] / escala + origem[1], ordem=1 if local else 3) - base
     k, _, lat, road = superficie(q)
     fora = np.abs(lat) - largura[k] / 2
     # Entre dois trechos da volta que passam perto (a menos de 26 m das bordas), o chao
@@ -531,7 +580,8 @@ def main():
     if pit:
         a, b = (pit['entry_main_s'] - 25) % L, (pit['exit_main_s'] + 25) % L
         fora_pit = ~((s >= a) | (s <= b)) if a > b else ~((s >= a) & (s <= b))
-        tem[1] = tem[1] & fora_pit            # o pit fica a esquerda da pista nos dois circuitos
+        lado_pit = c.get('lado_boxes', 1)     # a esquerda da pista; a direita em Brasilia
+        tem[lado_pit] = tem[lado_pit] & fora_pit
     rails = {str(lado): [[round(f, 1), round(t, 1)] for f, t in trechos_de(tem[lado])] for lado in (-1, 1)}
     frenagens = []
     for cc in cv:
@@ -541,7 +591,7 @@ def main():
 
     colunas = ['s_xy_m', 'x_east_m', 'y_north_m', 'z_local_m', 'width_m', 'crossfall_left', 'grade', 'tx', 'ty',
                'left_x', 'left_y', 'fit_rmse_m', 'ground_points', 'kerb_right', 'kerb_left']
-    rmse = np.abs(z_anadem - z_abs)
+    rmse = np.abs(z_relevo - z_abs)
     samples = np.column_stack([s, xy, z, largura, bank, grade, T, E, rmse, np.zeros(n), zebra_d, zebra_e])
     comp_3d = float(np.sqrt(np.sum((np.roll(xy, -1, 0) - xy) ** 2, axis=1) + (np.roll(z, -1) - z) ** 2).sum())
     fontes = json.loads((pasta / 'proveniencia.json').read_text(encoding='utf-8'))
@@ -566,8 +616,8 @@ def main():
         **({'horizon': c['horizonte']} if c.get('horizonte') else {}),
         **({'natural_relief_m': desnivel_terreno} if c.get('desnivel_m') else {}),
         'elevation_check': validacao, 'sources': fontes,
-        'centreline': 'OSM (highway=raceway) refinado sobre imagem aérea de 2025 (scripts/circuitos/refinar_eixo.py)',
-        'caveat': ('Reconstrução para jogo. Eixo e larguras medidos sobre imagem aérea; perfil do ANADEM (30 m) '
+        'centreline': x.get('eixo_fonte', 'OSM (highway=raceway) refinado sobre imagem aérea de 2025 (scripts/circuitos/refinar_eixo.py)'),
+        'caveat': x.get('ressalva') or ('Reconstrução para jogo. Eixo e larguras medidos sobre imagem aérea; perfil do ANADEM (30 m) '
                    'suavizado; caimento, zebras e muros são escolhas de modelagem.'),
     }
     if pit:
@@ -605,7 +655,12 @@ def projetar_main_s(pxy, pt, superficie, L):
 
 
 def completar_pit(pxy, pw_lo, pw_hi, pz, pbank, main_s, gap, garagens, superficie, fonte, entry_open, wall_nose, wall_end, L,
-                  muro_trechos):
+                  muro_trechos, reverso=False):
+    """Bloco do pit no formato de Interlagos: estacoes ao longo da faixa com as garagens do lado
+    positivo (a esquerda de quem anda no sentido das estacoes). Com os boxes a direita da pista
+    (Brasilia) as estacoes chegam do fim para o comeco da faixa (reverso): o bloco fica girado de
+    meia volta, nao espelhado, e `reversed` avisa o jogo que os carros andam no sentido contrario
+    ao das estacoes (pit-lane.js, race-field.js, interlagos-pit.js)."""
     ps = np.r_[0, np.cumsum(np.linalg.norm(np.diff(pxy, axis=0), axis=1))]
     pt, pl = quadro(pxy, fechado=False)
     end = float(ps[-1])
@@ -661,8 +716,10 @@ def completar_pit(pxy, pw_lo, pw_hi, pz, pbank, main_s, gap, garagens, superfici
     walls = []
     for a, b in muro_trechos:
         walls.append({'name': 'Muro_boxes', 'points': poly(muro_off, a, b, esp), 'height': 1.05, 'fence': 2.6, 'fence_side': -1})
-    walls += [{'name': 'Muro_externo_boxes', 'points': poly(externo, 6, s99 - bay / 2, .4), 'height': 1.0, 'fence': 0},
-              {'name': 'Muro_externo_boxes', 'points': poly(externo, s99 + bay / 2, end - 20, .4), 'height': 1.0, 'fence': 0},
+    # O muro externo para 20 m antes da ponta da saida (a faixa volta para a pista) e 6 m da entrada.
+    a0, a1 = (20, end - 6) if reverso else (6, end - 20)
+    walls += [{'name': 'Muro_externo_boxes', 'points': poly(externo, a0, s99 - bay / 2, .4), 'height': 1.0, 'fence': 0},
+              {'name': 'Muro_externo_boxes', 'points': poly(externo, s99 + bay / 2, a1, .4), 'height': 1.0, 'fence': 0},
               {'name': 'Box99_paredes', 'points': [qq + [.3] for qq in box_walls], 'height': 5.2, 'fence': 0},
               *({'name': 'Box99_divisoria', 'points': [qq + [.12] for qq in r], 'height': 1.1, 'fence': 0} for r in rail)]
     amostras = np.column_stack([ps, pxy, pz, pw_lo, paved_hi, pbank, pgrade, pt, pl, main_s, lane_lo, lane_hi, fast_hi, gap])
@@ -672,10 +729,13 @@ def completar_pit(pxy, pw_lo, pw_hi, pz, pbank, main_s, gap, garagens, superfici
         'wall_nose': float(wall_nose), 'wall_end': float(wall_end),
         'garages': [round(float(g0), 2), round(float(g1), 2)],
         # 60 km/h diante das garagens, so onde a faixa ja corre separada da pista por muro.
-        'limit': {'from': float(max(g0 - 40, ps[np.argmax(gap > 1.0)] + 5)),
-                  'to': float(min(g1 + 15, ps[len(gap) - 1 - np.argmax(gap[::-1] > 1.0)] - 5)), 'kmh': 60}, 'walls': walls,
+        # (40 m antes das garagens no sentido dos carros, 15 m depois; no bloco reverso, ao contrario em s.)
+        'limit': {'from': float(max(g0 - (15 if reverso else 40), ps[np.argmax(gap > 1.0)] + 5)),
+                  'to': float(min(g1 + (40 if reverso else 15), ps[len(gap) - 1 - np.argmax(gap[::-1] > 1.0)] - 5)), 'kmh': 60},
+        'walls': walls,
         'box99': {'index': BOX99, 's': float(s99), 'bay': float(bay), 'cafe_s': float(s_cafe), 'front': front, 'depth': DEPTH},
-        'entry_main_s': float(main_s[0]), 'exit_main_s': float(main_s[-1]), 'source': fonte,
+        'entry_main_s': float(main_s[-1] if reverso else main_s[0]), 'exit_main_s': float(main_s[0] if reverso else main_s[-1]),
+        'source': fonte, **({'reversed': True} if reverso else {}),
         # So para montar o terreno (removidos antes de gravar).
         'xy': pxy.tolist(), 'z_lane': pz.tolist(), 'lx_ly': pl.tolist(), 'lo_arr': pw_lo, 'hi_arr': paved_hi,
     }
@@ -694,8 +754,10 @@ def main_s_monotono(ps, main_s, lat, pt, T, k, L):
     return np.interp(ps, a_s, a_u) % L
 
 
-def montar_pit(pxy, pw, xy, z, E, T, bank, largura, s, L, superficie, vias_dem, origem, base, escala, fonte, garagens_s):
-    """Pit lane medido (Cascavel): perfil do ANADEM, juntando-se ao plano da pista nas pontas."""
+def montar_pit(pxy, pw, xy, z, E, T, bank, largura, s, L, superficie, vias_dem, origem, base, escala, fonte, garagens_s,
+               lado=1, folga_min=None):
+    """Pit lane medido (Cascavel, Brasilia): perfil do relevo, juntando-se ao plano da pista nas
+    pontas. lado: 1 com os boxes a esquerda da pista no sentido da corrida, -1 a direita."""
     # Reamostra a cada 2 m.
     ps0 = np.r_[0, np.cumsum(np.linalg.norm(np.diff(pxy, axis=0), axis=1))]
     ps = np.arange(0, ps0[-1] + 1e-6, DS)
@@ -703,8 +765,21 @@ def montar_pit(pxy, pw, xy, z, E, T, bank, largura, s, L, superficie, vias_dem, 
     pw = np.interp(ps, ps0, pw)
     pt, pl = quadro(pxy, fechado=False)
     k, main_s, lat, z_main = superficie(pxy)
-    gap = np.maximum(0, lat - pw / 2 - largura[k] / 2)
-    # Perfil: ANADEM suavizado; onde corre a menos de 12 m da pista segue o plano dela.
+    gap = np.maximum(0, lado * lat - pw / 2 - largura[k] / 2)
+    if folga_min:
+        # Plataforma do muro diante das garagens, como no ECPA e em Chapeco: a banca da equipe do Box 99
+        # pede o muro de 3,4 m a 0,6 m de cada via. Onde a faixa medida corre mais perto da pista ela se
+        # afasta o que falta (Brasilia: ~0,3 m), com transicao suave.
+        from scipy.ndimage import maximum_filter1d
+        g0_, g1_ = (v * escala for v in garagens_s)
+        falta = np.where((ps > g0_ - 40) & (ps < g1_ + 40), np.maximum(0, folga_min - gap), 0)
+        falta = gaussian_filter1d(maximum_filter1d(falta, 41, mode='nearest'), 8, mode='nearest')
+        pxy = pxy + (lado * falta)[:, None] * E[k]
+        pt, pl = quadro(pxy, fechado=False)
+        k, main_s, lat, z_main = superficie(pxy)
+        gap = np.maximum(0, lado * lat - pw / 2 - largura[k] / 2)
+        print(f'pit lane afastado ate {falta.max():.2f} m da pista diante das garagens (folga minima {folga_min} m)')
+    # Perfil: relevo suavizado; onde corre a menos de 12 m da pista segue o plano dela.
     zd = vias_dem(pxy[:, 0] / escala + origem[0], pxy[:, 1] / escala + origem[1]) - base
     zd = gaussian_filter1d(zd, 12 / DS, mode='nearest')
     junto = gaussian_filter1d(np.clip((14 - gap) / 8, 0, 1), 5, mode='nearest')
@@ -724,8 +799,18 @@ def montar_pit(pxy, pw, xy, z, E, T, bank, largura, s, L, superficie, vias_dem, 
     wall_end = muro_trechos[-1][1] if muro_trechos else ps[-1] - 40
     print(f'pit lane {ps[-1]:.0f} m: entra em s={main_s[0]:.0f}, volta em s={main_s[-1]:.0f}; garagens {g0:.0f}-{g1:.0f} m; '
           f'muro {[(round(a), round(b)) for a, b in muro_trechos]}')
+    if lado < 0:
+        # Boxes a direita: as estacoes vao da saida para a entrada, com as garagens a esquerda delas
+        # (meia volta do bloco; o caimento troca de sinal com o eixo lateral).
+        fim = float(ps[-1])
+        pxy, pz, pbank, main_s, gap = pxy[::-1], pz[::-1], -pbank[::-1], main_s[::-1], gap[::-1]
+        lo, hi = -hi[::-1], -lo[::-1]
+        g0, g1 = fim - g1, fim - g0
+        # Mesmo sentido de antes: wall_nose do lado da entrada, wall_end do lado da saida.
+        abertura, wall_nose, wall_end = fim - abertura, fim - wall_nose, fim - wall_end
+        muro_trechos = [(fim - b, fim - a) for a, b in reversed(muro_trechos)]
     return completar_pit(pxy, lo, hi, pz, pbank, main_s, gap, (g0, g1), superficie, fonte, abertura, wall_nose, wall_end, L,
-                         muro_trechos)
+                         muro_trechos, reverso=lado < 0)
 
 
 def predio_sentinel2(pasta, epsg, P, E, reta_ini, reta_n, lado):
@@ -881,13 +966,41 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
             if g is not None:
                 pinta(LineString(g).buffer(larg_via[hw] / 2), '7')
 
-    # Edificacoes: OSM primeiro; da Microsoft so as que nao caem sobre uma do OSM.
+    c = CIRCUITOS[nome]
+    foto = foto_referencia(pasta, epsg) if c.get('edificios_locais') == 'idedf' else None
+    if foto is not None:
+        # A cobertura de 2021 e anterior a reforma: mata ou arbusto onde a imagem de 2025 mostra terra
+        # vermelha exposta vira solo exposto (o miolo do autodromo foi terraplenado).
+        XX4, YY4 = np.meshgrid(gx, gy)
+        ux, uy = XX4 / escala + origem[0], YY4 / escala + origem[1]
+        terra = np.mean([terra_na_foto(foto, ux + dx, uy + dy) for dx, dy in ((0, 0), (1.5, 0), (-1.5, 0), (0, 1.5), (0, -1.5))], axis=0)
+        cx_, cy_ = foto.px(ux, uy)
+        na_foto = (cx_ > 2) & (cy_ > 2) & (cx_ < foto.img.shape[1] - 3) & (cy_ < foto.img.shape[0] - 3)
+        exposto = na_foto & (terra > .6) & np.isin(cover, ['0', '1', '2', '3'])
+        cover[exposto] = '5'
+        print(f'cobertura conferida na imagem de 2025: {int(exposto.sum())} celulas viram solo exposto')
+    # Edificacoes: OSM primeiro; da Microsoft so as que nao caem sobre uma do OSM. Onde ha cadastro
+    # local com altura (DF), ele substitui os dois.
     bandas = [(LineString(np.vstack([xy, xy[:1]])), np.median(largura) / 2 + 16)]
     if pit:
         bandas.append((LineString(np.array(pit['xy'])), 34))
     livre = lambda g: all(g.distance(linha) > folga for linha, folga in bandas)
+    # As arquibancadas do jogo (track-clearance.js standLayout: blocos de 28 m, 19 degraus) tomam o
+    # lugar do que houver ali (Brasilia: a estrutura velha da arquibancada coberta).
+    for cfg in x['arquibancadas']:
+        s0 = L - cfg['antes_da_chegada']
+        idx = [i for i in range(len(s)) if (s[i] - s0) % L <= cfg['blocos'] * 28]
+        if len(idx) > 1:
+            meio = cfg['lado'] * (largura[idx] / 2 + cfg['recuo'] + 9)
+            bandas.append((LineString(xy[idx] + E[idx] * meio[:, None]), 13))
     edificios, polys_osm = [], []
-    for w in vias:
+    if c.get('edificios_locais') == 'idedf':
+        for loc_, alt_, fonte_, redondo_, nome_ in edificios_idedf(pasta, origem, escala, foto, xy):
+            edificios.append((loc_, alt_, 'idedf-redondo' if redondo_ else 'idedf'))
+        vias_edif = []
+    else:
+        vias_edif = vias
+    for w in vias_edif:
         t = w.get('tags', {})
         if 'building' in t and w['nodes'][0] == w['nodes'][-1]:
             g = geom(w)
@@ -909,7 +1022,7 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
                     pass
             edificios.append((p, alt, 'osm'))
     ms = pasta / 'edificios_microsoft.geojson'
-    if ms.exists():
+    if ms.exists() and c.get('edificios_locais') != 'idedf':
         idx_osm = [prepared.prep(p) for p in polys_osm]
         for f in json.loads(ms.read_text(encoding='utf-8'))['features']:
             anel = np.array(f['geometry']['coordinates'][0])
@@ -932,7 +1045,15 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
         area = p.area
         if alt is None:
             alt = 3.4 if area < 90 else 5.8 if area < 250 else 7.5 if area < 1200 else 9.5
-        tipo = 'galpao' if area >= 600 else 'casa'
+        # Galpao (telhado plano): grande, ou comprido e estreito (no DF, estruturas de 4 x 130 m ao longo
+        # da reta longa nao levam telhado de telha).
+        tipo = 'galpao' if area >= 600 or (fonte.startswith('idedf') and max(la, lb) > 4 * min(la, lb)) else 'casa'
+        if fonte == 'idedf-redondo':
+            # Estadio Mane Garrincha, ginasios: um tambor com o diametro do contorno.
+            fonte, tipo = 'idedf', 'redondo'
+            la = lb = 2 * math.sqrt(Polygon(p.exterior.coords).area / math.pi)
+        elif fonte == 'idedf' and alt >= 12 and area >= 250:
+            tipo = 'predio'
         lista.append([round(cx, 2), round(cy, 2), round(la, 2), round(lb, 2), round(rumo, 4), round(alt, 2), tipo, fonte])
         # Pinta o chao sob a edificacao como construido.
         pinta(p, '4')
@@ -941,13 +1062,137 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
     for cfg in x['arquibancadas']:
         arq.append({'first_s': cfg['antes_da_chegada'], 'blocks': cfg['blocos'], 'side': cfg['lado'], 'gap': cfg['recuo']})
     contagem = {ch: int((cover == ch).sum()) for ch in '01234567'}
-    print(f'cenario: {len(lista)} edificacoes ({sum(1 for e in lista if e[7] == "osm")} OSM), cobertura {contagem}')
+    arvores = arvores_idedf(pasta, origem, escala, gx, gy, bandas, foto) if c.get('edificios_locais') == 'idedf' else []
+    print(f'cenario: {len(lista)} edificacoes ({sum(1 for e in lista if e[7] == "osm")} OSM, '
+          f'{sum(1 for e in lista if e[7] == "idedf")} IDE/DF), {len(arvores)} arvores isoladas, cobertura {contagem}')
     return {'cover': {'x0': float(gx[0]), 'y0': float(gy[0]), 'step': PASSO, 'nx': len(gx), 'ny': len(gy),
                       'classes': ''.join(cover.ravel()),
                       'legend': {'0': 'campo', '1': 'mata', '2': 'arbusto', '3': 'lavoura', '4': 'construido',
                                  '5': 'solo exposto', '6': 'agua', '7': 'via pavimentada'}},
             'buildings': {'columns': ['x', 'y', 'w', 'd', 'heading', 'h', 'kind', 'source'], 'items': lista},
-            'stands': arq}
+            'stands': arq,
+            **({'trees': {'columns': ['x', 'y'], 'items': arvores}} if arvores else {}),
+            **(skyline_idedf(pasta, epsg, origem, escala, gx, gy, c) if c.get('edificios_locais') == 'idedf' else {})}
+
+
+def skyline_idedf(pasta, epsg, origem, escala, gx, gy, c):
+    """O horizonte da cidade alem da grade do terreno (landscape.js createHorizon): os predios altos ou
+    grandes do cadastro do DF ate 3,5 km, como retangulos orientados (redondos como tambor), e os marcos
+    da cidade (config 'marcos': a Torre de TV)."""
+    from shapely.geometry import shape, Polygon
+    feicoes = json.loads((pasta / 'idedf_skyline.geojson').read_text(encoding='utf-8'))['features']
+    itens = []
+    for f in feicoes:
+        if not f.get('geometry'):
+            continue
+        g = shape(f['geometry']).buffer(0)
+        a = f['properties']
+        for parte in (list(g.geoms) if g.geom_type == 'MultiPolygon' else [g]):
+            if parte.area < 40:
+                continue
+            ext = Polygon(parte.exterior.coords)
+            loc = Polygon((np.array(ext.exterior.coords)[:, :2] - origem[:2]) * escala)
+            cx, cy = loc.centroid.x, loc.centroid.y
+            # So o que fica fora do terreno do jogo (dentro dele estao as edificacoes do cenario).
+            if gx[0] - 20 < cx < gx[-1] + 20 and gy[0] - 20 < cy < gy[-1] + 20:
+                continue
+            alt = a.get('ed_alt_aprox') or 3.1 * (a.get('ed_num_pav') or 1) + .8
+            q = np.array(loc.minimum_rotated_rectangle.exterior.coords)[:4]
+            u, v = q[1] - q[0], q[2] - q[1]
+            la, lb, rumo = float(np.linalg.norm(u)), float(np.linalg.norm(v)), math.atan2(u[1], u[0])
+            circ = 4 * math.pi * ext.area / ext.length ** 2
+            tipo = 'redondo' if circ > .82 and ext.area > 1500 else 'predio' if alt >= 9 else 'galpao'
+            if tipo == 'redondo':
+                la = lb = 2 * math.sqrt(loc.area / math.pi)
+            itens.append([round(cx, 1), round(cy, 1), round(la, 1), round(lb, 1), round(rumo, 3), round(float(alt), 1), tipo])
+    para_local = Transformer.from_crs(4326, epsg, always_xy=True)
+    marcos = []
+    for m in c.get('marcos', []):
+        x, y = para_local.transform(m['lon'], m['lat'])
+        marcos.append({'name': m['nome'], 'kind': m['tipo'], 'x': round((x - origem[0]) * escala, 1),
+                       'y': round((y - origem[1]) * escala, 1), 'h': m['altura_m']})
+    print(f'horizonte: {len(itens)} edificacoes do cadastro do DF alem do terreno, marcos {[m["name"] for m in marcos]}')
+    return {'skyline': {'columns': ['x', 'y', 'w', 'd', 'heading', 'h', 'kind'], 'items': itens,
+                        'source': 'IDE/DF, cadastro territorial (edificações com altura >= 9 m ou área >= 1.500 m²)'},
+            'landmarks': marcos}
+
+
+def foto_referencia(pasta, epsg):
+    """Imagem aerea de referencia (Esri), so para conferir o que existe hoje; None se nao baixada."""
+    if not (pasta / 'referencia_esri.jpg').exists():
+        return None
+    from refinar_eixo import Referencia
+    return Referencia(pasta, epsg)
+
+
+def terra_na_foto(foto, X, Y):
+    """Fracao de terra vermelha exposta (muito saturada, vermelho acima do verde) nos pontos UTM."""
+    f = foto.rgb(np.asarray(X, float), np.asarray(Y, float))
+    sat = f.max(-1) - f.min(-1)
+    return ((sat > 70) & (f[..., 0] > f[..., 1] + 35)).astype(float)
+
+
+def verde_na_foto(foto, X, Y):
+    """Copa de arvore nos pontos UTM: verde escuro (verde acima do vermelho, pouca luz)."""
+    f = foto.rgb(np.asarray(X, float), np.asarray(Y, float))
+    return ((f[..., 1] > f[..., 0] + 4) & (f.mean(-1) < 120)).astype(float)
+
+
+def edificios_idedf(pasta, origem, escala, foto, xy):
+    """Edificacoes do cadastro territorial do DF (IDE/DF) com a altura aproximada do cadastro. Perto
+    da pista (300 m) so as que a imagem de 2025 ainda mostra: a reforma demoliu o predio antigo dos
+    boxes e outras construcoes, onde ficou terra ou concreto."""
+    from shapely.geometry import shape, Polygon
+    feicoes = json.loads((pasta / 'idedf_edificacoes.geojson').read_text(encoding='utf-8'))['features']
+    pista = cKDTree(xy)
+    saida, demolidos = [], 0
+    for f in feicoes:
+        if not f.get('geometry'):
+            continue
+        g = shape(f['geometry']).buffer(0)
+        partes = list(g.geoms) if g.geom_type == 'MultiPolygon' else [g]
+        a = f['properties']
+        for parte in partes:
+            if parte.area < 12:
+                continue
+            ext = Polygon(parte.exterior.coords)
+            loc = Polygon((np.array(ext.exterior.coords)[:, :2] - origem[:2]) * escala)
+            alt = a.get('ed_alt_aprox')
+            if not alt or alt <= 0:
+                alt = 3.1 * (a.get('ed_num_pav') or 1) + .8
+            if foto is not None and pista.query([loc.centroid.x, loc.centroid.y])[0] < 300:
+                minx, miny, maxx, maxy = ext.bounds
+                gx_, gy_ = np.meshgrid(np.linspace(minx, maxx, 9), np.linspace(miny, maxy, 9))
+                import shapely
+                dentro = shapely.contains_xy(ext, gx_, gy_)
+                if dentro.sum() >= 4 and terra_na_foto(foto, gx_[dentro], gy_[dentro]).mean() > .5:
+                    demolidos += 1
+                    continue
+            # Redondo (estadio, ginasio): circularidade do contorno externo.
+            circ = 4 * math.pi * ext.area / ext.length ** 2
+            saida.append((loc, float(alt), 'idedf', circ > .82 and ext.area > 1500, a.get('ed_nome')))
+    print(f'IDE/DF: {len(saida)} edificacoes, {demolidos} demolidas segundo a imagem de 2025')
+    return saida
+
+
+def arvores_idedf(pasta, origem, escala, gx, gy, bandas, foto):
+    """Arvores isoladas da cartografia do DF (2016) que a imagem de 2025 ainda mostra, longe das vias."""
+    from shapely.geometry import Point
+    feicoes = json.loads((pasta / 'idedf_arvores.geojson').read_text(encoding='utf-8'))['features']
+    pts = np.array([f['geometry']['coordinates'][:2] for f in feicoes if f.get('geometry')])
+    if not len(pts):
+        return []
+    if foto is not None:
+        # A copa num raio de 2 m (9 pontos): a arvore continua la se metade deles e verde.
+        off = np.array([[0, 0], [2, 0], [-2, 0], [0, 2], [0, -2], [1.4, 1.4], [-1.4, 1.4], [1.4, -1.4], [-1.4, -1.4]])
+        q = pts[:, None, :] + off[None]
+        viva = verde_na_foto(foto, q[..., 0], q[..., 1]).mean(1) >= .5
+        pts = pts[viva]
+    loc = (pts - origem[:2]) * escala
+    dentro = (loc[:, 0] > gx[0] + 5) & (loc[:, 0] < gx[-1] - 5) & (loc[:, 1] > gy[0] + 5) & (loc[:, 1] < gy[-1] - 5)
+    loc = loc[dentro]
+    livre = [p for p in loc if all(Point(p).distance(linha) > folga - 6 for linha, folga in bandas)]
+    return [[round(float(x_), 2), round(float(y_), 2)] for x_, y_ in livre]
 
 
 def solo(nome, pasta, epsg, origem, escala, gx, gy):

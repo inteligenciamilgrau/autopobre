@@ -2,8 +2,10 @@
 
     python verificar_campeonato.py [porta]
 
-Modo Corrida: five rounds in a row, points on the result sheet, the next round from there,
-resuming after a reload and the final standings. Each round is finished on the spot (the
+Calendar tabs: Todas as pistas (every circuit, read from championship.js) and Old Stock 2026 (its
+eight dated rounds; waiting for Brasília while that track is not in the game), remembered on reload.
+Modo Corrida: all Todas as pistas rounds in a row, points on the result sheet, the next round from
+there, resuming after a reload and the final standings. Each round is finished on the spot (the
 player's lap count is set to the race distance), so the player wins every round.
 Modo História: its own championship; a round finished at the flag scores on the result sheet,
 the box before the judge's inspection disqualifies (0 points) and the next vaquinha is the next
@@ -20,8 +22,9 @@ from browser_config import browser_executable, browser_args, wait_js, wait_race_
 PORT = sys.argv[1] if len(sys.argv) > 1 else '8799'
 URL = f'http://127.0.0.1:{PORT}/pista_interlagos/teste/'
 ROOT = Path(__file__).resolve().parents[1]
-ROUNDS = ['interlagos', 'cascavel', 'piracicaba', 'chapeco', 'curvelo']
-NAMES = {'cascavel': 'Cascavel', 'piracicaba': 'ECPA Piracicaba', 'chapeco': 'Chapecó', 'curvelo': 'Oval de Curvelo'}
+# Todas as pistas runs every circuit of circuits.js (championship.js): read from the page.
+ROUNDS = []
+NAMES = {}
 STORY_KEY = 'opala99-championship-historia-v1'
 FIXTURE = """async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;
  ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();}"""
@@ -68,11 +71,35 @@ with sync_playwright() as p:
     page.on('pageerror', lambda e: (errors.append(str(e)), print('pageerror', e, flush=True)))
     page.goto(URL + '?intro=0', wait_until='domcontentloaded')
     wait_js(page, "window.interlagos&&!document.querySelector('#start').disabled")
+    ROUNDS[:] = page.evaluate("import('./championship.js').then(m=>[...m.CHAMPIONSHIP_ROUNDS])")
+    NAMES.update(page.evaluate("import('./circuits.js').then(m=>Object.fromEntries(Object.values(m.CIRCUITS).map(c=>[c.id,c.name])))"))
+    brasilia = 'brasilia' in NAMES
     page.fill('#pilotName', 'Piloto campeonato')
     # Modo Corrida, then the championship on the track screen.
     page.click('#start')
     page.click('#carsNext')
     assert page.get_attribute('#tracks', 'data-mode') == 'corrida'
+    assert page.get_attribute('[data-championship-calendar="todas"]', 'aria-selected') == 'true'
+    assert page.locator('#championshipCalendar li').count() == len(ROUNDS)
+    # Old Stock 2026: eight dated rounds, Interlagos twice in a row; Brasília opens it.
+    page.click('[data-championship-calendar="oldstock2026"]')
+    season = page.inner_text('#championshipCalendar')
+    assert page.locator('#championshipCalendar li').count() == 8 and '21 e 22 MAR' in season and '19 e 20 DEZ' in season, season
+    assert page.inner_text('#championshipCalendar li:nth-child(2) span') == page.inner_text('#championshipCalendar li:nth-child(3) span') == 'Interlagos - SP'
+    if brasilia:
+        assert page.is_enabled('#championshipStart') and page.inner_text('#championshipStart').startswith('Começar campeonato')
+    else:
+        assert page.is_disabled('#championshipStart') and 'Brasília' in page.inner_text('#championshipStart') and 'em breve' in season, season
+    page.screenshot(path=str(ROOT / 'renders/campeonato_oldstock2026.png'))
+    page.reload(wait_until='domcontentloaded')
+    wait_js(page, "window.interlagos&&!document.querySelector('#start').disabled")
+    page.click('#start')
+    page.click('#carsNext')
+    assert page.get_attribute('[data-championship-calendar="oldstock2026"]', 'aria-selected') == 'true', 'the tab is remembered'
+    page.focus('[data-championship-calendar="oldstock2026"]')
+    page.keyboard.press('ArrowLeft')
+    assert page.get_attribute('[data-championship-calendar="todas"]', 'aria-selected') == 'true'
+    assert page.evaluate("document.activeElement.dataset.championshipCalendar") == 'todas'
     assert page.inner_text('#championshipStart').startswith('Começar campeonato')
     page.click('#championshipStart')
     finish_round(page, 0)

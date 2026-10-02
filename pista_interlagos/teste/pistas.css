@@ -55,12 +55,25 @@
 #duelSwatch{width:16px;height:16px;flex-shrink:0;border-radius:3px;border:1px solid #0006;background:linear-gradient(90deg,var(--body,#555) 0 34%,var(--stripe,#e4e4d5) 34% 66%,var(--body,#555) 66%)}
 .championship-panel{padding:14px 16px;border-radius:9px;border:1px solid #d9b93c80;background:linear-gradient(170deg,#1b3a53ee,#0f2433ee);box-shadow:inset 0 3px #f4ce39}
 .championship-panel h3{margin:3px 0 10px;font-size:18px;color:#fff6dc}
+/* Calendar tabs: Todas as pistas / Old Stock 2026 (championship.js CHAMPIONSHIP_CALENDARS). */
+.championship-tabs{display:flex;gap:4px;margin:8px 0 10px;padding:3px;border-radius:7px;background:#0a1824b8;border:1px solid #9fb3c633}
+.championship-tabs button{flex:1;min-width:0;margin:0;padding:7px 8px;border:0;border-radius:5px;background:none;color:#9fb3c6;font-size:12px;font-weight:900;letter-spacing:.02em;white-space:nowrap;cursor:pointer}
+.championship-tabs button:hover{color:#fff6dc;background:#ffffff12}
+.championship-tabs button[aria-selected=true]{background:#f4ce39;color:#171c15;box-shadow:0 2px 8px #0006}
+.championship-tabs button:focus-visible{outline:2px solid #f4ce39;outline-offset:2px}
 #championshipCalendar{list-style:none;margin:0 0 10px;padding:0;display:grid;gap:5px}
 #championshipCalendar li{display:grid;grid-template-columns:24px 1fr auto;align-items:center;gap:8px;font-size:12px;color:#d6e0ea}
 #championshipCalendar b{display:grid;place-items:center;width:22px;height:22px;border-radius:50%;background:#ffffff1c;font-size:11px}
 #championshipCalendar em{font-style:normal;font-weight:800;color:#9fb3c6}
 #championshipCalendar li.done b{background:#177946;color:#fff}#championshipCalendar li.done em{color:#f4d055}
 #championshipCalendar li.next b{background:#f4ce39;color:#171c15}#championshipCalendar li.next span{color:#fff;font-weight:800}
+/* A season with dates (Old Stock 2026); a circuit still being built is coming soon. */
+#championshipCalendar i{display:none;font-style:normal;font-weight:900}
+#championshipCalendar.dated{gap:3px}#championshipCalendar.dated li{grid-template-columns:24px minmax(0,1fr) auto minmax(58px,auto)}
+#championshipCalendar small{font-size:11px;font-weight:700;color:#9fb3c6;font-variant-numeric:tabular-nums;white-space:nowrap}#championshipCalendar.dated em{text-align:right}
+#championshipCalendar li.next small{color:#f4d055}
+#championshipCalendar li.soon b{background:none;box-shadow:inset 0 0 0 1px #9fb3c6aa}#championshipCalendar li.soon span{color:#9fb3c6}#championshipCalendar li.soon em{color:#e9a23b}
+#tracks .championship-start:disabled{background:#3b4f5e;color:#c3d0db;cursor:default}
 #championshipStatus{margin:0 0 10px;font-size:12px;line-height:1.45;color:#e7edf2}
 #championshipMini{list-style:none;margin:0 0 10px;padding:6px 10px;background:#0a1824b8;border-radius:6px}
 #championshipMini[hidden]{display:none}
@@ -125,6 +138,11 @@
  .tracks-modes button,.championship-start{padding:8px 9px;font-size:12px;min-height:44px}.tracks-modes small{font-size:9px}
  .race-extras{gap:6px}#tracks .race-extras button{padding:7px 9px;font-size:12px;min-height:40px}.race-extras small,.duel-pick span{display:none}.duel-pick{padding:4px 6px}.tracks-laps{font-size:8px;gap:5px}.tracks-laps select,.duel-pick select{padding:2px 4px;font-size:10px}
  .championship-panel{padding:8px 10px}.championship-panel h3{display:none}
+ .championship-panel{display:grid;grid-template-columns:minmax(0,1fr) auto;column-gap:8px;align-items:center}.championship-panel>*{grid-column:1/-1}
+ .championship-panel>.tracks-kicker,.championship-panel>.championship-tabs{grid-column:auto}.championship-panel>.tracks-kicker{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+ .championship-tabs{margin:0;padding:2px}.championship-tabs button{flex:none;padding:3px 7px;font-size:10px}
+ #championshipCalendar em{white-space:nowrap;font-size:8px}
+ #championshipCalendar.long span,#championshipCalendar small{display:none}#championshipCalendar.long i{display:block}#championshipCalendar.dated li{grid-template-columns:1fr}
  #championshipCalendar{grid-auto-flow:column;grid-auto-columns:minmax(0,1fr);gap:4px;margin:4px 0 6px}
  #championshipCalendar li{grid-template-columns:1fr;justify-items:center;text-align:center;gap:1px;font-size:9px}
  #championshipCalendar span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}

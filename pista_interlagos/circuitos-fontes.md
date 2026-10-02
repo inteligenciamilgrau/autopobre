@@ -1,11 +1,10 @@
-# Cascavel, ECPA Piracicaba e Chapecó — circuitos da Old Stock Race a partir de dados abertos
+# Cascavel, ECPA Piracicaba, Chapecó e Brasília — circuitos da Old Stock Race a partir de dados abertos
 
-Os três circuitos entram no seletor da abertura ao lado de Interlagos e Curvelo
-(`?circuito=cascavel`, `?circuito=piracicaba`, `?circuito=chapeco`), com os mesmos Opalas, 14 adversários,
-Modo Corrida, Modo História, pit stop no Box 99 e recordes separados por circuito.
+Os quatro circuitos entram no seletor da abertura ao lado de Interlagos e Curvelo
+(`?circuito=cascavel`, `?circuito=piracicaba`, `?circuito=chapeco`, `?circuito=brasilia`), com os mesmos
+Opalas, 14 adversários, Modo Corrida, Modo História, pit stop no Box 99 e recordes separados por circuito.
 A Old Stock Race correu em Cascavel na 4ª e na 7ª etapas de 2025. Em 21 e 22/03/2026
-abriu a temporada em Brasília, no Autódromo Internacional Nelson Piquet, que ainda
-não está no jogo.
+abriu a temporada em Brasília, no Autódromo Internacional Nelson Piquet (seção no fim).
 
 ## Fontes (baixadas em 27/09/2026)
 
@@ -135,3 +134,78 @@ atalhos dos traçados alternativos (visíveis no Sentinel-2) não foram desenhad
 scipy no `geo-venv`. `projecao.py` faz as projeções pelo GDAL do rasterio e `compat_scipy.py`
 traz CubicSpline, cKDTree, brentq e savgol_filter em numpy, usados só quando o import falha; o
 ECPA regenerado assim sai idêntico ao JSON publicado.
+
+## Brasília (Autódromo Internacional Nelson Piquet) — fontes baixadas em 02/10/2026
+
+Reaberto em 27/11/2025 depois da reforma do BRB (R$ 60 milhões na primeira etapa); a Stock Car
+voltou em 29–30/11/2025 e a Old Stock abriu lá a temporada de 2026 (21–22/03).
+
+**O que foi publicado** (Metrópoles, Distrito do Esporte, Correio Braziliense, Jornal de Brasília,
+Poder360, 2025): 5.384 m no sentido horário, a pista mais longa em atividade no Brasil, 16 curvas
+(9 à direita, 7 à esquerda), seis traçados, duas variantes e duas entradas de boxes; 15 m de largura
+na reta de largada e 14 m no resto; retas de 803 m (a mais longa), 614 m (largada) e 502 m (oposta);
+a curva 1 "de alta velocidade, com 207 metros e inclinação de 5°". 10 km de guard-rail, 40 mil m² de
+caixas de brita, 90 mil pneus nas barreiras, 3,5 km de zebras. Os 40 boxes novos ficaram para a
+segunda etapa (2026); o traçado de 1974 tinha 5.476 m e 12 curvas.
+
+**Fontes:**
+
+| Dado | Fonte | Uso |
+|---|---|---|
+| Traçado (via 32900091, redesenhada em 20/02/2026), pit lane (vias 1450655789, 1450655791, 32900119) | OpenStreetMap (Overpass) | eixo inicial, pit lane |
+| Imagem aérea Esri World Imagery z18 (0,57 m), já com o asfalto novo e o prédio antigo dos boxes demolido | Esri | medir eixo e pátio dos boxes; conferir o que ainda existe; **não é distribuída** |
+| Modelo digital do terreno de 1 m do DF, pelo geoprocessamento `Profile1m` (perfis leste-oeste a cada 2 m, ±1.100 m) | IDE/DF — Geoportal da SEDUH/GDF | perfil da pista e terreno (`mdt_idedf.tif`) |
+| Edificações do cadastro territorial com altura aproximada (`ed_alt_aprox`) | IDE/DF, CADASTRO_TERRITORIAL/5 | prédios do cenário (3 km) e do horizonte (3,5 km, ≥ 9 m ou ≥ 1.500 m²) |
+| Árvores isoladas e massas arbóreas (cartografia de 2016) | IDE/DF, IDEDF/236 e 237 | árvores do cenário |
+| Torre de TV (OSM way 41648342) | OpenStreetMap | marco no horizonte (224 m, mirante a 75 m) |
+| ANADEM 23L, Copernicus S16W048, WorldCover S18W048, Sentinel-2 S2A_22LHH_20260930 | como nos outros | conferir o relevo, cobertura, cor do chão |
+
+As curvas de nível de 1 m (2016) da IDE/DF vêm inteiras do servidor (linhas de quilômetros, 13 MB
+para 24 curvas) e não cabem numa consulta; o serviço de perfis devolve o MDT direto. O MDT e o
+ANADEM concordam ao longo da pista (mediana 0,13 m, p95 1,1 m).
+
+**Como reconstruir:** `baixar_fontes.py brasilia --referencia` (inclui a IDE/DF; `--idedf` baixa só
+ela, ~12 min), `refinar_eixo.py brasilia`, `gerar_pista.py brasilia`, `desenhar_planta.py brasilia`.
+
+**Método, no que difere dos outros:**
+
+- **Eixo** (`refinar_eixo.py`): a via OSM passa duas vezes pelo nó do entroncamento com o anel externo
+  (nó 0 = nó 97); a volta vai do nó 1 ao 96, porque o nó 0 faz um bico no desenho. Na reta interna de
+  cima o OSM tem poucos nós e corre até 18 m fora do asfalto: busca de ±18 m (`desloc_max_m`), só o
+  asfalto novo e escuro conta como pista (`lum_max_asfalto` 85; pátio e escapes são mais claros) e o
+  asfalto mais perto do desenho do pit é do pit (`separar_pit_lane`). Mede 5.336 m; escala de 0,85%
+  para os 5.384 m publicados.
+- **Larguras** (`largura_publicada`): 15 m na reta de largada e 14 m no resto, com transição de 40 m;
+  a medida na imagem pega os escapes pavimentados encostados no asfalto (média 15,3 m).
+- **Relevo** (`relevo_local: idedf_mdt_1m`): o perfil lê o MDT suavizado 4 m em 2D e 6 m ao longo da
+  volta. 17,7 m de desnível, rampas de -3,2% a +2,8%: a reta de largada desce 7 m até a curva 1 (o
+  ponto mais baixo), a reta longa sobe devagar, o laço é o ponto mais alto. O MDT é anterior à reforma.
+- **Curva 1**: caimento de 8,75% (tan 5°) em toda a curva, o publicado.
+- **Curvas**: a detecção acha 12 trechos (6 e 6); quatro têm dois ápices separados e contam como duas
+  curvas na contagem oficial (canto de baixo à direita, o laço, o grampo à direita e o grampo à esquerda
+  do miolo). Fecha 9 + 7 = 16. Sem planta numerada publicada, a numeração segue a ordem da volta.
+- **Boxes** (`lado_boxes: -1`): por dentro da reta de largada, à direita dos carros no sentido horário.
+  O pit lane é o do OSM (1.126 m, entrada por dentro da curva 16, saída por dentro da curva 1 até a
+  reta longa). O bloco `pit` do JSON é escrito da saída para a entrada (`reversed: true`) para as
+  garagens ficarem do lado positivo, como nos outros circuitos: meia volta do bloco, nunca espelhado.
+  `pit-lane.js`, `race-field.js` (`pitRoute`), `interlagos-pit.js` e `pit-box99.js` tratam o sentido.
+  As garagens ocupam o pátio de concreto claro medido na imagem (318 m, 25 boxes de 12,9 m); a faixa
+  se afasta até 1,45 m da pista diante delas (`folga_minima_boxes_m` 4,6) para o muro da banca do
+  Box 99 ter 3,4 m. A linha de chegada fica no meio das garagens; o poste do pórtico do lado dos
+  boxes vai sobre o muro, como em Chapecó.
+- **Cenário** (`edificios_locais: idedf`): as edificações do cadastro do DF substituem OSM e Microsoft,
+  com a altura do cadastro; perto da pista (300 m) ficam de fora as que a imagem de 2025 mostra como
+  terra exposta (29 demolidas na reforma). Redondas viram tambor (Estádio Mané Garrincha, 49,5 m;
+  Ginásio Nilson Nelson), as altas viram prédio, as compridas e estreitas, galpão. As árvores isoladas
+  de 2016 entram onde a imagem ainda mostra copa (543). Mata e cerrado de 2021 onde a imagem de 2025
+  mostra terra vermelha viram solo exposto (o miolo foi terraplenado).
+- **Horizonte**: além da grade do terreno, 3.233 edificações reais do cadastro (superquadras, Setor
+  Noroeste, Eixo Monumental) no lugar dos telhados genéricos, e a Torre de TV.
+- **Arquibancadas**: 11 blocos do lado de fora da reta (norte), da estrutura antiga diante da linha até
+  ~250 m depois dela, onde a imagem mostra os assentos azuis; a estrutura antiga sai do cenário.
+
+**Aproximações declaradas:** os 40 boxes novos (não aparecem na imagem; o jogo usa a fileira padrão
+de garagens sobre o pátio), posição do Box 99, da lanchonete e da banca, caimentos fora da curva 1,
+zebras, muros, a numeração das curvas, os traçados alternativos (os atalhos do OSM não foram
+desenhados), o relevo da pista nova (o MDT é de antes da reforma) e a altura dos prédios do horizonte
+sobre o chão genérico além da grade do terreno.

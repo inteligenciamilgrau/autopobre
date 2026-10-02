@@ -29,9 +29,9 @@ with sync_playwright() as p:
   page.evaluate("""async ()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();const m=fixture,c=interlagos.car;window.finishStep=m.step.bind(m);m.step=()=>true;c.clock=129;c.best=40;c.laps=3;c.vx=30;c.vy=0;m.stepFree(1/120,{});for(let i=0;i<600;i++)finishStep({},1/120);} """)
   wait_js(page,"!document.querySelector('#raceResults').hidden")
   assert page.inner_text('#resultsCircuit')=='OVAL DE CURVELO';assert page.locator('#raceResults tbody tr').count()==15
-  page.click('#resultsRecords');page.click('[data-records-source="human"]');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-pressed')=='true'
+  page.click('#resultsRecords');page.click('[data-records-source="human"]');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-selected')=='true'
   assert page.locator('#lapRecords tbody tr').count()==1
-  page.click('[data-records-circuit="interlagos"]');assert page.locator('#lapRecords tbody tr').count()==0
+  page.click('#recordsCircuitPick');page.click('[data-records-circuit="interlagos"]');assert page.locator('#lapRecords tbody tr').count()==0
   page.click('#recordsClose');page.click('#resultsMainMenu');assert page.is_visible('#tracks')
   choose_race(page,story=True)
   wait_js(page,"fixture.active&&fixture.state.phase==='crowd'")

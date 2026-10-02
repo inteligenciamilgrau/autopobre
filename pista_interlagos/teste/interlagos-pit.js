@@ -51,13 +51,17 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
  }
  function across(list,s,from,to,depth){const p0=lerp(s-depth/2),p1=lerp(s+depth/2),v=[at(p0,from(p0),.046),at(p0,to(p0),.046),at(p1,from(p1),.046),at(p1,to(p1),.046)];list.push(geometryFrom(v.flatMap(q=>[q.x,q.y,q.z]),null,[0,2,1,1,2,3]));}
  const end=pit.length_m;
+ // A block written against the cars (Brasília, pit-lane.js) has its entry at the far end: the
+ // entry paint and the boards read by arriving cars go there, turned round.
+ const rev=!!pit.reversed,entry=s=>rev?end-s:s,facing=rev?Math.PI/2:-Math.PI/2;
+ const limitStart=rev?pit.limit.to:pit.limit.from,limitEnd=rev?pit.limit.from:pit.limit.to,before=d=>rev?d:-d;
  stripe(paints.white,0,end,p=>p[c.lane_lo]+.07,.14);
  stripe(paints.white,0,end,p=>p[c.lane_hi]-.07,.14);
  // Fast lane / working lane divider in front of the garages.
  stripe(paints.white,pit.garages[0]-6,pit.garages[1]+6,p=>p[c.fast_hi]-.07,.14);
  // Entry line, speed-limit lines and the exit line across the lane.
  const lane=p=>p[c.lane_lo],outer=p=>p[c.lane_hi];
- across(paints.white,1,lane,outer,.5);across(paints.white,pit.limit.from,lane,outer,.6);across(paints.white,pit.limit.to,lane,outer,.6);across(paints.white,pit.wall_end,lane,outer,.5);
+ across(paints.white,entry(1),lane,outer,.5);across(paints.white,pit.limit.from,lane,outer,.6);across(paints.white,pit.limit.to,lane,outer,.6);across(paints.white,pit.wall_end,lane,outer,.5);
  // Garage boxes along the working lane, about 13 m apart.
  const bays=Math.max(1,Math.round((pit.garages[1]-pit.garages[0])/13)),bay=(pit.garages[1]-pit.garages[0])/bays;
  for(let b=0;b<=bays;b++)across(paints.yellow,pit.garages[0]+b*bay,p=>p[c.fast_hi],p=>p[c.lane_hi]-.3,.12);
@@ -67,7 +71,8 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
   const map=canvasTexture((ctx,w,h)=>{ctx.fillStyle='#51b89f';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#e8f4d8';ctx.lineWidth=h*.16;for(let k=-1;k<3;k++){ctx.beginPath();ctx.moveTo(0,k*h/2+h*.1);ctx.lineTo(w/2,k*h/2+h*.45);ctx.lineTo(w,k*h/2+h*.1);ctx.stroke();}},128,128);
   map.wrapS=map.wrapT=THREE.RepeatWrapping;
   const positions=[],uvs=[],indices=[];let k=0;
-  for(let s=0;s<=pit.wall_nose;s+=2){const p=lerp(s),from=p[c.lo],to=p[c.lane_lo]-.05;if(to-from<.2&&k===0)continue;
+  // From the lane's entry to the nose of the pit wall (the stations' end on a reversed block).
+  for(let s=rev?pit.wall_nose:0;s<=(rev?end:pit.wall_nose);s+=2){const p=lerp(s),from=p[c.lo],to=p[c.lane_lo]-.05;if(to-from<.2&&k===0)continue;
    for(const d of [from,Math.max(from,to)]){const v=at(p,d,.044);positions.push(v.x,v.y,v.z);uvs.push((d-to)/3,s/3);}
    if(k){const b=(k-1)*2;indices.push(b,b+2,b+1,b+1,b+2,b+3);}k++;}
   const gore=new THREE.Mesh(geometryFrom(positions,uvs,indices),mat('Zebrado_entrada_boxes',0xffffff,{map,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
@@ -76,9 +81,9 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
  // "60" painted before the limiter line, readable when arriving.
  {
   const map=canvasTexture((ctx,w,h)=>{ctx.clearRect(0,0,w,h);ctx.fillStyle='#f2efe2';ctx.font='bold 190px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText('60',w/2,h/2+8);},256,256);
-  const p=lerp(pit.limit.from-9),mid=(p[c.lane_lo]+p[c.fast_hi])/2,centre=at(p,mid,.047);
+  const p=lerp(limitStart+before(9)),mid=(p[c.lane_lo]+p[c.fast_hi])/2,centre=at(p,mid,.047);
   const plane=new THREE.Mesh(new THREE.PlaneGeometry(3.2,4.4),new THREE.MeshStandardMaterial({map,transparent:true,roughness:.9,polygonOffset:true,polygonOffsetFactor:-3,polygonOffsetUnits:-3,depthWrite:false}));
-  plane.position.copy(centre);plane.rotation.order='YXZ';plane.rotation.y=Math.atan2(p[c.ty],p[c.tx])-Math.PI/2;plane.rotation.x=-Math.PI/2;plane.name='Pintura_limite_60';root.add(plane);
+  plane.position.copy(centre);plane.rotation.order='YXZ';plane.rotation.y=Math.atan2(p[c.ty],p[c.tx])+facing;plane.rotation.x=-Math.PI/2;plane.name='Pintura_limite_60';root.add(plane);
  }
  // --- Walls: extruded along the surveyed polylines.
  const concrete=structureMaterial(mat('Concreto',0x8f918b,{side:THREE.DoubleSide}),textures),metal=structureMaterial(mat('Metal',0x2c3136,{metalness:.5,roughness:.45}),textures);
@@ -119,11 +124,11 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
  // --- Signs at the entry and on the pit wall.
  {
   const board=(text,sub,bg,fg)=>canvasTexture((ctx,w,h)=>{ctx.fillStyle=bg;ctx.fillRect(0,0,w,h);ctx.fillStyle=fg;ctx.textAlign='center';ctx.font='bold 92px sans-serif';ctx.fillText(text,w/2,h*.47);ctx.font='bold 46px sans-serif';ctx.fillText(sub,w/2,h*.82);},512,256);
-  const place=(map,s,d,height,w,h,name)=>{const p=lerp(s),o=at(p,d);const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map,side:THREE.DoubleSide}));m.position.set(o.x,p[c.z]+height,o.z);m.rotation.y=Math.atan2(p[c.ty],p[c.tx])-Math.PI/2;m.name=name;root.add(m);
+  const place=(map,s,d,height,w,h,name)=>{const p=lerp(s),o=at(p,d);const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map,side:THREE.DoubleSide}));m.position.set(o.x,p[c.z]+height,o.z);m.rotation.y=Math.atan2(p[c.ty],p[c.tx])+facing;m.name=name;root.add(m);
    const pole=new THREE.Mesh(new THREE.BoxGeometry(.12,height-h/2,.12),metal);pole.position.set(o.x,p[c.z]+(height-h/2)/2,o.z);pole.castShadow=true;root.add(pole);};
-  place(board('PIT','ENTRADA DOS BOXES','#12463b','#fff6c9'),6,lerpHi(6)+1.4,2.6,2.2,1.1,'Placa_entrada_boxes');
-  place(board('60','LIMITE NO PIT LANE','#ffffff','#b0161d'),pit.limit.from-4,lerpHi(pit.limit.from-4)+.8,2.4,1.6,.8,'Placa_limite_60');
-  place(board('FIM','LIMITE DE VELOCIDADE','#ffffff','#1b2a2c'),pit.limit.to+2,lerpHi(pit.limit.to+2)+.8,2.4,1.6,.8,'Placa_fim_limite');
+  place(board('PIT','ENTRADA DOS BOXES','#12463b','#fff6c9'),entry(6),lerpHi(entry(6))+1.4,2.6,2.2,1.1,'Placa_entrada_boxes');
+  place(board('60','LIMITE NO PIT LANE','#ffffff','#b0161d'),limitStart+before(4),lerpHi(limitStart+before(4))+.8,2.4,1.6,.8,'Placa_limite_60');
+  place(board('FIM','LIMITE DE VELOCIDADE','#ffffff','#1b2a2c'),limitEnd-before(2),lerpHi(limitEnd-before(2))+.8,2.4,1.6,.8,'Placa_fim_limite');
   function lerpHi(s){return lerp(s)[c.hi];}
  }
  return {root,obstacles,box,stats:{length:pit.length_m,bays,walls:pit.walls.length,limitKmh:pit.limit.kmh,box99:!!box}};

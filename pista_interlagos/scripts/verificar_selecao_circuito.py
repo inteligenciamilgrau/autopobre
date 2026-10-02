@@ -35,7 +35,8 @@ with sync_playwright() as p:
  page.screenshot(path=str(ROOT/'renders/pistas_celular_historia.png'))
  page.click('#tracksBack');page.click('#start');assert page.is_visible('#cars') and not page.is_visible('#tracks')
  page.click('#carsNext');assert page.get_attribute('#tracks','data-mode')=='corrida' and 'MODO CORRIDA' in page.inner_text('#championshipKicker')
- assert page.locator('#tracks [data-circuit]').count()==5 and page.is_visible('#singleRace') and page.is_visible('#championshipStart') and not page.is_visible('#storyStart')
+ # One card per circuit of circuits.js (a new track brings its card).
+ assert page.locator('#tracks [data-circuit]').count()==page.evaluate("import('./circuits.js').then(m=>Object.keys(m.CIRCUITS).length)") and page.is_visible('#singleRace') and page.is_visible('#championshipStart') and not page.is_visible('#storyStart')
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
  page.screenshot(path=str(ROOT/'renders/pistas_celular.png'))
  assert not heavy(),heavy();assert page.evaluate('gpuContexts')<=1
@@ -51,7 +52,7 @@ with sync_playwright() as p:
  assert page.evaluate("JSON.parse(localStorage.getItem('opala99-preferences-v1')).circuit")=='curvelo'
  # Back to the opening and forward again keeps the choice; the records dialog opens there.
  page.click('#tracksBack');assert page.is_visible('#cars') and not page.is_visible('#tracks');page.click('#carsBack');assert page.is_visible('#start') and not page.is_visible('#cars')
- page.click('#recordsButton');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-pressed')=='true';page.click('#recordsClose')
+ page.click('#recordsButton');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-selected')=='true';page.click('#recordsClose')
  page.click('#settingsButton');page.select_option('#camera','hood');page.select_option('#livery','seiva_danilo');page.click('#settingsClose')
  page.click('#start');page.click('#carsNext');assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
  assert not heavy(),heavy()

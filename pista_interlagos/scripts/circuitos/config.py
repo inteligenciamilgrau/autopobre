@@ -27,6 +27,9 @@ CIRCUITOS = {
         'centro_cidade': (-24.9555, -53.4553),   # Catedral de Cascavel
         'largura_m': 12,
         'sentido': 'anti-horario',
+        # Reta dos boxes de concreto; o pit lane passa sob a cobertura das garagens.
+        'reta_de_concreto': True,
+        'boxes_sob_cobertura': True,
     },
     'piracicaba': {
         'nome': 'Autódromo do ECPA',
@@ -68,6 +71,44 @@ CIRCUITOS = {
         'base_na_grade': True,
         # Autodromo no meio do mato, a 20 km do centro: lavouras e sitios no horizonte, sem a cidade.
         'horizonte': 'rural',
+    },
+    'brasilia': {
+        'nome': 'Autódromo Internacional Nelson Piquet',
+        'cidade': 'Brasília, DF',
+        # Centro do tracado no OSM (way 32900091, redesenhado depois da reforma, fev/2026), no
+        # Eixo Monumental, ao lado do Estadio Mane Garrincha.
+        'centro': (-15.7760, -47.8995),
+        'raio_m': 1500,
+        'epsg': 31983,                 # SIRGAS 2000 / UTM 23S (o mesmo do Geoportal do DF)
+        'anadem': '23L',
+        'copernicus': 'Copernicus_DSM_COG_10_S16_00_W048_00_DEM',
+        'worldcover': 'S18W048',
+        # Reaberto no fim de 2025 depois da reforma do BRB (Metropoles, Distrito do Esporte):
+        # 5.384 m, 16 curvas (9 a direita), sentido horario, 15 m de largura na reta de largada e
+        # 14 m no resto; retas de 803 m, 614 m (largada) e 502 m (oposta); curva 1 de alta com
+        # 207 m e 5 graus de inclinacao.
+        'extensao_m': 5384,
+        'centro_cidade': (-15.7939, -47.8828),   # Plataforma Rodoviaria, centro do Plano Piloto
+        'largura_m': 14,
+        'sentido': 'horario',
+        'largura_faixa_m': (12, 16),
+        # Larguras publicadas (resto, reta de largada): a medida pega os escapes pavimentados.
+        'largura_publicada': (14, 15),
+        # Boxes por dentro da reta de largada: a direita no sentido horario da corrida.
+        'lado_boxes': -1,
+        # Plataforma do muro dos boxes diante das garagens (a banca do Box 99 pede 3,4 m de muro).
+        'folga_minima_boxes_m': 4.6,
+        # O OSM tem poucos nos na reta interna de cima e passa ate 18 m fora do asfalto: busca mais
+        # larga, e so o asfalto novo (escuro) conta como pista; o patio e os escapes sao mais claros.
+        'desloc_max_m': 18,
+        'lum_max_asfalto': 85,
+        'separar_pit_lane': True,
+        # Relevo e edificacoes do Geoportal do DF (IDE/DF, SEDUH): o MDT de 1 m (pelo servico de
+        # perfis) no lugar do ANADEM de 30 m, e o cadastro de edificacoes com altura.
+        'relevo_local': 'idedf_mdt_1m',
+        'edificios_locais': 'idedf',
+        # Marco no horizonte: a Torre de TV (Lucio Costa, 224 m, mirante a 75 m), OSM way 41648342.
+        'marcos': [{'nome': 'Torre de TV', 'tipo': 'torre_tv', 'lat': -15.79062, 'lon': -47.89298, 'altura_m': 224}],
     },
 }
 

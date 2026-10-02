@@ -1,9 +1,12 @@
 import {CIRCUITS} from './circuits.js';
-import {CHAMPIONSHIP_ROUNDS,CHAMPIONSHIP_POINTS,pointsText} from './championship.js';
+import {CHAMPIONSHIP_CALENDARS,CHAMPIONSHIP_POINTS,pointsText} from './championship.js';
 
-// The championship on screen: the panel of the track screen (calendar, status, top five)
-// and the full standings dialog, opened from there and from the result sheet.
-const SHORT={interlagos:'INT',cascavel:'CAS',piracicaba:'PIR',chapeco:'CHA',curvelo:'CUR'};
+// The championship on screen: the panel of the track screen (calendar tabs, rounds, status, top
+// five) and the full standings dialog, opened from there and from the result sheet.
+// A round's column: the circuit id's first letters (INT, CAS, PIR, CHA, CUR, BRA…).
+const code=id=>id.slice(0,3).toUpperCase();
+// A round's name: the season's place ("Interlagos - SP") or the game's name for the circuit.
+const roundName=r=>r.place??CIRCUITS[r.circuit]?.name??r.circuit;
 const el=(tag,props={},...children)=>{const node=document.createElement(tag);Object.assign(node,props);node.append(...children);return node;};
 const ordinal=n=>`${n}º`;
 const MODE_NAME={corrida:'MODO CORRIDA',historia:'MODO HISTÓRIA'};
@@ -11,19 +14,31 @@ const MODE_NAME={corrida:'MODO CORRIDA',historia:'MODO HISTÓRIA'};
 const placeText=r=>r.dsq?'DSQ':r.dnf?'AB':ordinal(r.position);
 
 export function renderChampionshipPanel(root,championship){
- const $=id=>root.querySelector('#'+id),state=championship.state,round=championship.round;
- const calendar=$('championshipCalendar');calendar.replaceChildren();
+ const $=id=>root.querySelector('#'+id),state=championship.state,round=championship.round,info=championship.info;
+ // One tab per calendar (championship.js CHAMPIONSHIP_CALENDARS); main.js switches them.
+ const tabs=$('championshipTabs');tabs.replaceChildren(...Object.values(CHAMPIONSHIP_CALENDARS).map(c=>{
+  const on=c.id===championship.calendar,tab=el('button',{type:'button',role:'tab',id:`championshipTab-${c.id}`,textContent:c.name,tabIndex:on?0:-1});
+  tab.dataset.championshipCalendar=c.id;tab.setAttribute('aria-selected',String(on));tab.setAttribute('aria-controls','championshipCalendar');return tab;}));
+ $('championshipTitle').textContent=info.title;
+ const calendar=$('championshipCalendar'),schedule=championship.schedule;calendar.replaceChildren();
+ calendar.classList.toggle('dated',schedule.some(r=>r.date));calendar.classList.toggle('long',schedule.length>6);calendar.setAttribute('aria-labelledby','championshipTab-'+championship.calendar);
  const standings=championship.standings(),player=standings.find(d=>d.player);
- championship.rounds.forEach((id,k)=>{
-  const done=state?.results[k],mine=done?.rows.find(r=>r.player),current=championship.active&&k===round;
-  const item=el('li',{className:done?'done':current?'next':''},el('b',{textContent:`${k+1}`}),el('span',{textContent:CIRCUITS[id].name}),el('em',{textContent:mine?`${placeText(mine)} · +${mine.points}`:current?'próxima':'—'}));
+ schedule.forEach((r,k)=>{
+  const done=state?.results[k],mine=done?.rows.find(r=>r.player),current=championship.active&&k===round,soon=!Object.hasOwn(CIRCUITS,r.circuit);
+  const item=el('li',{className:done?'done':current?'next':soon?'soon':'',title:[roundName(r),r.date].filter(Boolean).join(' · ')},el('b',{textContent:`${k+1}`}),el('span',{textContent:roundName(r)}),el('i',{textContent:code(r.circuit)}));
+  if(r.date)item.append(el('small',{textContent:r.date}));
+  item.append(el('em',{textContent:mine?`${placeText(mine)} · +${mine.points}`:current?'próxima':soon?'em breve':'—'}));
   calendar.append(item);
  });
  $('championshipKicker').textContent=`CAMPEONATO · ${MODE_NAME[championship.mode]??MODE_NAME.corrida}`;
  const status=$('championshipStatus'),start=$('championshipStart'),reset=$('championshipReset'),table=$('championshipTableButton'),mini=$('championshipMini');
- mini.replaceChildren();
- if(!state){
-  status.textContent=`${CHAMPIONSHIP_ROUNDS.length} etapas, uma corrida em cada pista. Pontos para os 15: ${CHAMPIONSHIP_POINTS.slice(0,3).join(', ')}… até 1.`;
+ mini.replaceChildren();start.disabled=!championship.available;
+ if(!state&&!championship.available){
+  const soon=schedule.find(r=>!Object.hasOwn(CIRCUITS,r.circuit));
+  status.textContent=`${schedule.length} etapas nas datas da temporada. ${roundName(soon).split(' - ')[0]} ainda está sendo construída: o campeonato abre assim que a pista ficar pronta.`;
+  start.textContent=`Em breve: ${roundName(soon).split(' - ')[0]}`;
+ }else if(!state){
+  status.textContent=`${schedule.length} etapas, ${schedule.some(r=>r.date)?'nas datas da temporada (sujeitas a alterações)':'uma corrida em cada pista'}. Pontos para os 15: ${CHAMPIONSHIP_POINTS.slice(0,3).join(', ')}… até 1.`;
   start.textContent='Começar campeonato →';
  }else{
   status.textContent=championship.finished
@@ -49,17 +64,17 @@ export class ChampionshipDialog {
  open(championship){
   const standings=championship.standings(),state=championship.state,$=id=>this.dialog.querySelector('#'+id);
   const player=standings.find(d=>d.player);
-  $('championshipDialogMode').textContent=`CAMPEONATO OLD STOCK · ${MODE_NAME[championship.mode]??MODE_NAME.corrida}`;
+  $('championshipDialogMode').textContent=`${championship.calendar==='todas'?'CAMPEONATO OLD STOCK':championship.info.label} · ${MODE_NAME[championship.mode]??MODE_NAME.corrida}`;
   $('championshipBanner').textContent=championship.finished
    ?(player.position===1?`CAMPEÃO! ${player.shortName} e o Opala ${player.number} levam o título com ${pointsText(player.points)}.`:`Campeão: #${standings[0].number} ${standings[0].name} (${standings[0].points} pts). Você fechou em ${ordinal(player.position)}.`)
    :`Depois de ${championship.round} de ${championship.total} etapas · próxima: ${CIRCUITS[championship.nextCircuit]?.name??'—'}`;
   $('championshipBanner').classList.toggle('champion',championship.finished&&player.position===1);
   const head=this.dialog.querySelector('thead');head.replaceChildren(el('tr',{},el('th',{textContent:'POS'}),el('th',{textContent:'Nº'}),el('th',{textContent:'PILOTO / DUPLA'}),
-   ...championship.rounds.map((id,k)=>{const th=el('th',{textContent:SHORT[id],title:CIRCUITS[id].name});if(k>=championship.round)th.className='pending';return th;}),el('th',{textContent:'VIT'}),el('th',{textContent:'PTS'})));
+   ...championship.schedule.map((r,k)=>{const th=el('th',{textContent:code(r.circuit),title:[`Etapa ${k+1}`,roundName(r),r.date].filter(Boolean).join(' · ')});if(k>=championship.round)th.className='pending';return th;}),el('th',{textContent:'VIT'}),el('th',{textContent:'PTS'})));
   const body=this.dialog.querySelector('tbody');body.replaceChildren();
   for(const d of standings){
    const row=el('tr',{className:d.player?'player':''},el('td',{textContent:ordinal(d.position)}),el('td',{textContent:d.number}),el('th',{scope:'row',textContent:d.player?`${state?.pilot||d.shortName} · VOCÊ`:d.name}),
-    ...championship.rounds.map((id,k)=>{const r=d.rounds[k];return el('td',{textContent:r?placeText(r):'·',title:r?`${CIRCUITS[id].name}: ${r.dsq?'desclassificado':r.dnf?'abandono':r.position+'º'}, ${r.points} pts`:CIRCUITS[id].name});}),
+    ...championship.rounds.map((id,k)=>{const r=d.rounds[k],name=CIRCUITS[id]?.name??id;return el('td',{textContent:r?placeText(r):'·',title:r?`${name}: ${r.dsq?'desclassificado':r.dnf?'abandono':r.position+'º'}, ${r.points} pts`:name});}),
     el('td',{textContent:String(d.wins)}),el('td',{className:'points',textContent:String(d.points)}));
    body.append(row);
   }

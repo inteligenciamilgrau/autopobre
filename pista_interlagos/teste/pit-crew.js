@@ -579,9 +579,13 @@ function detour(a,t,keep){
  if(Math.abs(a[0])<hx&&Math.abs(a[1])<hy)return hy-Math.abs(a[1])<hx-Math.abs(a[0])?{point:[a[0],Math.sign(a[1]||-1)*(hy+.35)],corner:-1}:{point:[Math.sign(a[0]||1)*(hx+.35),a[1]],corner:-1};
  if(!crossesBox(a,t,hx-.05,hy-.05))return null;
  const nodes=[a,...[[1,1],[1,-1],[-1,-1],[-1,1]].map(([i,j])=>[i*(hx+.3),j*(hy+.3)]),t],n=nodes.length,dist=Array(n).fill(Infinity),prev=Array(n).fill(-1),done=Array(n).fill(false);dist[0]=0;
+ // The corner already chosen keeps a small bonus (no dithering between two routes), but not once
+ // reached: standing on it, it would be chosen again forever (Brasília's fuel man, who comes round
+ // the car's front to his place behind it, stopped at the rear corner instead of going on).
+ const reached=keep>0&&Math.hypot(a[0]-nodes[keep][0],a[1]-nodes[keep][1])<.3;
  for(;;){
   let u=-1;for(let i=0;i<n;i++)if(!done[i]&&dist[i]<Infinity&&(u<0||dist[i]<dist[u]))u=i;if(u<0||u===n-1)break;done[u]=true;
-  for(let v=1;v<n;v++)if(!done[v]&&!crossesBox(nodes[u],nodes[v],hx-.05,hy-.05)){const w=Math.hypot(nodes[u][0]-nodes[v][0],nodes[u][1]-nodes[v][1])-(u===0&&v===keep?.4:0);if(dist[u]+w<dist[v]){dist[v]=dist[u]+w;prev[v]=u;}}
+  for(let v=1;v<n;v++)if(!done[v]&&!crossesBox(nodes[u],nodes[v],hx-.05,hy-.05)){const w=Math.hypot(nodes[u][0]-nodes[v][0],nodes[u][1]-nodes[v][1])-(u===0&&v===keep&&!reached?.4:0);if(dist[u]+w<dist[v]){dist[v]=dist[u]+w;prev[v]=u;}}
  }
  let v=n-1;if(prev[v]<0)return null;while(prev[v]!==0)v=prev[v];return {point:nodes[v],corner:v};
 }

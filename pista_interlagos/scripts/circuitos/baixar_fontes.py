@@ -9,6 +9,9 @@
 - Sentinel-2 L2A (ESA, via Earth Search/AWS): a cena mais recente sem nuvens, cor real de 10 m.
 - Microsoft Global ML Building Footprints (ODbL): pegadas de edificacoes detectadas em
   imagens (versao 2026-02-03), onde o OSM ainda nao mapeou as construcoes.
+- Geoportal do DF (IDE/DF, SEDUH), onde o circuito pede (Brasilia): o MDT de 1 m pelo servico de
+  perfis, edificacoes do cadastro territorial com altura, arvores isoladas e massas arboreas;
+  `--idedf` baixa so essa parte.
 - --referencia: mosaico de imagem aerea Esri World Imagery, so para conferencia visual
   local (nao entra no jogo nem no pacote publico).
 
@@ -163,6 +166,120 @@ def edificios_microsoft(c, pasta):
     return {'quadkey': q, 'urls': urls, 'edificacoes': len(feicoes)}
 
 
+IDEDF = 'https://www.geoservicos.ide.df.gov.br/arcgis/rest/services'
+
+
+def idedf_camada(camada, caixa_utm, destino, descricao, campos='*', onde='1=1'):
+    """Feicoes de uma camada do Geoportal do DF (ArcGIS REST da IDE/DF) dentro de uma caixa em
+    SIRGAS 2000 / UTM 23S, em GeoJSON nas mesmas coordenadas, paginando de 1000 em 1000."""
+    feicoes, inicio = [], 0
+    while True:
+        params = {'geometry': ','.join(f'{v:.1f}' for v in caixa_utm), 'geometryType': 'esriGeometryEnvelope',
+                  'inSR': 31983, 'outSR': 31983, 'spatialRel': 'esriSpatialRelIntersects', 'outFields': campos, 'where': onde,
+                  'returnGeometry': 'true', 'resultOffset': inicio, 'resultRecordCount': 1000, 'f': 'geojson'}
+        for tentativa in range(4):
+            try:
+                r = requests.get(f'{IDEDF}/{camada}/query', params=params, headers=AGENTE, timeout=300)
+                r.raise_for_status()
+                lote = r.json()
+                break
+            except (requests.RequestException, ValueError):
+                if tentativa == 3:
+                    raise
+                time.sleep(3 + 4 * tentativa)
+        feicoes += lote.get('features', [])
+        if not lote.get('exceededTransferLimit') and len(lote.get('features', [])) < 1000:
+            break
+        inicio += len(lote['features'])
+    destino.write_text(json.dumps({'type': 'FeatureCollection', 'crs': 'EPSG:31983', 'features': feicoes},
+                                  ensure_ascii=False), encoding='utf-8')
+    print(f'IDE/DF {descricao}: {len(feicoes)} feicoes -> {destino.name}')
+    return len(feicoes)
+
+
+def mdt_perfis(centro_utm, meia, destino, passo=2.0, lote=24):
+    """MDT de 1 m do DF amostrado numa grade de `passo` metros: o geoprocessamento Profile1m da
+    IDE/DF devolve as cotas ao longo de linhas; cada linha da grade e um perfil leste-oeste. As
+    curvas de nivel de 1 m (2016) vem inteiras do servidor (linhas de quilometros) e nao cabem
+    numa consulta."""
+    from rasterio.transform import from_origin
+    url = f'{IDEDF}/Geoprocessing/Profile1m/GPServer/Profile/execute'
+    cx, cy = centro_utm
+    x0, x1 = cx - meia, cx + meia
+    ys = np.arange(cy + meia, cy - meia - 1e-6, -passo)          # de norte para sul (linhas do raster)
+    nx = int(round((x1 - x0) / passo)) + 1
+    z = np.full((len(ys), nx), np.nan, np.float32)
+    campos = [{'name': 'OID', 'type': 'esriFieldTypeOID'}, {'name': 'pid', 'type': 'esriFieldTypeInteger'}]
+    for k0 in range(0, len(ys), lote):
+        feicoes = [{'geometry': {'paths': [[[x0, float(y)], [x1, float(y)]]], 'spatialReference': {'wkid': 31983}},
+                    'attributes': {'OID': k + 1, 'pid': k}} for k, y in enumerate(ys[k0:k0 + lote], k0)]
+        dados = {'InputLineFeatures': json.dumps({'geometryType': 'esriGeometryPolyline', 'spatialReference': {'wkid': 31983},
+                                                  'fields': campos, 'features': feicoes}),
+                 'ProfileIDField': 'pid', 'DEMResolution': '1m', 'MaximumSampleDistance': passo,
+                 'MaximumSampleDistanceUnits': 'Meters', 'returnZ': 'true', 'returnM': 'true', 'f': 'json'}
+        for tentativa in range(5):
+            try:
+                r = requests.post(url, data=dados, headers=AGENTE, timeout=300)
+                r.raise_for_status()
+                saida = r.json()['results'][0]['value']['features']
+                break
+            except (requests.RequestException, ValueError, KeyError, IndexError):
+                if tentativa == 4:
+                    raise
+                time.sleep(4 + 6 * tentativa)
+        for f in saida:
+            k = f['attributes']['pid']
+            pts = np.array([q for caminho in f['geometry']['paths'] for q in caminho])
+            col = np.clip(np.round((pts[:, 0] - x0) / passo).astype(int), 0, nx - 1)
+            z[k, col] = pts[:, 2]
+        if k0 // lote % 10 == 0:
+            print(f'  perfis {min(k0 + lote, len(ys))}/{len(ys)}')
+    vazio = np.isnan(z)
+    if vazio.any():
+        from rasterio.fill import fillnodata
+        z = fillnodata(np.where(vazio, 0, z).astype(np.float32), mask=(~vazio).astype('uint8'), max_search_distance=20)
+    perfil = {'driver': 'GTiff', 'width': nx, 'height': len(ys), 'count': 1, 'dtype': 'float32', 'crs': 'EPSG:31983',
+              'transform': from_origin(x0 - passo / 2, ys[0] + passo / 2, passo, passo), 'compress': 'deflate'}
+    with rasterio.open(destino, 'w', **perfil) as dst:
+        dst.write(z.astype(np.float32), 1)
+    print(f'MDT 1 m do DF (Profile1m) em grade de {passo:.0f} m: {nx}x{len(ys)}, {vazio.mean():.2%} preenchido, '
+          f'cotas {np.nanmin(z):.1f} a {np.nanmax(z):.1f} m -> {destino.name}')
+    return {'servico': url, 'passo_m': passo, 'celulas': [nx, len(ys)], 'preenchido': float(vazio.mean()),
+            'cota_min': float(np.nanmin(z)), 'cota_max': float(np.nanmax(z))}
+
+
+def fontes_idedf(c, pasta):
+    """Dados locais do Geoportal do DF (SEDUH, IDE/DF): o MDT de 1 m (pelo servico de perfis),
+    edificacoes do cadastro territorial com altura aproximada, coberturas, arvores isoladas e
+    massas arboreas da cartografia de 2016."""
+    from projecao import Transformer
+    T = Transformer.from_crs(4326, 31983, always_xy=True)
+    w, s, e, n = caixa(c)
+    xs, ys = T.transform(np.array([w, e, w, e]), np.array([s, s, n, n]))
+    perto = (float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys)))
+    info = {'servico': IDEDF, 'baixado_em': date.today().isoformat()}
+    # A grade do terreno do jogo vai ~460 m alem da caixa da pista: 1.100 m em volta do centro cobrem.
+    info['mdt'] = mdt_perfis(T.transform(c['centro'][1], c['centro'][0]), c.get('mdt_meia_m', 1100), pasta / 'mdt_idedf.tif')
+    info['edificacoes'] = idedf_camada('Publico/CADASTRO_TERRITORIAL/MapServer/5', perto, pasta / 'idedf_edificacoes.geojson',
+                                       'edificacoes (cadastro territorial)', 'ed_nome,ed_num_pav,ed_alt_aprox,ed_situacao,ed_area')
+    info['coberturas'] = idedf_camada('Publico/CADASTRO_TERRITORIAL/MapServer/2', perto, pasta / 'idedf_coberturas.geojson',
+                                      'coberturas', 'cb_area')
+    info['arvores_isoladas'] = idedf_camada('Publico/IDEDF/MapServer/236', perto, pasta / 'idedf_arvores.geojson',
+                                            'arvores isoladas (2016)', 'id')
+    info['massa_arborea'] = idedf_camada('Publico/IDEDF/MapServer/237', perto, pasta / 'idedf_massa_arborea.geojson',
+                                         'massas arboreas (2016)', 'id')
+    # O horizonte da cidade: os predios altos ou grandes do cadastro ate 3,5 km do autodromo (superquadras,
+    # Setor Noroeste, Eixo Monumental), no lugar dos telhados genericos do horizonte do jogo.
+    w, s, e, n = caixa(c, 2000)
+    xs, ys = T.transform(np.array([w, e, w, e]), np.array([s, s, n, n]))
+    longe = (float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys)))
+    info['skyline'] = idedf_camada('Publico/CADASTRO_TERRITORIAL/MapServer/5', longe, pasta / 'idedf_skyline.geojson',
+                                   'edificacoes do horizonte (>= 9 m ou >= 1.500 m2, 3,5 km)', 'ed_nome,ed_num_pav,ed_alt_aprox,ed_area',
+                                   'ed_alt_aprox >= 9 OR ed_area >= 1500')
+    (pasta / 'idedf.json').write_text(json.dumps(info, indent=1, ensure_ascii=False), encoding='utf-8')
+    return info
+
+
 def esri_referencia(c, pasta, z=18):
     """Mosaico aereo so para conferencia visual local (nao publicado)."""
     w, s, e, n = caixa(c, -c['raio_m'] * .45)
@@ -204,6 +321,9 @@ def main():
     if '--edificios' in sys.argv:
         edificios_microsoft(c, pasta)
         return
+    if '--idedf' in sys.argv:
+        fontes_idedf(c, pasta)
+        return
     if '--so-referencia' not in sys.argv:
         proveniencia = {'circuito': nome, 'baixado_em': date.today().isoformat(), 'caixa_lonlat': caixa(c)}
         proveniencia['osm_base'] = overpass(c, pasta / 'osm.json')
@@ -216,6 +336,8 @@ def main():
                 pasta / 'worldcover.tif', caixa(c), 'ESA WorldCover 2021')
         proveniencia['sentinel2'] = sentinel2(c, pasta)
         proveniencia['edificios_microsoft'] = edificios_microsoft(c, pasta)
+        if c.get('relevo_local') == 'idedf_mdt_1m' or c.get('edificios_locais') == 'idedf':
+            proveniencia['idedf'] = fontes_idedf(c, pasta)
         (pasta / 'proveniencia.json').write_text(json.dumps(proveniencia, indent=1, ensure_ascii=False), encoding='utf-8')
     if '--referencia' in sys.argv or '--so-referencia' in sys.argv:
         esri_referencia(c, pasta)

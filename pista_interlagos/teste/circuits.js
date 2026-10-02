@@ -11,7 +11,12 @@ export const CIRCUITS=Object.freeze({
  // Opened in August 2026: no aerial photo of the finished track yet, so the asphalt was measured on
  // Sentinel-2 and the relief of the earthworks calibrated to the published 18.5 m (circuitos-fontes.md).
  chapeco:{id:'chapeco',name:'Chapecó',label:'AUTÓDROMO MÁRCIO VACCARO · CHAPECÓ, SC',length:4004,description:'4.004 m · 12 curvas · horário · Chapecó, SC',intro:'O autódromo mais novo do Brasil, no meio do mato: reta de 837 m diante dos boxes, dois grampos e a curva 7, de alta, com 517 m em raio constante. 18,5 m de desnível.',source:'Traçado OSM (mai/2026) refinado sobre Sentinel-2 de set/2026 · relevo ANADEM (ANA/UFRGS) ajustado aos 18,5 m publicados · cobertura ESA WorldCover.',fuel:'Uma volta em Chapecó costuma gastar 3–4 L.',altitude:420,
-  data:'pista_chapeco.json',ground:'./assets/circuitos/chapeco_solo.jpg',track:'CHAPECÓ',boxTitle:'Cuida do Opala, tchê!',weather:'Chapecó · 16h40 · 23 °C · pista seca',venue:'Autódromo Internacional Márcio Vaccaro'}
+  data:'pista_chapeco.json',ground:'./assets/circuitos/chapeco_solo.jpg',track:'CHAPECÓ',boxTitle:'Cuida do Opala, tchê!',weather:'Chapecó · 16h40 · 23 °C · pista seca',venue:'Autódromo Internacional Márcio Vaccaro'},
+ // Reopened in November 2025 after the BRB renovation, the Old Stock's 2026 opener: the new asphalt
+ // measured on 2025 aerial imagery, the relief from the DF's 1 m terrain model and the buildings from
+ // its cadastre (circuitos-fontes.md). Clockwise, so its boxes are on the cars' right (data.pit.reversed).
+ brasilia:{id:'brasilia',name:'Brasília',label:'AUTÓDROMO NELSON PIQUET · BRASÍLIA, DF',length:5384,description:'5.384 m · 16 curvas · horário · Brasília, DF',intro:'A pista mais longa do Brasil, reaberta em 2025: largada em descida até a curva 1, de alta e inclinada a 5°, a reta de 803 m e um miolo de grampos e laço. 17,7 m de desnível.',source:'Traçado OSM (fev/2026) refinado sobre imagem aérea de 2025 · relevo do MDT de 1 m e edificações do Geoportal do DF (SEDUH) · Sentinel-2 de set/2026.',fuel:'Uma volta em Brasília costuma gastar 4–5 L.',altitude:1080,
+  data:'pista_brasilia.json',ground:'./assets/circuitos/brasilia_solo.jpg',track:'BRASÍLIA',boxTitle:'Cuida do Opala, candango!',weather:'Brasília · 16h40 · 27 °C · pista seca',venue:'Autódromo Internacional Nelson Piquet'}
 });
 export const circuitId=value=>typeof value==='string'&&Object.hasOwn(CIRCUITS,value)?value:'interlagos';
 export function selectedCircuit(saved,search=''){

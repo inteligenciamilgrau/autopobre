@@ -979,5 +979,201 @@ export const AI_REFERENCE_TIMES=[
   "number": "42",
   "bestLap": 123.117,
   "bestRace": 377.375
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "73",
+  "bestLap": 141.117,
+  "bestRace": 428.275
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "00",
+  "bestLap": 147.642,
+  "bestRace": 450.033
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "7",
+  "bestLap": 144.433,
+  "bestRace": 439.117
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "64",
+  "bestLap": 148.125,
+  "bestRace": 455.442
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "2",
+  "bestLap": 144.283,
+  "bestRace": 440.317
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "19",
+  "bestLap": 144.275,
+  "bestRace": 441.017
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "51",
+  "bestLap": 146.908,
+  "bestRace": 450.492
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "93",
+  "bestLap": 144.467,
+  "bestRace": 439.95
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "312",
+  "bestLap": 149.517,
+  "bestRace": 460.408
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "70",
+  "bestLap": 146.3,
+  "bestRace": 455.875
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "9",
+  "bestLap": 149.833,
+  "bestRace": 463.108
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "74",
+  "bestLap": 149.5,
+  "bestRace": 460.883
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "88",
+  "bestLap": 147.783,
+  "bestRace": 457.483
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "normal",
+  "number": "42",
+  "bestLap": 148.183,
+  "bestRace": 454.058
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "73",
+  "bestLap": 141.117,
+  "bestRace": 428.275
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "00",
+  "bestLap": 147.642,
+  "bestRace": 450.033
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "7",
+  "bestLap": 144.433,
+  "bestRace": 439.117
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "64",
+  "bestLap": 148.125,
+  "bestRace": 455.442
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "2",
+  "bestLap": 144.283,
+  "bestRace": 440.317
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "19",
+  "bestLap": 144.275,
+  "bestRace": 441.017
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "51",
+  "bestLap": 146.908,
+  "bestRace": 450.492
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "93",
+  "bestLap": 144.467,
+  "bestRace": 439.95
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "312",
+  "bestLap": 149.517,
+  "bestRace": 460.408
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "70",
+  "bestLap": 146.3,
+  "bestRace": 455.875
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "9",
+  "bestLap": 149.833,
+  "bestRace": 463.108
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "74",
+  "bestLap": 149.5,
+  "bestRace": 460.883
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "88",
+  "bestLap": 147.783,
+  "bestRace": 457.483
+ },
+ {
+  "circuit": "brasilia",
+  "mode": "immersive",
+  "number": "42",
+  "bestLap": 148.183,
+  "bestRace": 454.058
  }
 ];

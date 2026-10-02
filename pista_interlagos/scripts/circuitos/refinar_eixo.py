@@ -74,6 +74,15 @@ def rota(nome, vias):
         nos = vias[1523801531]['nodes']
         assert nos[0] == nos[-1]
         return nos[:-1]
+    if nome == 'brasilia':
+        # Tracado completo de 5.384 m, redesenhado no OSM depois da reforma (fev/2026), no sentido
+        # horario da corrida (oneway). A via passa duas vezes pelo no do grampo de baixo: do no 0
+        # ao 96 e a volta; do 97 em diante segue para o anel externo (via 219975884). O no 0 e o
+        # entroncamento com o anel e faz um bico no desenho (reta de 180 m chegando e virada brusca):
+        # fica de fora, e o spline vai do 96 ao 1 pela curva que o asfalto faz.
+        nos = vias[32900091]['nodes']
+        fim = nos.index(nos[0], 1)
+        return nos[1:fim]
     raise KeyError(nome)
 
 
@@ -82,6 +91,13 @@ def rota_boxes(nome, vias):
         # Desenhado da saida (reta interna, depois do Baciao) para a entrada (reta de
         # cima): no sentido da corrida, entra pela reta de cima.
         return vias[628049496]['nodes'][::-1]
+    if nome == 'brasilia':
+        # Entrada pelo lado de dentro da curva antes da reta de largada (1450655789), a faixa
+        # diante do patio dos boxes (1450655791) e a saida por dentro da curva 1 ate a reta
+        # longa (32900119, desenhada da saida para dentro).
+        entrada, faixa, saida = (vias[w]['nodes'] for w in (1450655789, 1450655791, 32900119))
+        assert entrada[-1] == faixa[0] and faixa[-1] == saida[-1]
+        return entrada + faixa[1:] + saida[::-1][1:]
     return None
 
 
@@ -286,6 +302,27 @@ def refinar(ref, pts, fechado, passadas, w0, proibido=None, concreto=None):
     return P, N, w, L, hist
 
 
+def patio_dos_boxes(ref, Pb, Nb, wb, Lb, lado, hb):
+    """Trecho do pit lane diante do patio dos boxes: o concreto claro junto a faixa, nos 6 m do
+    lado das garagens, no maior trecho continuo. s ao longo do pit lane. Na imagem de Brasilia
+    a poeira vermelha tinge o concreto (saturacao 30 a 70, luminancia 155 a 200); a terra fica
+    abaixo de 145 e muito saturada, o asfalto abaixo de 80."""
+    sb = np.linspace(0, Lb, len(Pb))
+    d = np.arange(.5, 6.01, .5)
+    off = lado * (wb[:, None] / 2 + d[None, :])
+    f = ref.rgb(Pb[:, None, 0] + off * Nb[:, None, 0], Pb[:, None, 1] + off * Nb[:, None, 1])
+    lum, sat = f.mean(-1), f.max(-1) - f.min(-1)
+    concreto = uniform_filter1d(((lum > 150) & (sat < 85)).mean(1), 5) > .45
+    idx = np.flatnonzero(concreto)
+    blocos = np.split(idx, np.flatnonzero(np.diff(idx) > 4) + 1)
+    maior = max(blocos, key=len)
+    garagens = [float(sb[maior[0]]), float(sb[maior[-1]])]
+    hb.append({'patio_boxes_s': garagens, 'patio_boxes_m': garagens[1] - garagens[0]})
+    print(f'  patio dos boxes: de {garagens[0]:.0f} a {garagens[1]:.0f} m do pit lane '
+          f'({garagens[1] - garagens[0]:.0f} m); trechos claros {[(round(sb[b[0]]), round(sb[b[-1]])) for b in blocos if len(b) > 5]}')
+    return garagens
+
+
 def desenhar(ref, pasta, linhas):
     xs = np.concatenate([p[:, 0] for p, _ in linhas])
     ys = np.concatenate([p[:, 1] for p, _ in linhas])
@@ -312,13 +349,21 @@ def main():
     w0 = c['largura_m'] or 13.0
     cs0, L0 = spline(pts, True)
     _, P0, N0 = estacoes(cs0, L0, True)
-    print('limiar do asfalto:', calibrar(ref, P0, N0))
+    calibrar(ref, P0, N0)
+    if c.get('lum_max_asfalto'):
+        # Asfalto novo e escuro (Brasilia): patio, escapes e o asfalto velho, mais claros, ficam de fora.
+        LIMIAR['lum_max'] = float(c['lum_max_asfalto'])
+    print('limiar do asfalto:', dict(LIMIAR))
     boxes = rota_boxes(nome, vias)
+    # Lado dos boxes no sentido da corrida: 1 a esquerda (Cascavel, anti-horario, boxes por
+    # dentro); -1 a direita (Brasilia, horario, boxes por dentro da reta de largada).
+    lado = c.get('lado_boxes', 1)
     concreto = None
     linhas = []
     if boxes:
         from compat_scipy import cKDTree
         bp = np.array([T.transform(*nos[n]) for n in boxes])
+    if boxes and c.get('reta_de_concreto'):
         arvore_osm = cKDTree(bp)
         def concreto(X, Y):
             # A reta dos boxes e de concreto: aceito como pista so perto do pit lane.
@@ -326,17 +371,28 @@ def main():
             return (dist < 40).reshape(np.shape(X)).astype(np.float32)
     # Faixa de largura procurada: a publicada, quando ha (Chapeco: 12 a 15 m).
     wmin, wmax = c.get('largura_faixa_m', (8, 18))
-    P, N, w, L, hist = refinar(ref, pts, True, [(6, wmin, wmax), (3, wmin, wmax)], w0, concreto=concreto)
+    fora_do_pit = None
+    if boxes and c.get('separar_pit_lane'):
+        # O pit lane corre colado a reta de largada: o asfalto mais perto do desenho OSM do pit
+        # (4 m de folga, para as junções da entrada e da saida) nao e da pista.
+        csp, Lp = spline(bp, False)
+        arv_pit = cKDTree(estacoes(csp, Lp, False)[1])
+        arv_pista = cKDTree(estacoes(*spline(pts, True), True)[1])
+        def fora_do_pit(X, Y):
+            q = np.column_stack([np.ravel(X), np.ravel(Y)])
+            return (arv_pit.query(q)[0] + 4 < arv_pista.query(q)[0]).reshape(np.shape(X))
+    P, N, w, L, hist = refinar(ref, pts, True, [(c.get('desloc_max_m', 6), wmin, wmax), (3, wmin, wmax)], w0,
+                               proibido=fora_do_pit, concreto=concreto)
     if boxes:
         # Pit lane: asfalto escuro entre o muro e as garagens, sempre do lado de dentro
-        # (a esquerda no sentido da corrida), alem da faixa da pista e do muro; nas
+        # (o lado dos boxes no sentido da corrida), alem da faixa da pista e do muro; nas
         # pontas (70 m) as vias se juntam e a regra nao vale.
         arvore = cKDTree(P)
         ponta = int(70 / DS)
         def proibido(X, Y):
             q = np.column_stack([np.ravel(X), np.ravel(Y)])
             _, k = arvore.query(q)
-            e = np.einsum('ij,ij->i', q - P[k], N[k])
+            e = lado * np.einsum('ij,ij->i', q - P[k], N[k])
             ban = (e < w[k] / 2 + 1.2).reshape(np.shape(X))
             ban[:ponta] = False
             ban[-ponta:] = False
@@ -346,12 +402,17 @@ def main():
         csb, Lb0 = spline(bp, False)
         sb0, Pb0, _ = estacoes(csb, Lb0, False)
         _, k = arvore.query(Pb0)
-        e = np.einsum('ij,ij->i', Pb0 - P[k], N[k])
+        e = lado * np.einsum('ij,ij->i', Pb0 - P[k], N[k])
         alvo = w[k] / 2 + 1.2 + 3.5
         meio = (sb0 > 70) & (sb0 < Lb0 - 70) & (e < alvo)
-        Pb0[meio] += ((alvo - e)[:, None] * N[k])[meio]
+        Pb0[meio] += (lado * (alvo - e)[:, None] * N[k])[meio]
         bp = Pb0[::3]
         Pb, Nb, wb, Lb, hb = refinar(ref, bp, False, [(8, 5, 12), (4, 5, 12), (2, 5, 12)], 7.0, proibido=proibido)
+    if boxes and not c.get('boxes_sob_cobertura'):
+        # Garagens ao longo do patio dos boxes (Brasilia: o predio antigo foi demolido na reforma e
+        # os 40 boxes novos ficam para 2026; a imagem mostra o patio de concreto claro junto a faixa).
+        garagens = patio_dos_boxes(ref, Pb, Nb, wb, Lb, lado, hb)
+    if boxes and c.get('boxes_sob_cobertura'):
         # Ao lado do predio o pit lane fica sob a borda da cobertura, invisivel do alto:
         # nos transectos medidos, pista de concreto, muro (1,5 m) e faixa de 6 m junto as
         # garagens. Vale onde a pista e reta e o pit corre a menos de 30 m dela.

@@ -637,6 +637,14 @@ function treeGeometry(kind,seed,detail=1){
 // Unit houses. partMask: 0 plastered wall, 1 roof (instance colour), 2 fixed colour, 3 wall of a
 // laje house (bare brick, block or plaster, picked in the shader).
 function houseGeometry(flat){
+ // A round building (the Mané Garrincha, a gymnasium): a drum in the instance colour, the
+ // concourse below a white roof band. Unit diameter, height like the boxes (base sunk 0.35).
+ if(flat==='round'){
+  const parts=[{geometry:new THREE.CylinderGeometry(.5,.5,1.13,64,1,true).translate(0,.215,0),mask:1,color:()=>[.82,.82,.8]},
+   {geometry:new THREE.CylinderGeometry(.505,.505,.22,64,1,true).translate(0,.89,0),mask:1,color:()=>[1.1,1.1,1.08]},
+   {geometry:new THREE.CylinderGeometry(.505,.505,.02,64).translate(0,.99,0),mask:1,color:()=>[.9,.9,.88]}];
+  return merge(parts);
+ }
  if(flat==='laje'){
   const parts=[{geometry:new THREE.BoxGeometry(1,1.35,1).translate(0,.325,0),mask:3,color:()=>[1,1,1]},
    {geometry:new THREE.BoxGeometry(1.04,.05,1.04).translate(0,1.02,0),mask:1,color:()=>[1,1,1]},
@@ -766,7 +774,7 @@ function treeColor(rand,dry=0){
 export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban'}){
  const root=new THREE.Group();root.name='Paisagem';
  const rand=random(data.samples.length*7919+17),stats={trees:0,houses:0,water:0};
- const trees=[],tall=[],houses=[],flats=[],lajes=[];
+ const trees=[],tall=[],houses=[],flats=[],lajes=[],rounds=[];
  const {x0,y0,width,height}=field;
  let bodies=[],simpleWater=null,simplePatch=null,lakes=null,shore=null,waves=null;terrainShore.shoreOn.value=0;terrainShore.shoreMap.value=null;
  // Lakes for the car: the surface over a point (null on land), the nearest lake from the
@@ -826,13 +834,23 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
    const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.4:h,width:(list===tall?.75:.95)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand,kind==='2'?.7:0)};
    if(edge>tree.width/2+2)list.push(tree);
   }
-  // Real buildings: OSM and Microsoft footprints, each its own oriented rectangle.
+  // Trees mapped one by one (data.scenery.trees: the DF's isolated trees still standing in 2025).
+  for(const [px,py] of data.scenery?.trees?.items??[]){
+   const cell=field.cell(px,py);if(cell<0)continue;const edge=field.edge[cell];if(edge<=6)continue;
+   const h=6+rand()*6,list=rand()<.2?tall:trees;
+   const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.35:h,width:(list===tall?.8:1)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand)};
+   if(edge>tree.width/2+1.5)list.push(tree);
+  }
+  // Real buildings: OSM and Microsoft footprints, each its own oriented rectangle; from a local
+  // cadastre (the DF's) also apartment blocks ('predio') and round ones ('redondo', a drum).
   const cols=Object.fromEntries((buildings?.columns??[]).map((k,i)=>[k,i]));
   for(const b of buildings?.items??[]){
-   const x=b[cols.x],y=b[cols.y],w=b[cols.w],d=b[cols.d],turn=b[cols.heading],h=b[cols.h],shed=b[cols.kind]==='galpao',c=Math.cos(turn),sn=Math.sin(turn);
+   const x=b[cols.x],y=b[cols.y],w=b[cols.w],d=b[cols.d],turn=b[cols.heading],h=b[cols.h],kind=b[cols.kind],shed=kind==='galpao',c=Math.cos(turn),sn=Math.sin(turn);
    const corner=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([a,e])=>terrainHeight(data,x+c*a*w/2-sn*e*d/2,y+sn*a*w/2+c*e*d/2));
    const item={x,y,z:Math.min(...corner)-.15,w,d,h,turn,color:shed?[.5+rand()*.12,.52+rand()*.1,.53+rand()*.1]:[.42+rand()*.16,.11+rand()*.06,.04+rand()*.03]};
-   if(shed)flats.push(item);else if(rand()<.35){item.color=[.47,.46,.44];lajes.push(item);}else houses.push(item);
+   if(kind==='redondo'){item.color=[.86,.86,.84];rounds.push(item);}
+   else if(kind==='predio'){item.color=[.56+rand()*.1,.55+rand()*.08,.5+rand()*.06];flats.push(item);}
+   else if(shed)flats.push(item);else if(rand()<.35){item.color=[.47,.46,.44];lajes.push(item);}else houses.push(item);
   }
  }else if(style==='cerrado'){
   // Sparse, low cerrado trees away from the oval and the service area.
@@ -856,11 +874,12 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
  if(houses.length)root.add(chunked('Casas',houseGeometry(false),houseMaterial,houses,composeHouse,{size:450}));
  if(flats.length)root.add(chunked('Predios',houseGeometry(true),houseMaterial,flats,composeHouse,{size:900}));
  if(lajes.length)root.add(chunked('Casas_laje',houseGeometry('laje'),houseMaterial,lajes,composeHouse,{size:450}));
+ if(rounds.length)root.add(chunked('Predios_redondos',houseGeometry('round'),houseMaterial,rounds,composeHouse,{size:900}));
  // A circuit far out in the countryside (data.meta.horizon 'rural': Chapecó, 20 km from town) sees
  // farmland and the odd farmhouse to the horizon, not the city's rooftops and towers.
  const rural=data.meta?.horizon==='rural';
  const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado'&&!rural,rural,cityAngle});root.add(horizon.root);
- Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
+ Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+rounds.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
  let realistic=false;
  return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
   shared.time.value+=dt;lakes?.update();
@@ -900,6 +919,26 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
   lakes:bodies.map(b=>{let x=0,y=0;for(const c of b.cells){const k=c%field.nx;x+=k;y+=(c-k)/field.nx;}return {level:b.level,area:Math.round(b.cells.length*field.sx*field.sy),center:[field.x0+(x/b.cells.length+.5)*field.sx,field.y0+(y/b.cells.length+.5)*field.sy]};})})};
 }
 
+// Brasília's TV tower (Lúcio Costa, 1967) on the horizon (data.scenery.landmarks): a concrete tripod,
+// the steel shaft of triangular section tapering up, the observation deck at 75 m and the antenna mast
+// with its warning light. h: total height (224 m). Its origin is the ground at the tower's centre.
+function tvTower(h){
+ const g=new THREE.Group(),steel=new THREE.MeshStandardMaterial({name:'Torre_TV_aco',color:0x8f969b,metalness:.45,roughness:.5});
+ const concrete=new THREE.MeshStandardMaterial({name:'Torre_TV_concreto',color:0xd6d3ca,roughness:.9}),glass=new THREE.MeshStandardMaterial({name:'Torre_TV_mirante',color:0x2c3a44,metalness:.3,roughness:.25});
+ const up=new THREE.Vector3(0,1,0),beam=(p,q,w,material)=>{const d=new THREE.Vector3().subVectors(q,p),m=new THREE.Mesh(new THREE.BoxGeometry(w,d.length(),w),material);m.position.copy(p).addScaledVector(d,.5);m.quaternion.setFromUnitVectors(up,d.normalize());g.add(m);return m;};
+ const shaftFoot=26,shaftTop=h*.8;
+ for(let k=0;k<3;k++){const a=k*2*Math.PI/3+Math.PI/6;beam(new THREE.Vector3(Math.cos(a)*17,-2,Math.sin(a)*17),new THREE.Vector3(Math.cos(a)*4.6,shaftFoot+1,Math.sin(a)*4.6),2.4,concrete);}
+ const shaft=new THREE.Mesh(new THREE.CylinderGeometry(1.6,5.2,shaftTop-shaftFoot,3,1),steel);shaft.position.y=(shaftTop+shaftFoot)/2;g.add(shaft);
+ // Bracing rings every 12 m read as the lattice from afar.
+ for(let y=shaftFoot+6;y<shaftTop;y+=12){const r=5.2+(1.6-5.2)*(y-shaftFoot)/(shaftTop-shaftFoot),ring=new THREE.Mesh(new THREE.CylinderGeometry(r+.35,r+.35,.6,3),steel);ring.position.y=y;g.add(ring);}
+ const deck=new THREE.Mesh(new THREE.CylinderGeometry(9.5,8.5,5,18),glass);deck.position.y=75;g.add(deck);
+ const roof=new THREE.Mesh(new THREE.CylinderGeometry(10.2,10.2,.8,18),concrete);roof.position.y=77.9;g.add(roof);
+ const mast=new THREE.Mesh(new THREE.CylinderGeometry(.35,.9,h-shaftTop,8),new THREE.MeshStandardMaterial({name:'Torre_TV_mastro',color:0xe8e6e0,roughness:.6}));mast.position.y=(h+shaftTop)/2;g.add(mast);
+ const light=new THREE.Mesh(new THREE.SphereGeometry(1.1,10,8),new THREE.MeshStandardMaterial({name:'Torre_TV_luz',color:0xff2a1a,emissive:0xff2a1a,emissiveIntensity:2}));light.position.y=h+.6;g.add(light);
+ g.traverse(o=>{if(o.isMesh)o.castShadow=false;});
+ return g;
+}
+
 // Ground continues past the surveyed terrain, rising into hazy hills and a
 // distant skyline so the world never ends at the edge of the LiDAR grid.
 function createHorizon(data,field,rand,{mobile,urban,rural=false,cityAngle=Math.PI/2}){
@@ -925,7 +964,25 @@ function createHorizon(data,field,rand,{mobile,urban,rural=false,cityAngle=Math.
  const geometry=new THREE.BufferGeometry();geometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));geometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));geometry.setIndex(indices);geometry.computeVertexNormals();
  const ground=new THREE.Mesh(geometry,new THREE.MeshStandardMaterial({name:'Horizonte_solo',vertexColors:true,roughness:1}));ground.name='Horizonte_solo';ground.receiveShadow=false;root.add(ground);
  let buildings=0;
- if(urban){
+ // The horizon ground's height at (x, y), as the rings are built: from the nearest edge point outwards.
+ const groundAt=(x,y)=>{let best=Infinity,b=border[0];for(let i=0;i<N;i+=2){const q=border[i],d=(q[0]-x)**2+(q[1]-y)**2;if(d<best){best=d;b=q;}}
+  const dist=Math.sqrt(best),f=smooth(0,1400,dist);return terrainHeight(data,b[0],b[1])*(1-f)+(base+22+hill(x,y)*38+dist*.012)*f;};
+ const skyline=data.scenery?.skyline;
+ if(skyline){
+  // A real city around the circuit (Brasília: the DF cadastre's tall or large buildings out to 3.5 km,
+  // superquadras, the Setor Noroeste, the Eixo Monumental) instead of generic rooftops and towers.
+  const cols=Object.fromEntries(skyline.columns.map((k,i)=>[k,i])),blocks=[],drums=[];
+  for(const b of skyline.items){
+   const x=b[cols.x],y=b[cols.y],kind=b[cols.kind],g=.5+rand()*.12;
+   const item={x,y,z:groundAt(x,y)-2.5,w:b[cols.w],d:b[cols.d],h:b[cols.h]+2.5,turn:b[cols.heading],color:kind==='predio'?[g+.08,g+.06,g+.02]:[g,g+.01,g+.02]};
+   (kind==='redondo'?drums:blocks).push(item);
+  }
+  const material=sceneryMaterial('house'),compose=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);};
+  root.add(chunked('Horizonte_cidade',houseGeometry(true),material,blocks,compose,{size:1500,shadows:false}));
+  if(drums.length)root.add(chunked('Horizonte_redondos',houseGeometry('round'),material,drums,compose,{size:3000,shadows:false}));
+  buildings=blocks.length+drums.length;
+  for(const mark of data.scenery.landmarks??[])if(mark.kind==='torre_tv'){const tower=tvTower(mark.h);tower.position.set(mark.x,groundAt(mark.x,mark.y)-.5,-mark.y);tower.name=mark.name;root.add(tower);buildings++;}
+ }else if(urban){
   // Neighbourhood rooftops and, farther out, taller towers toward the city centre (north at Interlagos).
   const items=[],towers=[],count=mobile?1400:3600;
   for(let i=0;i<count;i++){

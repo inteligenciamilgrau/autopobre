@@ -7,7 +7,7 @@ import {createCurveloData} from './curvelo-data.js';
 import {createCurveloScene} from './curvelo-scene.js';
 import {createOpenCircuit} from './open-circuit.js';
 import {RaceResults,resultRows} from './race-results.js';
-import {Championship} from './championship.js';
+import {Championship,CHAMPIONSHIP_CALENDARS,championshipCalendar} from './championship.js';
 import {renderChampionshipPanel,ChampionshipDialog} from './championship-board.js';
 import {LapRecords,AutomaticRecords,trackRecords} from './lap-records.js';
 import {AutomaticAIRecords} from './ai-records.js';
@@ -182,7 +182,8 @@ const openings=new CarOpenings();
 // controls show through the windows. The classic setting keeps the old box interior in the
 // cockpit view instead. The driver drops with the controls he holds.
 function cabinVisibility(){
- const inside=mode==='cockpit'&&!gridPreview()&&!watchedRival(),classic=preferences.values.classicInterior;
+ // The opening films the car from outside, whatever view the race then starts in.
+ const inside=mode==='cockpit'&&!gridPreview()&&!watchedRival()&&!intro.active,classic=preferences.values.classicInterior;
  if(cockpit){cockpit.root.visible=inside||!!model;cockpit.setView({inside,classic});if(driver)driver.root.position.y=cockpit.drop();}
  if(model){model.visible=!inside||!classic;carStructure.visible=!(inside&&classic);}
 }
@@ -394,12 +395,15 @@ function restBodyPose(){
  suspension.roll=suspension.pitch=suspension.rollRate=suspension.pitchRate=0;setBodyTilt(0,0);
  for(const w of wheels){w.obj.quaternion.copy(w.base);w.obj.position.copy(w.basePosition);}
 }
-function setCameraMode(value){
+// chosen: the player picked this view (C, the camera buttons, the menu, touch). It is remembered and
+// every race starts in it: after the opening shots and, in the story, once the engine catches. Views
+// the game sets itself (the story's cockpit for the start, the orbit a mouse drag opens) are not.
+function setCameraMode(value,chosen=false){
  if(!cameraModes.includes(value))return;
  // Only a follow view already drawn for this car is worth keeping when the orbit takes over.
  const previous=mode,keepView=ready&&value==='orbit'&&previous!=='orbit'&&(followInitialized||wasGridPreview);
  mode=value;orbitFrom=null;followInitialized=false;if(value==='tv')tvCamera?.reset();orbit.enabled=value==='orbit';$('camera').value=value;
- preferences.update({camera:value});
+ if(chosen)preferences.update({camera:value});
  orbit.enableRotate=!pointerLocked;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();
  cabinVisibility();
  document.body.classList.toggle('cockpit-mode',value==='cockpit');
@@ -741,7 +745,7 @@ function updateMenuLabels(){
  $('menu').classList.toggle('race-finished',finished);$('menu').classList.toggle('in-session',sessionStarted&&!finished);
  $('finishingOrder').hidden=!finished;if(finished)renderClassification();
  document.querySelector('#menu h1').textContent=finished?'Fim de corrida.':`Pausa em ${circuit.name}.`;
- document.querySelector('#menu .eyebrow').textContent=finished?'BANDEIRADA / RESULTADO FINAL':`${immersive?.active?'MODO HISTÓRIA':'MODO CORRIDA'} · ${championshipRace?`CAMPEONATO · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total}`:freeRaceTitle()} / PAUSA`;
+ document.querySelector('#menu .eyebrow').textContent=finished?'BANDEIRADA / RESULTADO FINAL':`${immersive?.active?'MODO HISTÓRIA':'MODO CORRIDA'} · ${championshipRace?`${championshipRace.championship.info.label} · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total}`:freeRaceTitle()} / PAUSA`;
  // Opening: Modo Corrida or Modo História. Paused: back to the track, restart, change track.
  // A finished single race can be run again; a scored championship round goes on from the result sheet.
  $('start').hidden=$('storyStart').hidden=sessionStarted;if(!$('start').disabled)$('start').textContent='Modo Corrida →';
@@ -826,11 +830,14 @@ function renderTracks(){
  renderChampionshipPanel($('tracks'),championshipFor());
 }
 const openSettings=setupSettings(()=>{menu(true);showRoster();},returnToMainMenu);
-// Championship (championship.js): all circuits in turn, one per mode. championshipRace is the
-// round on track; storyRound, a Modo História round already scored that the judge can still
-// disqualify and whose next vaquinha is the next round.
-const championships={corrida:new Championship(pilotStorage(),'corrida'),historia:new Championship(pilotStorage(),'historia')},championshipDialog=new ChampionshipDialog();
-const championshipFor=(mode=menuMode)=>championships[mode];
+// Championship (championship.js): one per mode and calendar (Todas as pistas, Old Stock 2026), the
+// panel's tab picks the calendar (remembered). championshipRace is the round on track; storyRound, a
+// Modo História round already scored that the judge can still disqualify and whose next vaquinha is
+// the next round.
+const CHAMPIONSHIP_VIEW_KEY='opala99-championship-calendar-v1';
+let championshipView=(()=>{try{return championshipCalendar(pilotStorage()?.getItem(CHAMPIONSHIP_VIEW_KEY));}catch{return 'todas';}})();
+const championships=Object.fromEntries(['corrida','historia'].map(mode=>[mode,Object.fromEntries(Object.keys(CHAMPIONSHIP_CALENDARS).map(id=>[id,new Championship(pilotStorage(),mode,id)]))])),championshipDialog=new ChampionshipDialog();
+const championshipFor=(mode=menuMode,calendar=championshipView)=>championships[mode][calendar];
 let championshipRace=null,storyRound=null,scoredChampionship=null,pendingMode=null;
 // Modo Corrida's single races: 'grid' (the whole field), 'solo' (practice alone) or 'duel' (the 1x1).
 let raceKind='grid';
@@ -843,7 +850,7 @@ const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({
 const pilotPicker=new PilotPicker(),automaticRecords=new AutomaticRecords(pilotStorage()),automaticAIRecords=new AutomaticAIRecords(pilotStorage());
 $('recordsButton').onclick=()=>{lapRecords.circuit=circuit.id;lapRecords.open();};
 $('settingsButton').onclick=openSettings;
-mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(nextCameraMode());},onSkin:cycleLivery,onReset:()=>{if(ready&&!immersive.finishing){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
+mobile=new MobileControls({enabled:touchDevice,onMenu:openSettings,onCamera:()=>{if(ready)setCameraMode(nextCameraMode(),true);},onSkin:cycleLivery,onReset:()=>{if(ready&&!immersive.finishing){if(!immersive?.handleKey('KeyR'))reset(true);}},onUnlock:()=>carAudio.unlock()});
 document.addEventListener('keydown',e=>{
  if(lapRecords.dialog.open||championshipDialog.dialog.open)return;
  if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape')openSettings();else if(e.code==='KeyP')hold(!held);else if(!paused){if(pitstop.coffee&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(!e.repeat&&pitstop.handleKey(e.code))e.preventDefault();}return;}
@@ -855,7 +862,7 @@ document.addEventListener('keydown',e=>{
  if(!paused&&immersive?.handleKey(e.code)){e.preventDefault();return;}
  // Space pulls the handbrake and leaves it pulled until the next press, like the touch button.
  if(e.code==='Space'&&!paused)mobile.setHandbrake(!mobile.handbrake);
- if(e.code==='KeyC')setCameraMode(nextCameraMode());
+ if(e.code==='KeyC')setCameraMode(nextCameraMode(),true);
  if(e.code==='KeyN')watchNext(e.shiftKey?-1:1);
  if(e.code==='KeyR'&&!immersive.finishing)reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
@@ -867,8 +874,8 @@ document.addEventListener('keydown',e=>{
 });document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(automatic);keys.clear();mobile?.clear();if(!automatic)hold(true);});
 document.addEventListener('visibilitychange',()=>{carAudio.setFocused(!document.hidden&&(automatic||document.hasFocus()));if(document.hidden&&!automatic)hold(true);});
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer?.setSize(innerWidth,innerHeight,false);mobile?.clear();if(touchDevice&&innerHeight>innerWidth&&ready)menu(true);});
-$('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit');};
-$('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit');};
+$('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit',true);};
+$('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit',true);};
 $('skinButton').onclick=cycleLivery;
 $('watchButton').onclick=()=>watchNext(1);
 async function beginRace(restart=false,tour=false,story=preferences.values.immersive){
@@ -890,10 +897,10 @@ async function beginRace(restart=false,tour=false,story=preferences.values.immer
  raceCar=preferences.values.immersive||tour?'99':multiplayer?.car()??preferences.values.car;reconLap=tour;
  immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[duelRivalFor(raceCar,preferences.values.duelRival)];
  seatCar();
- document.querySelector('.session').childNodes[1].textContent=championshipRace?` CAMPEONATO · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total} `:immersive.lineup?.length===0?' TREINO SOLO ':immersive.lineup?` 1x1 · #${immersive.lineup[0]} `:' PISTA LIVRE ';
+ document.querySelector('.session').childNodes[1].textContent=championshipRace?` ${championshipRace.championship.info.label} · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total} `:immersive.lineup?.length===0?' TREINO SOLO ':immersive.lineup?` 1x1 · #${immersive.lineup[0]} `:' PISTA LIVRE ';
  pitstop?.reset();automatic=false;watched=0;
  if(preferences.values.immersive){immersive.start();}
- else{if(immersive.active)immersive.disable();reset();setCameraMode('chase');updateCar(1);updateCamera(1);}
+ else{if(immersive.active)immersive.disable();reset();setCameraMode(preferences.values.camera);updateCar(1);updateCamera(1);}
  paintCar();
  if(!immersive.active&&!tour)immersive.beginCountdown();
  sessionStarted=true;automatic=tour&&!immersive.active;menu(false);
@@ -930,7 +937,7 @@ function storyRows(){
 function startChampionshipRound(mode=menuMode){
  if(loading||sessionStarted)return;
  const pilot=pilotPicker.commit();if(!pilot)return;
- const championship=championshipFor(mode);menuMode=mode;
+ const championship=championshipFor(mode);if(!championship.available)return;menuMode=mode;
  if(championship.finished)championship.reset();
  if(!championship.started)championship.start(pilot,preferences.values.laps);
  selectCircuit(championship.nextCircuit);championshipRace={championship,round:championship.round,circuit:championship.nextCircuit};
@@ -970,11 +977,21 @@ $('resume').onclick=resumeRace;
 $('leaveRace').onclick=returnToMainMenu;
 $('championshipStart').onclick=()=>startChampionshipRound();
 $('championshipTableButton').onclick=()=>championshipDialog.open(championshipFor());
+// The calendar tabs (championship-board.js draws them): click, or the arrows between them.
+function showChampionshipCalendar(id,focus=false){
+ if(loading||sessionStarted)return;championshipView=championshipCalendar(id);try{pilotStorage()?.setItem(CHAMPIONSHIP_VIEW_KEY,championshipView);}catch{}
+ renderTracks();if(focus)$(`championshipTab-${championshipView}`)?.focus();
+}
+$('championshipTabs').onclick=e=>{const tab=e.target.closest('[data-championship-calendar]');if(tab)showChampionshipCalendar(tab.dataset.championshipCalendar);};
+$('championshipTabs').onkeydown=e=>{
+ const ids=Object.keys(CHAMPIONSHIP_CALENDARS),i=ids.indexOf(championshipView),go={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:ids.length-1}[e.key];
+ if(go===undefined)return;e.preventDefault();e.stopPropagation();showChampionshipCalendar(ids[(go+ids.length)%ids.length],true);
+};
 // Erasing a championship under way takes a second click.
 $('championshipReset').onclick=()=>{const b=$('championshipReset');if(b.dataset.armed){championshipFor().reset();delete b.dataset.armed;renderTracks();return;}b.dataset.armed='1';b.textContent='Apagar pontos? Clique de novo';setTimeout(()=>{delete b.dataset.armed;b.textContent='Recomeçar campeonato';},4000);};
 $('restartRace').onclick=()=>beginRace(true);
 $('settingsRestart').onclick=()=>{$('settings').close();beginRace(true);};
-$('tour').onclick=()=>{$('settings').close();beginRace(true,true,false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted||raceCar!=='99')return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
+$('tour').onclick=()=>{$('settings').close();beginRace(true,true,false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value,true);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted||raceCar!=='99')return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
 // Keep the car and audio session; release the previous circuit before loading another.
 function clearCircuit(){
  intro.stop();const retired=[];
@@ -1058,7 +1075,7 @@ async function loadCircuit(){
  treeField=new TreeField(landscape.trunks(),{mobile:touchDevice});scene.add(treeField.points);car.posts=treeField;
  restBodyPose();
  carLivery.clear();
- immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
+ immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
  // In a Modo História championship the story's own restarts lead to the next round (after this frame).
  {const storyStart=immersive.start.bind(immersive);immersive.start=()=>{if(storyRound){queueMicrotask(()=>{if(storyRound)nextStoryRound();});return;}storyStart();};}immersive.laps=preferences.values.laps;immersive.field.ace=preferences.values.aceKoyzinho;immersive.field.level=preferences.values.aiLevel;immersive.field.retirements=preferences.values.retirements;immersive.visual.viewCamera=camera;

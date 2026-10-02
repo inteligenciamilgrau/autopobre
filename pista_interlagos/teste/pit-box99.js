@@ -87,7 +87,10 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
  // painted service box on the working lane in front of the garage.
  grid(M.floor,-B+.17,B-.15,F+.35,F+16.15,.05,(x,d)=>[(x+6.3)/12.6,(d-F-.35)/15.8],'Piso_epoxi_box99');
  grid(M.tiles,-3*B+.15,-B-.06,F+.35,F+16.15,.05,(x,d)=>[x/.8,d/.8],'Ladrilho_lanchonete');
- grid(M.box,-spot.length/2,spot.length/2,spot.d-spot.width/2,spot.d+spot.width/2,.047,(x,d)=>[(x+spot.length/2)/spot.length,(d-spot.d+spot.width/2)/spot.width],'Box_de_parada_99');
+ // The painted 99 reads right for the arriving car: turned half round where the cars run against
+ // the stations (pit.reversed, Brasília), or it would read 66.
+ const turned=pit.reversed?uv=>[1-uv[0],1-uv[1]]:uv=>uv;
+ grid(M.box,-spot.length/2,spot.length/2,spot.d-spot.width/2,spot.d+spot.width/2,.047,(x,d)=>turned([(x+spot.length/2)/spot.length,(d-spot.d+spot.width/2)/spot.width]),'Box_de_parada_99');
 
  // --- Walls (their collision comes from the data walls): garage side, back wall,
  // café side and the café storefront with its window and door.

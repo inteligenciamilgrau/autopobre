@@ -1,6 +1,6 @@
-// Cascavel, ECPA Piracicaba and Chapecó, rebuilt from open data (scripts/circuitos/): geometry,
-// relief, pit lane, scenery clearances and a full AI race on each.
-//   node scripts/testar_circuitos_abertos.mjs [cascavel|piracicaba|chapeco]
+// Cascavel, ECPA Piracicaba, Chapecó and Brasília, rebuilt from open data (scripts/circuitos/):
+// geometry, relief, pit lane, scenery clearances and a full AI race on each.
+//   node scripts/testar_circuitos_abertos.mjs [cascavel|piracicaba|chapeco|brasilia]
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {CIRCUITS} from '../teste/circuits.js';
@@ -12,7 +12,7 @@ import {billboardSpots,BOARD_CLEARANCE} from '../teste/track-surface.js';
 
 const only=process.argv[2];
 const report={};
-for(const id of ['cascavel','piracicaba','chapeco']){
+for(const id of ['cascavel','piracicaba','chapeco','brasilia']){
  if(only&&only!==id)continue;
  const circuit=CIRCUITS[id],data=JSON.parse(readFileSync(new URL(`../dados/pista_${id}.json`,import.meta.url)));
  data.meta.id=id;data.meta.name=circuit.name;
@@ -31,7 +31,7 @@ for(const id of ['cascavel','piracicaba','chapeco']){
  assert.equal(Math.sign(turn),data.meta.direction==='horario'?-1:1,`${id}: sense of travel`);
  if(id==='piracicaba')assert(Math.abs(L-circuit.length)<15,'ECPA shows its measured length');
  else assert(Math.abs(data.meta.reconstructed_3d_m-circuit.length)<.5,`${id} matches the published length`);
- assert.equal(circuit.length,{cascavel:3058,piracicaba:1930,chapeco:4004}[id]);
+ assert.equal(circuit.length,{cascavel:3058,piracicaba:1930,chapeco:4004,brasilia:5384}[id]);
  // Chapecó (opened 08/2026): the earthworks profile is calibrated to the published 18.5 m, and the
  // sections carry the official numbering (12 curves, curve 7 the long constant-radius sweep).
  if(id==='chapeco'){
@@ -39,6 +39,19 @@ for(const id of ['cascavel','piracicaba','chapeco']){
   const names=new Set(data.meta.sections.map(([,name])=>name.split(' · ')[0]));
   for(let k=1;k<=12;k++)assert(names.has(`Curva ${k}`),`Chapecó: curve ${k} named`);
   assert(!names.has('Curva'),'Chapecó: every detected curve has its official number');
+ }
+ // Brasília (reopened 11/2025): 16 curves, the published widths (15 m on the start straight, 14 m
+ // elsewhere), curve 1 banked at 5°, relief from the DF's 1 m terrain model.
+ if(id==='brasilia'){
+  const numbers=new Set(data.meta.sections.flatMap(([,name])=>[...name.split(' · ')[0].matchAll(/\d+/g)].map(m=>+m[0])));
+  for(let k=1;k<=16;k++)assert(numbers.has(k),`Brasília: curve ${k} named`);
+  assert(!data.meta.sections.some(([,name])=>name==='Curva'),'Brasília: every detected curve has its number');
+  const widths=a.map(p=>p[4]);assert(Math.min(...widths)>=13.9&&Math.max(...widths)<=15.01,'Brasília: published widths');
+  assert(Math.abs(a[0][4]-15)<.01,'Brasília: 15 m at the timing line');
+  const c1=data.meta.sections.find(([,name])=>name.startsWith('Curva 1 '))[0],turn1=a.filter(p=>p[0]>c1&&p[0]<c1+150).map(p=>p[5]);
+  assert(Math.abs(Math.max(...turn1)-Math.tan(5*Math.PI/180))<.002,'Brasília: curve 1 banked at 5°');
+  assert(data.meta.elevation_check.mdt_local_menos_anadem_p95_abs_m<3,'Brasília: the DF terrain model agrees with ANADEM');
+  assert.equal(data.meta.direction,'horario');
  }
  // --- Relief: real circuits, not a flat plate; grades a car can climb.
  const grades=a.map(p=>p[6]);out.grade=[Math.min(...grades),Math.max(...grades)].map(g=>+(g*100).toFixed(1));
@@ -57,6 +70,13 @@ for(const id of ['cascavel','piracicaba','chapeco']){
  const spot=serviceSpot(data.pit);assert(spot&&spot.d>0&&spot.d<data.pit.box99.front,'service spot on the working lane');
  const bays=garageBays(data.pit,14);assert(bays.bays>=3,'garage row');
  const route=pitRoute(data);assert(route&&route.slots.length>=5,`${id}: in-lap parking slots (${route?.slots.length})`);
+ // The in-lap route runs the way the cars do (Brasília's block is written exit to entry): its first
+ // station by the entry, each step forward along the lap, the slots on the garage side of the lane.
+ {const st=route.stations,e=a[Math.round(((route.entryS%L)+L)%L/(L/n))%n];
+  assert(Math.hypot(st[0].x-e[1],st[0].y-e[2])<40,`${id}: in-lap route starts at the entry (${Math.hypot(st[0].x-e[1],st[0].y-e[2]).toFixed(1)} m)`);
+  for(let k=1;k<st.length;k++)assert(st[k].u>st[k-1].u&&(st[k].x-st[k-1].x)*st[k-1].tx+(st[k].y-st[k-1].y)*st[k-1].ty>0,`${id}: in-lap route goes forward`);
+  for(const slot of route.slots){const q=route.at(slot.u),x=q.x-q.ty*slot.d,y=q.y+q.tx*slot.d,lane=locatePit(geo,x,y);assert(lane&&lane.d>0,`${id}: parking slot on the garage side`);}
+  out.pitReversed=!!data.pit.reversed;}
  // Box 99 stands on the pit lane, clear of the track asphalt.
  const s99=car.sample(...(()=>{const p=data.pit.samples.find(r=>r[pc.s]>=data.pit.box99.s);return [p[pc.x]+p[pc.lx]*(data.pit.box99.front+8),p[pc.y]+p[pc.ly]*(data.pit.box99.front+8)];})());
  assert(Math.abs(s99.d)>s99.width/2+3,'Box 99 is off the racing surface');
@@ -72,13 +92,17 @@ for(const id of ['cascavel','piracicaba','chapeco']){
   out.standWall={thick:+near[0].q[3].toFixed(1),clear:+(Math.abs(edge.d)-edge.width/2).toFixed(1)};}
  out.pit={length:Math.round(data.pit.length_m),entry:Math.round(data.pit.entry_main_s),exit:Math.round(data.pit.exit_main_s),garages:data.pit.garages,slots:route.slots.length};
  // No guardrail across the pit side while the lane runs along the track.
- const railLeft=guardrailSections(data,1);
- assert(!railLeft.some(([f,t])=>0>=f&&0<=t),'no left rail at the timing line (pit side)');
+ const pitSide=data.pit.reversed?-1:1,railPit=guardrailSections(data,pitSide);
+ assert(!railPit.some(([f,t])=>0>=f&&0<=t),'no rail on the pit side at the timing line');
  // --- Stands and buildings keep off the roads.
  const stands=standLayout(data);assert(stands.length>=3,'grandstand blocks');
  for(const b of stands){const [x,y]=[b.x+b.rx*b.front,b.y+b.ry*b.front];car.index=car.nearest(x,y,true).i;const s=car.sample(x,y);assert(Math.abs(s.d)>s.width/2+6,'stand front clear of the asphalt');}
  const bands=sceneryBands(data),cols=Object.fromEntries(data.scenery.buildings.columns.map((k,i)=>[k,i]));
- for(const b of data.scenery.buildings.items){const c=bandClearance(bands,b[cols.x],b[cols.y]);assert(c.distance>Math.hypot(b[cols.w],b[cols.d])/2,`${id}: building ${b[cols.x]},${b[cols.y]} too close to ${c.band}`);}
+ // Each footprint (an oriented rectangle: corners, edge midpoints, centre) stays off every band; a
+ // bounding circle was too coarse for Brasília's long, thin stands beside its 803 m straight.
+ for(const b of data.scenery.buildings.items){const x=b[cols.x],y=b[cols.y],w=b[cols.w],d=b[cols.d],c=Math.cos(b[cols.heading]),sn=Math.sin(b[cols.heading]);
+  for(const [u,v] of [[0,0],[-1,-1],[1,-1],[1,1],[-1,1],[0,-1],[1,0],[0,1],[-1,0]]){const px=x+c*u*w/2-sn*v*d/2,py=y+sn*u*w/2+c*v*d/2,clear=bandClearance(bands,px,py);
+   assert(clear.distance>0,`${id}: building ${x},${y} too close to ${clear.band}`);}}
  out.buildings=data.scenery.buildings.items.length;out.stands=stands.length;
  // Billboards: all sixteen placed, off every road (ECPA's side-by-side straights, the pit
  // entry) and apart from each other; none is left where its search failed.
@@ -93,8 +117,8 @@ for(const id of ['cascavel','piracicaba','chapeco']){
   car.index=car.nearest(post.x,post.y,true).i;const onTrack=car.sample(post.x,post.y),lane=locatePit(geo,post.x,post.y);
   assert(Math.abs(onTrack.d)>onTrack.width/2+POST_CLEARANCE,`${id}: gantry post ${post.side} off the track`);
   assert(!lane||lane.d<lane.lo-POST_CLEARANCE||lane.d>lane.hi+POST_CLEARANCE,`${id}: gantry post ${post.side} on the pit lane (d ${lane?.d.toFixed(1)})`);
-  // Clear of the pit walls, or (Chapecó, the line facing the garages) mounted on the pit wall's platform.
-  if(post.onWall)assert(wallUnderPost(geo,post.x,post.y)&&id==='chapeco',`${id}: gantry post ${post.side} on the pit wall top`);
+  // Clear of the pit walls, or (Chapecó, Brasília: the line facing the garages) mounted on the pit wall's platform.
+  if(post.onWall)assert(wallUnderPost(geo,post.x,post.y)&&['chapeco','brasilia'].includes(id),`${id}: gantry post ${post.side} on the pit wall top`);
   else assert.equal(wallsNear(geo,post.x,post.y,POST_CLEARANCE).length,0,`${id}: gantry post ${post.side} against a pit wall`);
  }
  out.gantry=posts.map(p=>+p.d.toFixed(1));
@@ -111,8 +135,10 @@ for(const id of ['cascavel','piracicaba','chapeco']){
  const best=Math.min(...field.rivals.map(r=>r.car.best??Infinity));
  out.rivals={finished:finished.length,bestLap:+best.toFixed(2),avgSpeedKmh:+(L/best*3.6).toFixed(1),offroadPct:+(offroad/(steps*14)*100).toFixed(2)};
  const solo=new TestCar(data);solo.resetGrid();solo.awaitingStart=false;let t=0,soloOff=0;const startLaps=solo.laps;
- while(solo.laps<startLaps+2&&t<120*400){solo.step(recognitionInput(solo),1/120);if(!solo.surface.onRoad)soloOff++;t++;}
- assert(solo.laps>=startLaps+2,`${id}: recognition driver laps`);out.recognition={best:+solo.best.toFixed(2),offroadPct:+(soloOff/t*100).toFixed(2)};
+ // Two laps at the tour's pace (it averages ~75 km/h): 400 s, more for Brasília's 5.4 km.
+ const budget=120*Math.max(400,L/15*2.4);
+ while(solo.laps<startLaps+2&&t<budget){solo.step(recognitionInput(solo),1/120);if(!solo.surface.onRoad)soloOff++;t++;}
+ assert(solo.laps>=startLaps+2,`${id}: recognition driver laps (${solo.laps-startLaps} in ${(t/120).toFixed(0)} s, at s=${solo.surface.s.toFixed(0)})`);out.recognition={best:+solo.best.toFixed(2),offroadPct:+(soloOff/t*100).toFixed(2)};
  report[id]=out;
 }
 console.log(JSON.stringify({passed:true,report},null,1));

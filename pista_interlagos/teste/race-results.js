@@ -38,18 +38,20 @@ export class RaceResults {
   $('resultsContinue').textContent=mode.active?'Continuar para o pódio →':champ?(champ.final?'Ver a classificação final →':`Próxima etapa: ${champ.nextName} →`):this.rerunLabel?.()??'Correr novamente →';
   $('resultsChampionship').hidden=!champ;this.root.querySelector('th.results-points').hidden=!champ;$('resultsChampionshipLine').hidden=!champ;
   if(champ){const me=champ.player,mine=champ.rows.find(r=>r.player);
-   $('resultsMode').textContent=`/ ${mode.active?'HISTÓRIA · ':''}CAMPEONATO · ETAPA ${champ.round} DE ${champ.total} · ${laps} VOLTA${laps>1?'S':''}`;
+   $('resultsMode').textContent=`/ ${mode.active?'HISTÓRIA · ':''}${champ.label??'CAMPEONATO'} · ETAPA ${champ.round} DE ${champ.total}${champ.date?' · '+champ.date.toUpperCase():''} · ${laps} VOLTA${laps>1?'S':''}`;
    $('resultsChampionshipLine').textContent=champ.final
     ?(me.position===1?`CAMPEÃO! +${mine?.points??0} pts nesta etapa e o título com ${pointsText(me.points)}.`:`FIM DO CAMPEONATO · +${mine?.points??0} pts · você fechou em ${me.position}º com ${pointsText(me.points)} · campeão: #${champ.champion.number} ${champ.champion.shortName}`)
     :me.position===1?`CAMPEONATO · +${mine?.points??0} pts nesta etapa · você lidera com ${pointsText(me.points)} · 2º: #${champ.standings[1].number} ${champ.standings[1].shortName} (${champ.standings[1].points})`
     :`CAMPEONATO · +${mine?.points??0} pts nesta etapa · você é ${me.position}º no geral com ${pointsText(me.points)} · líder: #${champ.standings[0].number} ${champ.standings[0].shortName} (${champ.standings[0].points})`;}
+  // What broke ("ABANDONOU · superaquecimento") needs a wider time column than a time does.
+  this.root.querySelector('.results-table').classList.toggle('results-has-dnf',rows.some(r=>!r.finished&&r.dnf&&r.breakdown));
   const body=this.root.querySelector('tbody');body.replaceChildren();
   for(const row of rows){const tr=document.createElement('tr');if(row.player)tr.classList.add('results-player');
    // A retirement (race-field.js breakdowns, or the story's tow) is classified AB, with what broke.
    // Still on the track at the flag: the estimated time to the line (race-field.js classification).
    const values=[row.dnf?'AB':`${row.position}º`,row.number,row.name+(row.player?' · VOCÊ':''),formatTime(row.bestLap),row.finished?formatTime(row.totalTime):row.dnf?`ABANDONOU${row.breakdown?' · '+row.breakdown:''}`:row.estimated?`≈ ${formatTime(row.totalTime)}`:'NA PISTA'];
    if(points)values.push(`+${points.get(String(row.number))??0}`);
-   values.forEach((value,i)=>{const cell=document.createElement(i===2?'th':'td');if(i===2)cell.scope='row';cell.textContent=value;if(i===3&&best&&row.number===best.number)cell.className='results-best';if(i===4&&row.estimated){cell.className='results-estimated';cell.title='Estimado: o que faltava da prova, no ritmo que vinha fazendo';}if(i===5)cell.className='results-points';tr.append(cell);});body.append(tr);
+   values.forEach((value,i)=>{const cell=document.createElement(i===2?'th':'td');if(i===2)cell.scope='row';cell.textContent=value;if(i===3&&best&&row.number===best.number)cell.className='results-best';if(i===4&&!row.finished&&row.dnf)cell.className='results-dnf';if(i===4&&row.estimated){cell.className='results-estimated';cell.title='Estimado: o que faltava da prova, no ritmo que vinha fazendo';}if(i===5)cell.className='results-points';tr.append(cell);});body.append(tr);
   }
  }
 }

@@ -52,16 +52,68 @@ export function trackRecords(storage,circuit,mode,pilot='',limit=8){
 export const RECORD_VIEW_KEY='autopobre-record-view-v1';
 function recordStorage(){try{return globalThis.localStorage;}catch{return null;}}
 export function readRecordView(storage){try{const v=JSON.parse(storage?.getItem(RECORD_VIEW_KEY)||'null');return v&&typeof v.circuit==='string'&&Object.hasOwn(CIRCUITS,v.circuit)&&['normal','immersive'].includes(v.mode)&&['human','ai','all'].includes(v.source)?{circuit:v.circuit,mode:v.mode,source:v.source}:null;}catch{return null;}}
+// The circuit dropdown borrows each track's outline and place from its card on the track screen
+// (index.html); a circuit without a card still gets its name and length.
+const circuitCard=id=>document.querySelector(`.track-cards [data-circuit="${id}"]`);
+const circuitOutline=id=>circuitCard(id)?.querySelector('path')?.getAttribute('d')??'';
+const circuitLength=c=>`${c.length.toLocaleString('pt-BR')} m`;
+const initial=text=>text.normalize('NFD').replace(/\p{M}/gu,'').toLowerCase();
 export class LapRecords {
  constructor(circuit='interlagos',storage=recordStorage()){
   this.storage=storage;const view=readRecordView(storage);this.viewSaved=!!view;
   this.circuit=circuitId(circuit);this.selectedCircuit=view?.circuit??this.circuit;this.selectedMode=view?.mode??'normal';this.selectedSource=view?.source??'all';
-  this.dialog=document.createElement('dialog');this.dialog.id='lapRecords';this.dialog.setAttribute('aria-labelledby','recordsTitle');this.dialog.innerHTML=`<div class="records-head"><div><span>AUTO-POBRE RACING</span><h2 id="recordsTitle">RECORDES DE TEMPO</h2></div><button id="recordsClose" aria-label="Fechar recordes">✕</button></div><p id="recordCandidate" hidden></p><div class="records-filters"><fieldset id="recordsCircuit"><legend>AUTÓDROMO</legend><div class="records-mode-options"><button type="button" data-records-circuit="interlagos" aria-pressed="true">Interlagos <span>4.309 m</span></button><button type="button" data-records-circuit="curvelo" aria-pressed="false">Oval de Curvelo <span>1.250 m</span></button><button type="button" data-records-circuit="cascavel" aria-pressed="false">Cascavel <span>3.058 m</span></button><button type="button" data-records-circuit="piracicaba" aria-pressed="false">ECPA Piracicaba <span>1.930 m</span></button><button type="button" data-records-circuit="chapeco" aria-pressed="false">Chapecó <span>4.004 m</span></button></div></fieldset><fieldset id="recordsMode"><legend>MODALIDADE</legend><div class="records-mode-options"><button type="button" data-records-mode="normal" aria-pressed="true">Corrida normal <span>corrida em 3 voltas</span></button><button type="button" data-records-mode="immersive" aria-pressed="false">Imersiva <span>corrida em 3 voltas</span></button></div></fieldset><fieldset id="recordsSource"><legend>QUEM PILOTOU</legend><div class="records-source-options"><button type="button" data-records-source="all" aria-pressed="true">Todos</button><button type="button" data-records-source="human" aria-pressed="false" aria-label="Pessoas" title="Pessoas">🧑</button><button type="button" data-records-source="ai" aria-pressed="false" aria-label="Inteligência artificial" title="Inteligência artificial">🤖</button></div></fieldset></div><div class="records-list"><table><thead><tr><th>POS</th><th>PILOTO</th><th>MELHOR VOLTA</th><th>MELHOR CORRIDA</th></tr></thead><tbody></tbody></table><p id="recordsEmpty">O primeiro recorde pode ser seu. Complete uma volta válida para registrar seu tempo automaticamente.</p></div><p id="recordsSourceNote" class="records-note"></p><p id="recordsMessage" role="status"></p>`;
+  this.dialog=document.createElement('dialog');this.dialog.id='lapRecords';this.dialog.setAttribute('aria-labelledby','recordsTitle');this.dialog.innerHTML=`<div class="records-head"><div><span>AUTO-POBRE RACING</span><h2 id="recordsTitle">RECORDES DE TEMPO</h2></div><button id="recordsClose" aria-label="Fechar recordes">✕</button></div><p id="recordCandidate" hidden></p><div class="records-filters"><fieldset id="recordsCircuit"><legend id="recordsCircuitLegend">AUTÓDROMO</legend><div class="records-pick"><button type="button" id="recordsCircuitPick" aria-haspopup="listbox" aria-expanded="false" aria-controls="recordsCircuitList" aria-labelledby="recordsCircuitLegend recordsCircuitName"><svg viewBox="0 0 120 60" aria-hidden="true"><path/></svg><b id="recordsCircuitName"></b><small id="recordsCircuitLength"></small><i aria-hidden="true"></i></button><ul id="recordsCircuitList" role="listbox" tabindex="-1" aria-labelledby="recordsCircuitLegend" hidden></ul></div></fieldset><fieldset id="recordsMode"><legend>MODALIDADE</legend><div class="records-mode-options"><button type="button" data-records-mode="normal" aria-pressed="true">Corrida normal <span>corrida em 3 voltas</span></button><button type="button" data-records-mode="immersive" aria-pressed="false">Imersiva <span>corrida em 3 voltas</span></button></div></fieldset><fieldset id="recordsSource"><legend>QUEM PILOTOU</legend><div class="records-source-options"><button type="button" data-records-source="all" aria-pressed="true">Todos</button><button type="button" data-records-source="human" aria-pressed="false" aria-label="Pessoas" title="Pessoas">🧑</button><button type="button" data-records-source="ai" aria-pressed="false" aria-label="Inteligência artificial" title="Inteligência artificial">🤖</button></div></fieldset></div><div class="records-list"><table><thead><tr><th>POS</th><th>PILOTO</th><th>MELHOR VOLTA</th><th>MELHOR CORRIDA</th></tr></thead><tbody></tbody></table><p id="recordsEmpty">O primeiro recorde pode ser seu. Complete uma volta válida para registrar seu tempo automaticamente.</p></div><p id="recordsSourceNote" class="records-note"></p><p id="recordsMessage" role="status"></p>`;
   document.body.append(this.dialog);const $=id=>this.dialog.querySelector('#'+id);$('recordsClose').onclick=()=>this.dialog.close();
   for(const button of this.dialog.querySelectorAll('[data-records-source]'))button.onclick=()=>{this.selectedSource=button.dataset.recordsSource;this.saveView();this.render();};
-  for(const button of this.dialog.querySelectorAll('[data-records-circuit]'))button.onclick=()=>{this.selectedCircuit=button.dataset.recordsCircuit;this.saveView();this.render();};
+  this.circuitPicker();
   for(const button of this.dialog.querySelectorAll('[data-records-mode]'))button.onclick=()=>{this.selectedMode=button.dataset.recordsMode;this.saveView();this.render();};
 
+ }
+ // Too many circuits for a row of buttons: a listbox in the game's colours, one option per
+ // circuit with its outline, place and best lap in the mode and drivers being shown.
+ circuitPicker(){
+  const button=this.dialog.querySelector('#recordsCircuitPick'),list=this.dialog.querySelector('#recordsCircuitList');this.pickButton=button;this.pickList=list;
+  const svg='http://www.w3.org/2000/svg';
+  for(const c of Object.values(CIRCUITS)){const li=document.createElement('li');li.id=`recordsCircuit-${c.id}`;li.setAttribute('role','option');li.setAttribute('aria-selected','false');li.dataset.recordsCircuit=c.id;
+   const map=document.createElementNS(svg,'svg');map.setAttribute('viewBox','0 0 120 60');map.setAttribute('aria-hidden','true');const path=document.createElementNS(svg,'path');path.setAttribute('d',circuitOutline(c.id));map.append(path);
+   const name=document.createElement('b'),place=document.createElement('small'),best=document.createElement('em');name.textContent=c.name;place.textContent=circuitCard(c.id)?.querySelector('span')?.textContent??circuitLength(c);
+   li.append(map,name,place,best);list.append(li);}
+  const ids=()=>[...list.children].map(li=>li.dataset.recordsCircuit);
+  button.onclick=()=>this.showCircuits(list.hidden);
+  button.onkeydown=e=>{if(e.key==='ArrowDown'||e.key==='ArrowUp'){e.preventDefault();this.showCircuits(true);}};
+  list.onclick=e=>{const li=e.target.closest('[data-records-circuit]');if(li)this.chooseCircuit(li.dataset.recordsCircuit);};
+  list.onpointermove=e=>{const li=e.target.closest('[data-records-circuit]');if(li&&li.dataset.recordsCircuit!==this.activeCircuit)this.activateCircuit(li.dataset.recordsCircuit,false);};
+  list.onkeydown=e=>{
+   const all=ids(),i=all.indexOf(this.activeCircuit),go={ArrowDown:i+1,ArrowUp:i-1,Home:0,End:all.length-1,PageUp:0,PageDown:all.length-1}[e.key];
+   if(go!==undefined)this.activateCircuit(all[Math.max(0,Math.min(all.length-1,go))]);
+   else if(e.key==='Enter'||e.key===' ')this.chooseCircuit(this.activeCircuit);
+   else if(e.key==='Escape'){this.showCircuits(false);button.focus();}
+   else if(e.key==='Tab'){this.showCircuits(false);button.focus();return;}
+   else if(e.key.length===1&&!e.ctrlKey&&!e.metaKey&&!e.altKey){
+    // Type-ahead: the next circuit starting with that letter ("c" cycles Curvelo, Cascavel, Chapecó).
+    const key=initial(e.key),next=[...all.slice(i+1),...all.slice(0,i+1)].find(id=>initial(CIRCUITS[id].name).startsWith(key));if(next)this.activateCircuit(next);else return;}
+   else return;
+   e.preventDefault();e.stopPropagation();};
+  // Escape closes the list before the dialog; a click anywhere else closes it too.
+  this.dialog.addEventListener('cancel',e=>{if(!list.hidden){e.preventDefault();this.showCircuits(false);button.focus();}});
+  this.dialog.addEventListener('pointerdown',e=>{if(!list.hidden&&!e.target.closest('.records-pick'))this.showCircuits(false);});
+  this.dialog.addEventListener('close',()=>this.showCircuits(false));
+ }
+ showCircuits(open){
+  const list=this.pickList;if(open===!list.hidden)return;
+  list.hidden=!open;this.pickButton.setAttribute('aria-expanded',String(open));if(!open)return;
+  // As tall as the dialog allows below the button (a phone held sideways), scrolling past that.
+  list.style.maxHeight=`${Math.max(120,this.dialog.getBoundingClientRect().bottom-this.pickButton.getBoundingClientRect().bottom-18)}px`;
+  this.activateCircuit(this.selectedCircuit);list.focus({preventScroll:true});
+ }
+ activateCircuit(id,scroll=true){
+  this.activeCircuit=id;let active=null;
+  for(const li of this.pickList.children){const on=li.dataset.recordsCircuit===id;li.classList.toggle('active',on);if(on)active=li;}
+  if(active){this.pickList.setAttribute('aria-activedescendant',active.id);if(scroll)active.scrollIntoView({block:'nearest'});}
+ }
+ chooseCircuit(id){
+  if(!Object.hasOwn(CIRCUITS,id))return;
+  this.selectedCircuit=id;this.showCircuits(false);this.pickButton.focus();this.saveView();this.render();
  }
  saveView(){this.viewSaved=true;try{this.storage?.setItem(RECORD_VIEW_KEY,JSON.stringify({circuit:this.selectedCircuit,mode:this.selectedMode,source:this.selectedSource}));}catch{}}
  open(mode=null){
@@ -81,7 +133,12 @@ export class LapRecords {
   this.dialog.querySelector('#recordsSourceNote').textContent=this.selectedSource==='human'?'Pessoas: recordes salvos automaticamente neste navegador.':'Pessoas: recordes deste navegador. IA: tempos do jogo, não dos pilotos reais.';
   const mode=this.selectedMode;
   for(const button of this.dialog.querySelectorAll('[data-records-mode]'))button.setAttribute('aria-pressed',String(button.dataset.recordsMode===mode));
-  for(const button of this.dialog.querySelectorAll('[data-records-circuit]'))button.setAttribute('aria-pressed',String(button.dataset.recordsCircuit===this.selectedCircuit));
+  const circuit=CIRCUITS[this.selectedCircuit],button=this.pickButton;button.dataset.circuit=circuit.id;
+  button.querySelector('path').setAttribute('d',circuitOutline(circuit.id));button.querySelector('b').textContent=circuit.name;button.querySelector('small').textContent=circuitLength(circuit);
+  for(const li of this.pickList.children){
+   const id=li.dataset.recordsCircuit,laps=rows.filter(r=>r.mode===mode&&r.circuit===id).map(r=>r.bestLap),best=li.querySelector('em');
+   li.setAttribute('aria-selected',String(id===circuit.id));best.classList.toggle('records-pick-none',!laps.length);
+   best.replaceChildren();if(laps.length){const label=document.createElement('span');label.textContent='MELHOR VOLTA';best.append(label,formatTime(Math.min(...laps)));}else best.textContent='sem tempos';}
   rows=rows.filter(r=>r.mode===mode&&r.circuit===this.selectedCircuit).sort((a,b)=>a.bestLap-b.bestLap);
   const body=this.dialog.querySelector('tbody');body.replaceChildren();
   rows.forEach((row,i)=>{const tr=document.createElement('tr');tr.dataset.source=row.source;for(const value of [`${i+1}º`,row.name,formatTime(row.bestLap),formatTime(row.bestRace)]){const td=document.createElement('td');td.textContent=value;tr.append(td);}const badge=document.createElement('span');badge.className='record-source-badge';const label=row.source==='ai'?`Inteligência artificial · carro #${row.number}`:'Pessoa';badge.title=label;badge.setAttribute('role','img');badge.setAttribute('aria-label',label);badge.textContent=row.source==='ai'?`🤖 · #${row.number}`:'🧑';tr.children[1].append(badge);body.append(tr);});this.dialog.querySelector('#recordsEmpty').hidden=rows.length>0;
