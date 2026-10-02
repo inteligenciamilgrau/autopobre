@@ -147,12 +147,19 @@ def enter_track(page, pilot='Piloto teste', timeout=120000, tap=False, story=Fal
 def pause_race(page, tap=False):
     """Open the pause menu with the keyboard (Escape) or the touch toolbar.
 
-    P only freezes the race on screen under the pause badge, without the menu."""
+    P only freezes the race on screen under the pause badge, without the menu. Under pointer lock
+    Escape only frees the mouse, with no keydown: on the track that opens the menu, on foot (story
+    paddock, podium) it does not, so a second Escape opens it."""
     if tap:
         page.tap('#touchMenu')
         page.tap('#settingsClose')
     else:
         page.keyboard.press('Escape')
+        try:
+            wait_js(page, 'interlagos.state.paused', timeout=1500)
+            return
+        except TimeoutError:
+            page.keyboard.press('Escape')
     wait_js(page, 'interlagos.state.paused')
 
 

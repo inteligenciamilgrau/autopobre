@@ -11,15 +11,15 @@ on:
   workflow_dispatch:
     inputs:
       versao:
-        description: 'Link principal: branch, tag ou commit (ex.: apr-2.0 ou main)'
+        description: 'Link principal (inteligenciamilgrau.github.io/autopobre/): qual versão do jogo vai ali. Tag (apr-2.0), branch (main) ou commit.'
         required: true
         default: apr-2.0
       versao_v1:
-        description: 'Endereco /apr_v1/: branch, tag ou commit (vazio = sem /apr_v1/)'
+        description: 'Endereço .../autopobre/apr_v1/ (versão antiga, histórico): qual versão vai ali. Se apagar este campo, o /apr_v1/ sai do ar.'
         required: false
         default: apr-1.0
       versao_dev:
-        description: 'Endereco /dev/: branch, tag ou commit (vazio = sem /dev/)'
+        description: 'Endereço .../autopobre/dev/ (versão em teste, a única com multiplayer): qual versão vai ali. Se apagar este campo, o /dev/ sai do ar.'
         required: false
         default: main
 

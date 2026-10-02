@@ -1,18 +1,18 @@
-// Cascavel and ECPA Piracicaba, rebuilt from open data (scripts/circuitos/): geometry,
+// Cascavel, ECPA Piracicaba and Chapecó, rebuilt from open data (scripts/circuitos/): geometry,
 // relief, pit lane, scenery clearances and a full AI race on each.
-//   node scripts/testar_circuitos_abertos.mjs [cascavel|piracicaba]
+//   node scripts/testar_circuitos_abertos.mjs [cascavel|piracicaba|chapeco]
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {CIRCUITS} from '../teste/circuits.js';
 import {TestCar,recognitionInput,guardrailSections} from '../teste/physics.js';
 import {RaceField,pitRoute} from '../teste/race-field.js';
 import {pitGeometry,locatePit,serviceSpot,garageBays,wallsNear} from '../teste/pit-lane.js';
-import {standLayout,fitGround,sceneryBands,bandClearance,gantryPosts,POST_CLEARANCE} from '../teste/track-clearance.js';
+import {standLayout,fitGround,sceneryBands,bandClearance,gantryPosts,wallUnderPost,POST_CLEARANCE} from '../teste/track-clearance.js';
 import {billboardSpots,BOARD_CLEARANCE} from '../teste/track-surface.js';
 
 const only=process.argv[2];
 const report={};
-for(const id of ['cascavel','piracicaba']){
+for(const id of ['cascavel','piracicaba','chapeco']){
  if(only&&only!==id)continue;
  const circuit=CIRCUITS[id],data=JSON.parse(readFileSync(new URL(`../dados/pista_${id}.json`,import.meta.url)));
  data.meta.id=id;data.meta.name=circuit.name;
@@ -29,9 +29,17 @@ for(const id of ['cascavel','piracicaba']){
  assert(Math.abs(length-L)<1,`${id}: lap length`);
  assert(Math.abs(Math.abs(turn)-2*Math.PI)<.05,`${id}: closed loop`);
  assert.equal(Math.sign(turn),data.meta.direction==='horario'?-1:1,`${id}: sense of travel`);
- if(id==='cascavel')assert(Math.abs(data.meta.reconstructed_3d_m-3058)<.5,'Cascavel matches the published 3,058 m');
- else assert(Math.abs(L-circuit.length)<15,'ECPA shows its measured length');
- assert.equal(circuit.length,id==='cascavel'?3058:1930);
+ if(id==='piracicaba')assert(Math.abs(L-circuit.length)<15,'ECPA shows its measured length');
+ else assert(Math.abs(data.meta.reconstructed_3d_m-circuit.length)<.5,`${id} matches the published length`);
+ assert.equal(circuit.length,{cascavel:3058,piracicaba:1930,chapeco:4004}[id]);
+ // Chapecó (opened 08/2026): the earthworks profile is calibrated to the published 18.5 m, and the
+ // sections carry the official numbering (12 curves, curve 7 the long constant-radius sweep).
+ if(id==='chapeco'){
+  assert(Math.abs(data.meta.elevation_range_m-18.5)<.01,'Chapecó: published 18.5 m of relief');
+  const names=new Set(data.meta.sections.map(([,name])=>name.split(' · ')[0]));
+  for(let k=1;k<=12;k++)assert(names.has(`Curva ${k}`),`Chapecó: curve ${k} named`);
+  assert(!names.has('Curva'),'Chapecó: every detected curve has its official number');
+ }
  // --- Relief: real circuits, not a flat plate; grades a car can climb.
  const grades=a.map(p=>p[6]);out.grade=[Math.min(...grades),Math.max(...grades)].map(g=>+(g*100).toFixed(1));
  assert(data.meta.elevation_range_m>10&&data.meta.elevation_range_m<60,`${id}: relief range`);
@@ -85,7 +93,9 @@ for(const id of ['cascavel','piracicaba']){
   car.index=car.nearest(post.x,post.y,true).i;const onTrack=car.sample(post.x,post.y),lane=locatePit(geo,post.x,post.y);
   assert(Math.abs(onTrack.d)>onTrack.width/2+POST_CLEARANCE,`${id}: gantry post ${post.side} off the track`);
   assert(!lane||lane.d<lane.lo-POST_CLEARANCE||lane.d>lane.hi+POST_CLEARANCE,`${id}: gantry post ${post.side} on the pit lane (d ${lane?.d.toFixed(1)})`);
-  assert.equal(wallsNear(geo,post.x,post.y,POST_CLEARANCE).length,0,`${id}: gantry post ${post.side} against a pit wall`);
+  // Clear of the pit walls, or (Chapecó, the line facing the garages) mounted on the pit wall's platform.
+  if(post.onWall)assert(wallUnderPost(geo,post.x,post.y)&&id==='chapeco',`${id}: gantry post ${post.side} on the pit wall top`);
+  else assert.equal(wallsNear(geo,post.x,post.y,POST_CLEARANCE).length,0,`${id}: gantry post ${post.side} against a pit wall`);
  }
  out.gantry=posts.map(p=>+p.d.toFixed(1));
  // --- Ground fitting under asphalt, kerbs, pit and stands converges.

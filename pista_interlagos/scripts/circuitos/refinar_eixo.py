@@ -21,10 +21,9 @@ import sys
 
 import numpy as np
 from PIL import Image, ImageDraw
-from pyproj import Transformer
-from scipy.interpolate import CubicSpline
+from projecao import Transformer
+from compat_scipy import CubicSpline, savgol_filter
 from scipy.ndimage import gaussian_filter1d, map_coordinates, uniform_filter1d
-from scipy.signal import savgol_filter
 
 from config import CIRCUITOS, pasta_fontes
 
@@ -69,6 +68,12 @@ def rota(nome, vias):
                 break
             seq.append(anel[k])
         return seq
+    if nome == 'chapeco':
+        # Um so contorno fechado (leisure=track, mapeado em 27/05/2026), ja desenhado no
+        # sentido horario da corrida. Os atalhos dos tracados alternativos nao estao no OSM.
+        nos = vias[1523801531]['nodes']
+        assert nos[0] == nos[-1]
+        return nos[:-1]
     raise KeyError(nome)
 
 
@@ -99,7 +104,33 @@ class Referencia:
         return np.stack([map_coordinates(self.img[..., k], [r, c], order=1, mode='nearest') for k in range(3)], -1)
 
 
-LIMIAR = {'sat': 34.0, 'lum_min': 28.0, 'lum_max': 185.0}
+class ReferenciaSentinel2(Referencia):
+    """Cor real do Sentinel-2 (10 m) no lugar da imagem aerea, para um circuito construido
+    depois da ultima imagem aerea (Chapeco: a Esri de 08/2024 ainda mostra a terraplanagem).
+    Reamostrada a 2 m por pixel na grade da cena, com o contraste esticado para a faixa da
+    imagem aerea (os limiares sao recalibrados em calibrar())."""
+    SUB = 5
+
+    def __init__(self, pasta, epsg):
+        import rasterio
+        with rasterio.open(pasta / 'sentinel2_rgb.tif') as r:
+            a = np.moveaxis(r.read(), 0, -1).astype(np.float32)
+            self.t, crs = r.transform, r.crs
+        lo, hi = np.percentile(a, 1), np.percentile(a, 99.7)
+        a = np.clip((a - lo) / (hi - lo) * 235 + 10, 0, 255)
+        k = self.SUB
+        g = (np.arange(a.shape[0] * k) + .5) / k - .5, (np.arange(a.shape[1] * k) + .5) / k - .5
+        R, C = np.meshgrid(*g, indexing='ij')
+        self.img = np.clip(np.stack([map_coordinates(a[..., b], [R, C], order=3, mode='nearest') for b in range(3)], -1), 0, 255)
+        self.inv = Transformer.from_crs(epsg, crs, always_xy=True)
+
+    def px(self, x, y):
+        u, v = self.inv.transform(x, y)
+        col, lin = ~self.t * (np.asarray(u), np.asarray(v))
+        return np.asarray(col) * self.SUB - .5, np.asarray(lin) * self.SUB - .5
+
+
+LIMIAR ={'sat': 34.0, 'lum_min': 28.0, 'lum_max': 185.0}
 
 
 def calibrar(ref, P, N):
@@ -230,7 +261,7 @@ def refinar(ref, pts, fechado, passadas, w0, proibido=None, concreto=None):
             # Trechos distantes na volta que correm lado a lado (a reta do miolo do ECPA
             # desce colada a reta principal): cada estacao fica com o asfalto mais perto
             # do proprio trecho, sem se fundir ao vizinho.
-            from scipy.spatial import cKDTree
+            from compat_scipy import cKDTree
             arvore = cKDTree(P)
             def regra(X, Y, P=P, ss=ss, L=L, arvore=arvore, outra=proibido):
                 q = np.column_stack([np.ravel(X), np.ravel(Y)])
@@ -274,7 +305,7 @@ def main():
     pasta = pasta_fontes(nome)
     nos, vias = carregar_osm(pasta)
     T = Transformer.from_crs(4326, c['epsg'], always_xy=True)
-    ref = Referencia(pasta, c['epsg'])
+    ref = (ReferenciaSentinel2 if c.get('referencia') == 'sentinel2' else Referencia)(pasta, c['epsg'])
     seq = rota(nome, vias)
     pts = np.array([T.transform(*nos[n]) for n in seq])
     L_osm = float(np.sum(np.linalg.norm(np.diff(np.vstack([pts, pts[:1]]), axis=0), axis=1)))
@@ -286,14 +317,16 @@ def main():
     concreto = None
     linhas = []
     if boxes:
-        from scipy.spatial import cKDTree
+        from compat_scipy import cKDTree
         bp = np.array([T.transform(*nos[n]) for n in boxes])
         arvore_osm = cKDTree(bp)
         def concreto(X, Y):
             # A reta dos boxes e de concreto: aceito como pista so perto do pit lane.
             dist, _ = arvore_osm.query(np.column_stack([np.ravel(X), np.ravel(Y)]))
             return (dist < 40).reshape(np.shape(X)).astype(np.float32)
-    P, N, w, L, hist = refinar(ref, pts, True, [(6, 8, 18), (3, 8, 18)], w0, concreto=concreto)
+    # Faixa de largura procurada: a publicada, quando ha (Chapeco: 12 a 15 m).
+    wmin, wmax = c.get('largura_faixa_m', (8, 18))
+    P, N, w, L, hist = refinar(ref, pts, True, [(6, wmin, wmax), (3, wmin, wmax)], w0, concreto=concreto)
     if boxes:
         # Pit lane: asfalto escuro entre o muro e as garagens, sempre do lado de dentro
         # (a esquerda no sentido da corrida), alem da faixa da pista e do muro; nas

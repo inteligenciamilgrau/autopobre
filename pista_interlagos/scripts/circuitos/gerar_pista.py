@@ -23,11 +23,10 @@ import sys
 import numpy as np
 import rasterio
 from PIL import Image
-from pyproj import Transformer
+from projecao import Transformer
 from rasterio.warp import reproject, Resampling
 from scipy.ndimage import gaussian_filter1d, map_coordinates, minimum_filter1d, uniform_filter1d
-from scipy.optimize import brentq
-from scipy.spatial import cKDTree
+from compat_scipy import brentq, cKDTree
 
 from config import ASSETS, CIRCUITOS, DADOS, pasta_fontes
 from muro_barraca import FOLGA_PISTA_M, LARGURA_M, largura_muro, trecho_cheio
@@ -67,6 +66,30 @@ EXTRA = {
         'zebras': ['#c8201e', '#f1efe8'],
         # Sem pit lane no OSM: faixa de servico a esquerda da reta, diante do paddock.
         'pit_sintetico': {'lado': 1, 'inicio': .29, 'entrada': 50, 'saida': 50, 'largura': 7.6},
+    },
+    'chapeco': {
+        # Numeracao oficial (12 curvas, 7 a direita e 5 a esquerda) casada com a geometria: a dobra
+        # de 26 graus no meio da reta 2 nao conta (a reta tem 634 m ate a curva 2) e a de 22 graus
+        # antes da reta 3 e a curva 4; a varrida longa a esquerda, detectada em dois pedacos, e a
+        # curva 7 ("de alta velocidade, com 517 metros e raio aberto constante"). No projeto de
+        # 2023 (13 curvas) a dobra da reta 2 contava e a varrida era a curva 8.
+        'trechos': {399: 'Curva 1 · grampo', 1131: 'Reta 2', 1206: 'Curva 2', 1412: 'Curva 3', 1603: 'Curva 4',
+                    2124: 'Curva 5 · grampo', 2349: 'Curva 6', 2436: 'Curva 7 · alta, raio constante',
+                    2578: 'Curva 7 · alta, raio constante', 2930: 'Curva 8', 3104: 'Curva 9', 3167: 'Curva 10',
+                    3273: 'Curva 11', 3388: 'Curva 12'},
+        'depois': {399: 'Reta 2', 1603: 'Reta 3', 3388: 'Reta principal'},
+        'reta': 'Reta principal',
+        'caimento_extra': {},
+        # 30 mil lugares divulgados, sem planta publicada: arquibancadas do lado de dentro da
+        # reta, de frente para os boxes (aproximacao declarada).
+        'arquibancadas': [{'antes_da_chegada': 140, 'blocos': 8, 'lado': -1, 'recuo': 14}],
+        'linha_chegada': 'predio_sentinel2',
+        'zebras': ['#c8201e', '#f1efe8'],
+        # Pit building "fora da area do tracado" (Prefeitura): do lado de fora da reta principal,
+        # a esquerda no sentido horario. O OSM nao traz o pit lane; garagens na extensao do predio.
+        'pit_sintetico': {'lado': 1, 'inicio': .05, 'antes_do_fim': 130, 'entrada': 60, 'saida': 60, 'largura': 7.6,
+                          'fonte': 'Pit lane modelado diante do prédio dos boxes medido no Sentinel-2 (23/09/2026): '
+                                   'o OSM ainda não traz a faixa dos boxes de Chapecó.'},
     },
 }
 
@@ -187,7 +210,7 @@ def alisar_rumo(P):
     for _ in range(3):
         Q = Q + gaussian_filter1d(P - Q, 50, axis=0, mode='wrap')
     # Estacoes igualmente espacadas ao longo do eixo alisado (mesma contagem).
-    from scipy.interpolate import CubicSpline
+    from compat_scipy import CubicSpline
     fechado = np.vstack([Q, Q[:1]])
     sq = np.r_[0, np.cumsum(np.linalg.norm(np.diff(fechado, axis=0), axis=1))]
     cs = CubicSpline(sq, fechado, bc_type='periodic')
@@ -242,6 +265,14 @@ def main():
         sb = np.r_[0, np.cumsum(np.linalg.norm(np.diff(Pb, axis=0), axis=1))]
         meio = int(np.searchsorted(sb, sum(boxes['garagens_s']) / 2))
         i0 = int(cKDTree(P).query(Pb[meio])[1])
+    elif x['linha_chegada'] == 'predio_sentinel2':
+        # Sem pit lane no OSM e sem imagem aerea da pista pronta (Chapeco): o predio dos boxes e
+        # a faixa clara (telhado e concreto) do lado dos boxes da maior reta, no Sentinel-2. A
+        # linha fica diante do meio dele e as garagens ocupam a extensao medida.
+        ini, fim = predio_sentinel2(pasta, epsg, P, E, reta_ini, reta_n, x['pit_sintetico']['lado'])
+        i0 = ((ini + fim) // 2) % n
+        x['reta_principal'] = ((reta_ini - (ini + fim) // 2) * DS, (reta_ini + reta_n - (ini + fim) // 2) * DS)
+        x['pit_sintetico']['garagens'] = ((ini - (ini + fim) // 2) * DS, (fim - (ini + fim) // 2) * DS)
     else:
         runs = [(reta_n, (reta_ini + reta_n // 2) % n)]
         comp, meio = max(runs)
@@ -264,7 +295,22 @@ def main():
     z_anadem = anadem(P[:, 0], P[:, 1])
     z_cop = cop(P[:, 0], P[:, 1])
     z_abs = gaussian_filter1d(vias_dem(P[:, 0], P[:, 1]), 12 / DS, mode='wrap')
-    base = math.floor((min(z_abs.min(), np.percentile(anadem.a[anadem.a > -1000], 1)) - 5) / 10) * 10
+    desnivel_terreno = float(np.ptp(z_abs))
+    if c.get('desnivel_m'):
+        # Pista mais nova que os modelos de terreno (ANADEM e Copernicus sao de antes da obra): a
+        # terraplanagem cortou os altos e aterrou os baixos. O perfil do terreno natural e
+        # comprimido em torno da media ate o desnivel publicado (Chapeco: 23 m do terreno, que o
+        # projeto de 2023 citava, para os 18,5 m da pista pronta).
+        media = float(z_abs.mean())
+        z_abs = media + (z_abs - media) * (c['desnivel_m'] / desnivel_terreno)
+    piso = anadem.a[anadem.a > -1000]
+    if c.get('base_na_grade'):
+        # So o relevo da caixa do terreno do jogo: um vale fundo alem dela (Chapeco: o rio a 264 m,
+        # 1,5 km ao sul, 300 m abaixo da pista) deixaria a pista a 330 m de altura local.
+        gx_, gy_ = (np.arange(P[:, k].min() - MARGEM, P[:, k].max() + MARGEM, 30.0) for k in (0, 1))
+        GX, GY = np.meshgrid(gx_, gy_)
+        piso = anadem(GX.ravel(), GY.ravel(), ordem=1)
+    base = math.floor((min(z_abs.min(), np.percentile(piso, 1)) - 5) / 10) * 10
     origem = np.array([round(float(P[:, 0].mean()) / 10) * 10, round(float(P[:, 1].mean()) / 10) * 10, float(base)])
     xy = P - origem[:2]
     z = z_abs - base
@@ -405,7 +451,10 @@ def main():
                          fonte='Pit lane: OSM (way 628049496) refinado sobre imagem aérea de 2025; garagens sob a cobertura, medidas nos transectos.',
                          garagens_s=boxes['garagens_s'])
     elif x.get('pit_sintetico'):
-        pit = pit_sintetico(x['pit_sintetico'], x['reta_principal'], xy, z, E, T, bank, largura, s, L, superficie)
+        cfg = dict(x['pit_sintetico'])
+        if cfg.get('garagens'):
+            cfg['garagens'] = [v * escala for v in cfg['garagens']]
+        pit = pit_sintetico(cfg, [v * escala for v in x['reta_principal']], xy, z, E, T, bank, largura, s, L, superficie)
 
     # --- Terreno: ANADEM na grade de 4 m; perto das vias segue o plano da pista.
     pontos = [xy] + ([np.array(pit['xy'])] if pit else [])
@@ -513,6 +562,9 @@ def main():
         'surface_zones': ([{'from': round(reta_s[0] * escala, 1), 'to': round(reta_s[1] * escala - 100, 1), 'kind': 'concreto'}]
                           if x.get('concreto') else []),
         'city_angle': angulo_cidade(c, origem, epsg),
+        # Horizonte do jogo (landscape.js): 'rural' longe da cidade (Chapeco fica a 20 km do centro).
+        **({'horizon': c['horizonte']} if c.get('horizonte') else {}),
+        **({'natural_relief_m': desnivel_terreno} if c.get('desnivel_m') else {}),
         'elevation_check': validacao, 'sources': fontes,
         'centreline': 'OSM (highway=raceway) refinado sobre imagem aérea de 2025 (scripts/circuitos/refinar_eixo.py)',
         'caveat': ('Reconstrução para jogo. Eixo e larguras medidos sobre imagem aérea; perfil do ANADEM (30 m) '
@@ -676,12 +728,52 @@ def montar_pit(pxy, pw, xy, z, E, T, bank, largura, s, L, superficie, vias_dem, 
                          muro_trechos)
 
 
+def predio_sentinel2(pasta, epsg, P, E, reta_ini, reta_n, lado):
+    """Estacoes (sem dar a volta no indice) onde o predio dos boxes acompanha a maior reta.
+
+    Na cor real do Sentinel-2 (10 m) o telhado e o concreto novo saturam (~250 contra ~90 do
+    asfalto e da terra). Em cada estacao da reta vale o mais claro entre 12 e 40 m do eixo, do
+    lado dos boxes; o predio e o maior trecho continuo acima de 180, aparado onde cai abaixo
+    da metade entre o fundo e o pico."""
+    s2 = Raster(pasta / 'sentinel2_rgb.tif', epsg, banda=1)
+    bandas = [s2.a]
+    for b in (2, 3):
+        bandas.append(Raster(pasta / 'sentinel2_rgb.tif', epsg, banda=b).a)
+    s2.a = np.mean(bandas, axis=0)
+    idx = np.arange(reta_ini, reta_ini + reta_n + 1)
+    i = idx % len(P)
+    d = np.arange(12, 40.1, 1.0)
+    q = P[i][:, None, :] + lado * d[None, :, None] * E[i][:, None, :]
+    claro = gaussian_filter1d(s2(q[..., 0], q[..., 1], ordem=1).max(1), 2)
+    acima = claro > 180
+    if not acima.any():
+        raise SystemExit('predio dos boxes nao encontrado no Sentinel-2')
+    runs, k = [], 0
+    while k < len(acima):
+        j = k
+        while j < len(acima) and acima[j] == acima[k]:
+            j += 1
+        if acima[k]:
+            runs.append((j - k, k, j - 1))
+        k = j
+    _, a, b = max(runs)
+    corte = (np.median(claro) + claro[a:b + 1].max()) / 2
+    while a > 0 and claro[a - 1] > corte:
+        a -= 1
+    while b < len(claro) - 1 and claro[b + 1] > corte:
+        b += 1
+    print(f'predio dos boxes no Sentinel-2: {(b - a) * DS:.0f} m ao longo da reta '
+          f'(pico {claro[a:b + 1].max():.0f}, fundo {np.median(claro):.0f})')
+    return int(idx[a]), int(idx[b])
+
+
 def pit_sintetico(cfg, reta, xy, z, E, T, bank, largura, s, L, superficie):
     """Faixa de servico paralela a reta principal (aproximacao declarada)."""
     lado = cfg['lado']
     r0, r1 = reta
     a = r0 + cfg['inicio'] * (r1 - r0)
-    b = r1 - 4
+    # A faixa termina perto do fim da reta (ECPA) ou antes da frenagem da curva seguinte.
+    b = r1 - cfg.get('antes_do_fim', 4)
     print(f'reta principal: s de {r0:.0f} a {r1:.0f} m; faixa dos boxes de {a:.0f} a {b:.0f}')
     us = np.arange(a, b + 1e-6, DS)
     sm = us % L
@@ -709,12 +801,15 @@ def pit_sintetico(cfg, reta, xy, z, E, T, bank, largura, s, L, superficie):
     lo, hi = -pw / 2, pw / 2
     par = np.flatnonzero(blend > .999)
     g0, g1 = ps[par[0]] + 12, ps[par[-1]] - 12
+    if cfg.get('garagens'):
+        # Extensao medida do predio (s da volta, relativo a linha), levada para a faixa.
+        g0, g1 = (float(np.interp(v, us, ps)) for v in cfg['garagens'])
     abertura = float(ps[np.argmax(gap > .3)])
     muro_idx = np.flatnonzero(gap > 1.3)
     muro_trechos = [(ps[muro_idx[0]], ps[muro_idx[-1]])] if len(muro_idx) else []
     print(f'pit sintetico {ps[-1]:.0f} m: entra em s={main_s[0]:.0f}, volta em s={main_s[-1]:.0f}; garagens {g0:.0f}-{g1:.0f} m')
     return completar_pit(pxy, lo, hi, pz, pbank, main_s, gap, (g0, g1), superficie,
-                         'Faixa de serviço fictícia ao lado da reta principal, diante do paddock: o ECPA não tem pit lane mapeado.',
+                         cfg.get('fonte', 'Faixa de serviço fictícia ao lado da reta principal, diante do paddock: o ECPA não tem pit lane mapeado.'),
                          abertura, muro_trechos[0][0] if muro_trechos else abertura, muro_trechos[0][1] if muro_trechos else ps[-1] - 40,
                          L, muro_trechos)
 

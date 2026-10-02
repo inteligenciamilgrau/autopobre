@@ -24,6 +24,11 @@
 #mpRoom .mp-knocks{margin:0 0 8px;padding:0;list-style:none}
 #mpRoom .mp-knocks li{display:flex;align-items:center;gap:6px;padding:6px 8px;border-radius:6px;background:#e2fb5722}
 #mpRoom .mp-knocks li span{flex:1}
+/* A knock stands out until the start: Aceitar in lime, the row pulsing a few times. */
+#mpRoom .mp-knocks li{animation:mp-knock 1.2s ease-in-out 4}
+#mpRoom .mp-knocks li button:first-of-type{background:var(--lime);border-color:var(--lime);color:var(--ink)}
+@keyframes mp-knock{50%{background:#e2fb5766}}
+@media(prefers-reduced-motion:reduce){#mpRoom .mp-knocks li{animation:none}}
 #mpRoom .mp-players li{display:flex;align-items:center;gap:6px}
 #mpRoom .mp-players li span{flex:1}
 /* One line: on track under the lap banner; on the track screen along the free bottom edge. */

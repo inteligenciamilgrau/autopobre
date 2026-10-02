@@ -10,9 +10,12 @@
 //   &auto=1                  the automatic pilot drives this window's car from the start
 //   &fantasmas=1             (host) humans pass through each other instead of colliding
 //   &lag=150&perda=5         simulate 150 ms of network delay and 5% of lost car messages
-// The host picks the track and presses Corrida única: the grid waits on 3, every guest in the room
-// (and whoever joins meanwhile) loads it, and the lights go out for everyone when the host presses
-// Largar. The host's car starts at the back of the grid, as Modo Corrida's chosen car does, and the
+// A guest the host lets in goes to Modo Corrida's car screen, picks its car and presses "Aguardar
+// início da corrida". The host lets pilots in until the start (on the car screen, the track screen and
+// on the grid; its mouse is let go on the grid when someone knocks), picks the track and presses
+// Corrida única: the grid waits on 3, every waiting guest (and whoever says so meanwhile) loads it,
+// and the lights go out for everyone when the host presses Largar. From then on the door waits for
+// the race to end. The host's car starts at the back of the grid, as Modo Corrida's chosen car does, and the
 // driver of that car sits out (the 99 races in its seat, race-roster.js fieldRoster); each guest's
 // car starts in its own seat. The host's game drives the bots and passes every car on; each window
 // drives its own car and places the others where their owners say they are (RaceField's remote
@@ -39,7 +42,7 @@ const PROBLEMS={conectando:'Conectando ao servidor da sala…',reconectando:'Con
  ocupada:'Muitas tentativas com a chave errada · tente de novo em um minuto.','outra-aba':'Esta sala foi aberta em outra aba.',origem:'Endereço não autorizado.',
  fora:'Sem conexão com o servidor da sala (internet, ou o limite do dia do servidor).',saiu:'Você saiu da sala.'};
 // game: main.js hooks (session, immersive, fullGrid, template, withTemplate, pilotName, wantedCar,
-// roomCars, command, autopilot, startRace, hasCircuit).
+// roomCars, openCars, freeMouse, command, autopilot, startRace, hasCircuit).
 export function startMultiplayer(game,hash=location.hash){const params=roomParams(hash);return params?new Multiplayer(game,params):null;}
 class Multiplayer {
  constructor(game,params){
@@ -47,8 +50,10 @@ class Multiplayer {
   const link=params.local?null:new ServerLink({url:params.server==='local'?LOCAL_SERVER:ROOM_SERVER,room:params.room,key:readKey,name:()=>this.room?.name??game.pilotName()});
   this.room=new Room({room:params.room,name:game.pilotName(),want:params.car??game.wantedCar(),lag:params.lag,loss:params.loss,link});
   this.race=null;this.phase='lobby';this.holding=false;this.remotes=new Map();this.seq=0;this.sendClock=0;this.readyClock=0;this.finishedAt=null;this.panelClock=0;this.immersive=null;this.rows='';this.cars='';
-  // A new race from the host: load its track and start (false: busy loading, asked again later).
-  this.room.on('race',race=>this.game.hasCircuit(race.circuit)&&this.game.startRace(race.circuit)).on('go',race=>this.go(race))
+  this.welcomed=false;this.knocking=0;
+  // A new race from the host, while this guest waits for one: load its track and start (false: busy
+  // loading, asked again later).
+  this.room.on('race',race=>this.room.waiting&&this.game.hasCircuit(race.circuit)&&this.game.startRace(race.circuit)).on('go',race=>this.go(race))
    .on('state',(id,m)=>this.heardCar(id,m)).on('snap',m=>this.heardField(m)).on('leave',p=>this.left(p)).on('change',()=>this.render())
    // Someone took (or left) a seat, or renamed, while the start waits: the cars and their name tags follow.
    .on('seats',race=>{if(this.race&&race.id===this.race.id&&this.phase==='waiting'){this.race=race;this.seatHumans();}});
@@ -77,6 +82,21 @@ class Multiplayer {
  car(){return this.myNumber(this.loading())??this.room.number;}
  // The car screen's choice (main.js): this window's car in the room from now on, if nobody has it.
  choose(number){this.room.choose(number);this.render();}
+ // main.js: whether this window is no room's host (its car screen then waits for the host's race
+ // instead of leading to the tracks), and the car screen's "Aguardar início da corrida" (on, off, or
+ // the other way round); a guest that went back to the opening waits no more.
+ guest(){return this.room.role!=='host';}
+ wait(on=!this.room.waiting){if(on&&!this.admitted())return;this.room.setWaiting(on);this.render();}
+ // main.js, as this window leaves its race (the menu's way out, the result sheet, the host's next
+ // race on another track): a guest that leaves the host's race before its flag gives its seat up and
+ // is back to picking its car (main.js lands it on the car screen); done with that race, or moved on
+ // to the host's next one, it still waits.
+ leaving(){
+  const room=this.room;
+  if(room.role==='guest'&&this.phase!=='lobby'&&this.race&&room.race?.id===this.race.id&&this.phase!=='finished'&&this.finishedAt===null)this.wait(false);
+ }
+ // A guest the host has let in (online, past the door) and the room lists.
+ admitted(){const room=this.room;return room.role==='guest'&&!room.pending&&room.members.some(m=>m.id===room.id);}
  // main.js seatCar: in the host's race this guest sets up, the car at the back of its grid (the
  // host's), whose driver sits out; null for any other race (the field is then this window's own).
  gridCar(){const race=this.hostRace();return race&&this.myNumber(race)?race.car:null;}
@@ -205,6 +225,8 @@ class Multiplayer {
  frame(dt){
   const game=this.game,s=game.session(),room=this.room,immersive=this.immersive;
   room.setName(s.started&&immersive?.pilotName||game.pilotName());room.tick();
+  // Let in: the guest goes to the car screen (once; not out of a race, nor without a pilot's name).
+  if(!this.welcomed&&this.admitted()){this.welcomed=true;game.openCars();}
   // Out of the race (the way out of the menu, another track, Modo História): the room hears it.
   if(this.phase!=='lobby'&&(!s.started||immersive?.active)){this.phase='lobby';this.holding=false;if(room.role==='host')room.closeRace();}
   // A window waiting outside any race (a guest's rerun before the host starts one) sends nothing.
@@ -277,32 +299,55 @@ class Multiplayer {
   if(room.hostAway)return 'O anfitrião saiu · esperando ele voltar…';
   if(this.immersive?.active)return 'A sala corre só no Modo Corrida.';
   if(room.role==='guest'&&!me)return 'Sala cheia: os 15 carros estão ocupados.';
+  const choosing=this.choosing(),picking=choosing?` · ${choosing} escolhendo o carro`:'';
   if(this.phase==='waiting'){
    if(room.role==='host'&&room.race){
     const {guests,ready}=this.readiness();
-    return guests?`${ready} de ${guests} convidado${guests>1?'s':''} pronto${ready===1?'':'s'} · quem entrar agora também larga`:'Ninguém na sala ainda · quem entrar agora larga junto';
+    return guests?`${ready} de ${guests} convidado${guests>1?'s':''} pronto${ready===1?'':'s'}${picking} · quem chegar antes da largada também corre`
+     :choosing?`${choosing} convidado${choosing>1?'s':''} escolhendo o carro · quem chegar antes da largada também corre`:'Ninguém na sala ainda · aceite quem chegar antes da largada';
    }
    return this.race?'Pronto · o anfitrião dá a largada':'Esperando o anfitrião largar…';
   }
   if(this.phase==='racing'){
    if(this.immersive?.freeFinished){const left=this.stillRacing(),wait=Math.max(0,Math.ceil(RESULTS_WAIT-(clock()-(this.finishedAt??clock()))));return `Você terminou! Esperando ${left} piloto${left>1?'s':''} · ${wait} s`;}
    if(room.role==='guest'&&room.lobby?.race?.id!==this.race?.id)return 'O anfitrião saiu desta corrida.';
-   const humans=this.race?.seats.length??1;return `Corrida com ${humans} piloto${humans>1?'s':''} ${humans>1?'humanos':'humano'}.`;
+   // The door waits for the race to end.
+   const humans=this.race?.seats.length??1,door=room.role==='host'&&room.knocks.size?` · ${room.knocks.size} na porta (entra depois da corrida)`:'';
+   return `Corrida com ${humans} piloto${humans>1?'s':''} ${humans>1?'humanos':'humano'}${door}.`;
   }
   if(this.phase==='finished')return 'Fim de corrida.';
   if(room.role==='host'){
    if(s.started)return 'Esta corrida é só sua: a sala larga junto na Corrida única.';
-   const guests=room.members.length-1;return `Você hospeda · ${guests} convidado${guests===1?'':'s'} · escolha a pista e clique em Corrida única: todos largam juntos.`;
+   const guests=room.members.length-1;
+   return guests?`Você hospeda · ${guests-choosing} de ${guests} convidado${guests>1?'s':''} aguardando a largada${picking} · escolha a pista e clique em Corrida única.`
+    :'Você hospeda · aceite quem chegar, escolha a pista e clique em Corrida única: todos largam juntos.';
   }
-  const race=room.race;
-  return race?.state==='racing'&&!race.seats.some(x=>x.id===room.id)?'Corrida em andamento: você entra na próxima largada.':'Esperando o anfitrião escolher a pista e largar…';
+  // A guest out of any race: picking its car, or waiting for the host's next one.
+  const race=room.lobby?.race;
+  if(!room.waiting)return document.getElementById('cars')?.classList.contains('hidden')?'Você está na sala: em Modo Corrida, escolha seu carro e clique em Aguardar início da corrida.':'Escolha seu carro e clique em Aguardar início da corrida.';
+  return race?.state==='racing'&&!race.seats.some(x=>x.id===room.id)?'Corrida em andamento: você entra na próxima largada.':'Pronto · esperando o anfitrião escolher a pista e largar…';
  }
  // Host, while its race waits: guests seated in it, and how many of them have it loaded.
  readiness(){const r=this.room.race,guests=r?r.seats.filter(x=>x.id!==this.room.id):[];return {guests:guests.length,ready:guests.filter(x=>this.room.ready.has(x.id)).length};}
+ // Guests still picking their car (not waiting for the start yet).
+ choosing(){const room=this.room;return room.members.filter(m=>m.id!==room.hostId&&!m.wait).length;}
+ // What a pilot in the room's list is doing, as this window knows it (the host also knows who has
+ // the waiting race loaded).
+ doing(m){
+  const room=this.room,race=room.role==='host'?room.race:room.lobby?.race,seated=race?.seats.some(s=>s.id===m.id);
+  if(m.id===room.hostId)return ' (anfitrião)';
+  if(race?.state==='racing')return seated?' · correndo':' · espera a próxima';
+  if(seated)return room.role!=='host'?' · na largada':room.ready.has(m.id)?' · na largada':' · carregando a pista';
+  return m.wait?' · aguardando a largada':' · escolhendo o carro';
+ }
  render(){
   const p=this.panel;if(!p)return;const room=this.room,s=this.game.session(),me=room.number;
   p.start.hidden=!this.canStart();
-  if(!p.start.hidden){const {guests,ready}=this.readiness(),loading=guests-ready;p.start.textContent=!guests?'Largar sozinho ↵':loading?`Largar já · ${loading} carregando ↵`:'Largar ↵';p.start.classList.toggle('mp-go',!!guests&&!loading);}
+  if(!p.start.hidden){
+   const {guests,ready}=this.readiness(),loading=guests-ready,choosing=this.choosing(),late=loading+choosing;
+   p.start.textContent=!guests&&!choosing?'Largar sozinho ↵':late?`Largar já · ${[loading&&`${loading} carregando`,choosing&&`${choosing} escolhendo o carro`].filter(Boolean).join(', ')} ↵`:'Largar ↵';
+   p.start.classList.toggle('mp-go',!!guests&&!late);
+  }
   // The held 3 says what it waits for.
   if(this.holding){const caption=document.getElementById('countdownCaption');if(caption&&caption.textContent!=='AGUARDANDO A LARGADA')caption.textContent='AGUARDANDO A LARGADA';}
   // Out of the way of the result sheet; under the circuits on the track screen; one line on track.
@@ -310,24 +355,27 @@ class Multiplayer {
   const shown=id=>!document.getElementById(id)?.classList.contains('hidden');
   p.root.classList.toggle('mp-racing',s.started&&!s.paused);p.root.classList.toggle('mp-tracks',shown('tracks')||shown('cars'));
   // The car screen (main.js roomCars): the cars other pilots have, this window's car once the host
-  // has answered its last choice, and the car still being asked for.
-  const taken=room.members.filter(m=>m.id!==room.id&&m.number).map(m=>[m.number,m.name]),mine=room.settled?me:null,asking=room.settled?null:room.want,cars=JSON.stringify([taken,mine,asking]);
-  if(cars!==this.cars){this.cars=cars;this.game.roomCars({taken:new Map(taken),mine,asking});}
+  // has answered its last choice, the car still being asked for, and for a guest its way on: the
+  // host's answer at the door, then "Aguardar início da corrida".
+  const taken=room.members.filter(m=>m.id!==room.id&&m.number).map(m=>[m.number,m.name]),mine=room.settled?me:null,asking=room.settled?null:room.want;
+  const guest=this.guest()?{admitted:this.admitted(),waiting:room.waiting}:null,cars=JSON.stringify([taken,mine,asking,guest]);
+  if(cars!==this.cars){this.cars=cars;this.game.roomCars({taken:new Map(taken),mine,asking,guest});}
   p.room.textContent=room.room;
   p.role.textContent=room.role==='host'?`anfitrião · #${me}`:room.pending?'na porta':room.role==='guest'?(me?`convidado · #${me}`:'assistindo'):'…';
   p.status.textContent=this.statusText(s);
   // The key form when the server asks for it; knocks and kicks for an online host. Names only ever
-  // reach the page as text.
+  // reach the page as text. The door is open until the start: on the car screen, the track screen
+  // and on the grid (a knock there lets the host's mouse go, main.js freeMouse); from the start it
+  // waits for the race to end.
   p.key.hidden=!(room.online&&room.problem==='chave');
-  const knocks=room.role==='host'?[...room.knocks.values()]:[],kickable=room.online&&room.role==='host'&&!(s.started&&!s.paused);
-  const rows=room.members.map(m=>({id:m.id,text:`#${m.number??'—'} ${m.name}${m.id===room.hostId?' (anfitrião)':''}${m.id===room.id?' · você':''}`,kick:kickable&&m.id!==room.id}));
-  const key=JSON.stringify([rows,knocks]);
-  if(key!==this.rows){
-   this.rows=key;
-   const button=(text,action)=>{const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=()=>{action();b.blur();};return b;};
-   p.list.replaceChildren(...rows.map(r=>{const li=document.createElement('li'),name=document.createElement('span');name.textContent=r.text;li.append(name);if(r.kick)li.append(button('Expulsar',()=>this.room.kick(r.id)));return li;}));
-   p.knocks.replaceChildren(...knocks.map(k=>{const li=document.createElement('li'),name=document.createElement('span');name.textContent=`${k.name} quer entrar`;li.append(name,button('Aceitar',()=>this.room.admit(k.id)),button('Recusar',()=>this.room.deny(k.id)));return li;}));
-  }
+  const knocks=room.role==='host'&&this.phase!=='racing'?[...room.knocks.values()]:[],kickable=room.online&&room.role==='host'&&!(s.started&&!s.paused);
+  if(knocks.length>this.knocking&&this.phase==='waiting')this.game.freeMouse();this.knocking=knocks.length;
+  const rows=room.members.map(m=>({id:m.id,text:`#${m.number??'—'} ${m.name}${this.doing(m)}${m.id===room.id?' · você':''}`,kick:kickable&&m.id!==room.id}));
+  // (each list rebuilt only when it changed: a pilot's progress never swaps a button under a click)
+  const button=(text,action)=>{const b=document.createElement('button');b.type='button';b.textContent=text;b.onclick=()=>{action();b.blur();};return b;};
+  const listKey=JSON.stringify(rows),knockKey=JSON.stringify(knocks);
+  if(listKey!==this.rows){this.rows=listKey;p.list.replaceChildren(...rows.map(r=>{const li=document.createElement('li'),name=document.createElement('span');name.textContent=r.text;li.append(name);if(r.kick)li.append(button('Expulsar',()=>this.room.kick(r.id)));return li;}));}
+  if(knockKey!==this.knockRows){this.knockRows=knockKey;p.knocks.replaceChildren(...knocks.map(k=>{const li=document.createElement('li'),name=document.createElement('span');name.textContent=`${k.name} quer entrar`;li.append(name,button('Aceitar',()=>this.room.admit(k.id)),button('Recusar',()=>this.room.deny(k.id)));return li;}));}
   p.knocks.hidden=!knocks.length;
   p.net.textContent=[room.online?'servidor':'mesmo PC',room.role==='guest'?`ping ${Math.round(room.latency*2000)} ms`:room.role==='host'?`${Math.max(0,room.members.length-1)} convidado(s)`:'',
    this.params.lag?`atraso simulado ${this.params.lag} ms`:'',this.params.loss?`perda simulada ${Math.round(this.params.loss*100)}%`:''].filter(Boolean).join(' · ');

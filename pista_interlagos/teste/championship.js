@@ -5,7 +5,10 @@ import {RIVAL_ROSTER,PLAYER_ENTRY,carEntry} from './race-roster.js';
 // chegada e uma classificação geral com os 15 carros do grid. Each game mode (Modo Corrida,
 // Modo História) keeps its own championship. The table and the calendar are the game's own,
 // not an official regulation. Progress lives in this browser.
-export const CHAMPIONSHIP_ROUNDS=Object.freeze(['interlagos','cascavel','piracicaba','curvelo']);
+// A championship keeps the calendar it started with: one saved before Chapecó opened goes on
+// with its four rounds, new ones run all five.
+export const CHAMPIONSHIP_ROUNDS=Object.freeze(['interlagos','cascavel','piracicaba','chapeco','curvelo']);
+const CALENDARS=[CHAMPIONSHIP_ROUNDS,['interlagos','cascavel','piracicaba','curvelo']];
 // Every finishing position scores, so a comeback from the back still counts.
 export const CHAMPIONSHIP_POINTS=Object.freeze([25,20,16,13,11,10,9,8,7,6,5,4,3,2,1]);
 export const CHAMPIONSHIP_MODES=Object.freeze(['corrida','historia']);
@@ -17,7 +20,7 @@ export const pointsText=n=>`${n} ponto${n===1?'':'s'}`;
 const finite=value=>Number.isFinite(value)&&value>0?value:null;
 const validRow=r=>r&&typeof r.number==='string'&&Number.isInteger(r.position)&&r.position>0&&Number.isFinite(r.points);
 function validState(s,mode){
- return !!s&&s.version===1&&(s.mode??'corrida')===mode&&Array.isArray(s.rounds)&&s.rounds.length===CHAMPIONSHIP_ROUNDS.length&&s.rounds.every((id,i)=>id===CHAMPIONSHIP_ROUNDS[i])
+ return !!s&&s.version===1&&(s.mode??'corrida')===mode&&Array.isArray(s.rounds)&&CALENDARS.some(c=>c.length===s.rounds.length&&c.every((id,i)=>id===s.rounds[i]))
   &&Array.isArray(s.results)&&s.results.length<=s.rounds.length&&s.results.every((r,i)=>r&&r.circuit===s.rounds[i]&&Array.isArray(r.rows)&&r.rows.every(validRow))
   &&Number.isInteger(s.laps)&&s.laps>0;
 }
@@ -51,7 +54,8 @@ export class Championship {
  get active(){return !!this.state&&!this.finished;}
  // Index of the round still to be raced (equals the number of rounds already scored).
  get round(){return this.state?.results.length??0;}
- get total(){return CHAMPIONSHIP_ROUNDS.length;}
+ get rounds(){return this.state?.rounds??CHAMPIONSHIP_ROUNDS;}
+ get total(){return this.rounds.length;}
  get nextCircuit(){return this.active?this.state.rounds[this.round]:null;}
  get laps(){return this.state?.laps??null;}
  start(pilot,laps){this.state={version:1,mode:this.mode,pilot,laps,rounds:[...CHAMPIONSHIP_ROUNDS],results:[],started:new Date().toISOString()};this.save();return this.state;}

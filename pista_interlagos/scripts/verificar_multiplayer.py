@@ -1,11 +1,14 @@
 """Multiplayer test version (teste/multiplayer.js) in the browser. Three windows of one browser join
-the room of index.html#sala=...: the host takes the 73 on Modo Corrida's car screen (the guest's car
-shows there under her name) and picks Corrida única, which waits on the grid; one guest was in the
-room already (she asked for the 64), the other arrives during that wait, is seated too and gets the
-first free car, the 99; the host gives the start (the Largar button). Each window paints its own car
-as its own. They race one lap of Interlagos on the automatic pilot, every window shows the
+the room of index.html#sala=...: each guest, once in the room, lands on Modo Corrida's car screen and
+races only after pressing "Aguardar início da corrida". The host takes the 73 on its car screen (the
+guest's car shows there under her name) and picks Corrida única, which waits on the grid; one guest
+was in the room already (she asked for the 64), the other arrives during that wait (online, the host
+lets her in from the grid, its captured mouse let go for it, no menu), gets the first free car, the
+99, and is seated once she says she waits; the host gives the start (the Largar button). Each window
+paints its own car as its own. They race one lap of Interlagos on the automatic pilot, every window shows the
 others' cars where they really are (solid: humans collide unless the host asks for ghosts), and every
-result sheet lists all three pilots. Then the host reloads (F5): it hosts again under the same
+result sheet lists all three pilots; a guest's sheet leads back to its car screen, still waiting for
+the next race. Then the host reloads (F5): it hosts again under the same
 identity and the guests keep their cars. A window opened without #sala shows nothing of it and does
 not even load the module.
 
@@ -86,9 +89,21 @@ def guest_window(context, host, pages, name, car=None):
         # The doorman: the host lets the guest in from its room card.
         wait_js(page, "window.interlagosSala?.info().pending", timeout=60000)
         knock = host.locator('#mpRoom .mp-knocks li', has_text=PILOTS[name][0])
+        knock.wait_for(state='visible', timeout=30000)
+        host.screenshot(path=str(SHOTS / f'0_porta_{name}.png'))
         knock.get_by_role('button', name='Aceitar').click(timeout=30000)
     wait_js(page, f"window.interlagosSala?.info().role==='guest'&&interlagosSala.info().number==={PILOTS[name][1]!r}", timeout=60000)
+    # Let in: on the car screen, picking a car; not waiting for any race yet.
+    wait_js(page, "!document.querySelector('#cars').classList.contains('hidden')&&interlagosCarros.info().guest?.admitted", timeout=30000)
+    assert page.inner_text('#carsNext').startswith('Aguardar início da corrida'), page.inner_text('#carsNext')
+    assert not page.evaluate('interlagosSala.info().waiting')
     return page
+
+
+def wait_for_start(page):
+    """The guest's "Aguardar início da corrida": the button stays pressed until a race takes it."""
+    page.click('#carsNext')
+    wait_js(page, "interlagosSala.info().waiting&&document.querySelector('#carsNext').getAttribute('aria-pressed')==='true'", timeout=10000)
 
 
 def race_room(context, host, pages):
@@ -114,15 +129,34 @@ def race_room(context, host, pages):
     host.click('#carsNext')
     assert host.is_visible('#tracks') and host.inner_text('#tracksBack') == '← Carro'
     assert 'Opala #73' in host.inner_text('#tracksPilot'), host.inner_text('#tracksPilot')
+    # The host sees who is still picking a car; the guest says she waits, and the host sees that too.
+    wait_js(host, "document.querySelector('#mpRoom .mp-status').textContent.includes('1 escolhendo o carro')", timeout=10000)
+    guest.screenshot(path=str(SHOTS / '1_convidado_carros.png'))
+    wait_for_start(guest)
+    wait_js(host, "document.querySelector('#mpRoom .mp-status').textContent.includes('1 de 1 convidado aguardando')", timeout=10000)
     host.screenshot(path=str(SHOTS / '1_anfitriao_pistas.png'))
     guest.screenshot(path=str(SHOTS / '1_convidado_espera.png'))
     host.click('#singleRace')
 
     # Corrida única waits on the grid, the Largar button showing, until the host gives the start.
     wait_js(host, "interlagosSala.info().phase==='waiting'&&!document.querySelector('#mpStart').hidden", timeout=240000)
-    # A third window arrives during that wait: it is seated and loads the race by itself.
+    if SERVER:
+        # The host's mouse on the track (the page's own pointer lock, browser_config): a knock lets it
+        # go so Aceitar can be clicked, and that opens no menu.
+        wait_js(host, "window.interlagos?.ready", timeout=60000)
+        host.mouse.click(330, 250)
+        wait_js(host, "document.pointerLockElement===document.querySelector('#view')", timeout=10000)
+    # A third window arrives during that wait: let in, it picks a car on its car screen and is seated
+    # once it says it waits, then loads the race by itself.
     late = guest_window(context, host, pages, 'late')
+    if SERVER:
+        assert host.evaluate("document.pointerLockElement===null&&document.querySelector('#menu').classList.contains('hidden')&&!interlagos.state.paused"), 'the knock let the mouse go, no menu'
     ids = {name: page.evaluate('interlagosSala.info().id') for name, page in pages.items()}
+    late.wait_for_timeout(800)
+    assert host.evaluate("interlagosSala.info().race.seats.length") == 2, 'picking a car: no seat yet'
+    assert 'escolhendo o carro' in host.inner_text('#mpStart'), host.inner_text('#mpStart')
+    late.screenshot(path=str(SHOTS / '2_atrasado_carros.png'))
+    wait_for_start(late)
     wait_js(host, f"(()=>{{const s=interlagosSala.info();return s.race?.seats.length===3&&[{ids['guest']!r},{ids['late']!r}].every(id=>s.ready.includes(id));}})()", timeout=240000)
     host.wait_for_timeout(500)
     assert host.evaluate("interlagosSala.info().phase") == 'waiting', 'nobody starts before the host says so'
@@ -181,6 +215,11 @@ def race_room(context, host, pages):
         page.screenshot(path=str(SHOTS / f'4_{name}_resultado.png'))
         text = page.evaluate("document.querySelector('#raceResults').innerText")
         assert all(pilot in text for pilot, _ in PILOTS.values()), (name, text[:600])
+    # A guest does not rerun alone: its sheet leads back to the car screen, still waiting.
+    assert guest.inner_text('#resultsContinue') == 'Aguardar a próxima corrida →', guest.inner_text('#resultsContinue')
+    guest.click('#resultsContinue')
+    wait_js(guest, "!document.querySelector('#cars').classList.contains('hidden')&&interlagosSala.info().waiting&&document.querySelector('#carsNext').getAttribute('aria-pressed')==='true'", timeout=30000)
+    guest.screenshot(path=str(SHOTS / '5_convidado_proxima.png'))
 
     # F5 on the host: the same identity hosts again at once, and each guest keeps its car.
     before = {name: page.evaluate('interlagosSala.info()') for name, page in pages.items()}

@@ -9,7 +9,7 @@ const memory=()=>{const data=new Map();return {getItem:k=>data.has(k)?data.get(k
 const order=(place,rotate=0)=>{const rivals=RIVAL_ROSTER.map((e,i)=>RIVAL_ROSTER[(i+rotate)%RIVAL_ROSTER.length]).map(e=>({number:e.number,name:e.name,bestLap:80,totalTime:250,finished:true}));
  rivals.splice(place-1,0,{number:'99',name:'Piloto',player:true,bestLap:79,totalTime:249,finished:true});return rivals;};
 
-assert.deepEqual(CHAMPIONSHIP_ROUNDS,['interlagos','cascavel','piracicaba','curvelo']);
+assert.deepEqual(CHAMPIONSHIP_ROUNDS,['interlagos','cascavel','piracicaba','chapeco','curvelo']);
 assert.equal(CHAMPIONSHIP_POINTS.length,15,'every finisher of the 15-car grid scores');
 assert.equal(pointsFor(1),25);assert.equal(pointsFor(15),1);assert.equal(pointsFor(16),0);
 assert(CHAMPIONSHIP_POINTS.every((p,i)=>i===0||p<CHAMPIONSHIP_POINTS[i-1]),'points fall with the position');
@@ -22,7 +22,7 @@ assert(champ.active&&champ.round===0&&champ.nextCircuit==='interlagos'&&champ.la
 assert.equal(champ.record(1,'cascavel',order(1),'Ana'),null);
 assert.equal(champ.record(0,'cascavel',order(1),'Ana'),null);
 const s1=champ.record(0,'interlagos',order(3),'Ana');
-assert(s1&&s1.round===1&&s1.total===4&&!s1.final&&s1.next==='cascavel'&&s1.nextName==='Cascavel');
+assert(s1&&s1.round===1&&s1.total===5&&!s1.final&&s1.next==='cascavel'&&s1.nextName==='Cascavel');
 assert.equal(s1.points.get('99'),16,'third place scores 16');
 assert.equal(s1.player.points,16);assert.equal(s1.standings[0].number,RIVAL_ROSTER[0].number);assert.equal(s1.standings[0].points,25);
 assert.equal(champ.record(0,'interlagos',order(1),'Ana'),null,'a round is scored once');
@@ -32,15 +32,20 @@ const again=new Championship(storage);assert(again.active&&again.round===1&&agai
 for(const bad of ['{',JSON.stringify({version:1,rounds:['interlagos'],results:[],laps:3}),JSON.stringify({version:1,rounds:CHAMPIONSHIP_ROUNDS,results:[{circuit:'curvelo',rows:[]}],laps:3})]){
  const s=memory();s.setItem(CHAMPIONSHIP_KEY,bad);assert.equal(new Championship(s).state,null,bad.slice(0,40));
 }
-// Three more rounds: the player wins them all and takes the title (25*3+16 = 91).
+// Four more rounds: the player wins them all and takes the title (25*4+16 = 116).
 again.record(1,'cascavel',order(1,1),'Ana');again.record(2,'piracicaba',order(1,2),'Ana');
-const last=again.record(3,'curvelo',order(1,3),'Ana');
+assert.equal(again.nextCircuit,'chapeco');assert.equal(again.record(3,'chapeco',order(1,3),'Ana').nextName,'Oval de Curvelo');
+const last=again.record(4,'curvelo',order(1,4),'Ana');
 assert(last.final&&again.finished&&!again.active&&again.nextCircuit===null&&last.next===null);
-assert.equal(last.player.points,91);assert.equal(last.champion.number,'99');assert.equal(last.player.position,1);assert.equal(last.player.wins,3);
+assert.equal(last.player.points,116);assert.equal(last.champion.number,'99');assert.equal(last.player.position,1);assert.equal(last.player.wins,4);
 const table=again.standings();
 assert.equal(table.length,15);assert(table.every((d,i)=>d.position===i+1));
 assert(table.every((d,i)=>i===0||d.points<=table[i-1].points),'standings sorted by points');
-assert.deepEqual(table.find(d=>d.player).rounds.map(r=>r.position),[3,1,1,1]);
+assert.deepEqual(table.find(d=>d.player).rounds.map(r=>r.position),[3,1,1,1,1]);
+// A championship saved before Chapecó opened goes on with its own four rounds.
+{const s=memory(),old=['interlagos','cascavel','piracicaba','curvelo'];s.setItem(CHAMPIONSHIP_KEY,JSON.stringify({version:1,mode:'corrida',pilot:'Ana',laps:3,rounds:old,results:[{circuit:'interlagos',laps:3,rows:order(2).map((r,i)=>({number:r.number,name:r.name,position:i+1,points:pointsFor(i+1),player:!!r.player}))}]}));
+ const c=new Championship(s);assert(c.active&&c.total===4&&c.nextCircuit==='cascavel'&&c.rounds===c.state.rounds,'old four-round save kept');
+ c.record(1,'cascavel',order(1),'Ana');c.record(2,'piracicaba',order(1),'Ana');assert.equal(c.nextCircuit,'curvelo','the old calendar skips Chapecó');assert(c.record(3,'curvelo',order(1),'Ana').final);}
 // Ties: equal points (30 each) go to the driver with more wins.
 const tie=championshipStandings({pilot:'X',results:[
  {circuit:'interlagos',rows:[{number:'73',name:'A',position:1,points:25},{number:'00',name:'B',position:2,points:20}]},

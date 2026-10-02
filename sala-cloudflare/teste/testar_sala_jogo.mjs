@@ -13,7 +13,7 @@ const tab=()=>{const store=new Map();return {getItem:k=>store.get(k)??null,setIt
 const rooms=[];
 function player(room,name,{key=KEY,storage=tab(),want=null}={}){
  const link=new ServerLink({url:`ws://127.0.0.1:${PORT}`,room,key:()=>key,name:()=>name,storage,socket:url=>new WebSocket(url,{headers:{Origin:ORIGIN}})});
- const r=new Room({room,name,want,link});r.events={};r.storage=storage;rooms.push(r);r.start();return r;
+ const r=new Room({room,name,want,link,storage});r.events={};r.storage=storage;rooms.push(r);r.start();return r;
 }
 // Every room ticks as a frame would (beacons, pings, hellos).
 const ticker=setInterval(()=>{for(const r of rooms)try{r.tick();}catch{}},50);
@@ -30,6 +30,8 @@ const bia=player(name,'Bia',{want:'64'});await until(()=>bia.role==='guest'&&bia
 await until(()=>ana.knocks.has(bia.id));assert.equal(ana.members.length,1,'a guest at the door is not in the room yet');
 ana.admit(bia.id);await until(()=>!bia.pending&&bia.number==='64');
 assert.deepEqual(ana.members.map(m=>m.number),['99','64']);assert.equal(bia.hostId,ana.id);
+// Let in, she picks her car and waits for the start ("Aguardar início da corrida").
+bia.setWaiting(true);await until(()=>ana.members.find(m=>m.id===bia.id)?.wait);
 // A race: announced, loaded, started by the host.
 const got=[];bia.on('race',race=>{got.push('race');return true;}).on('go',race=>got.push('go '+race.seats.length)).on('snap',m=>got.push('snap '+m.cars.length));
 ana.on('state',(id,m)=>got.push('state '+(id===bia.id)));
@@ -43,10 +45,12 @@ await until(()=>bia.latency>0);report.latencyMs=Math.round(bia.latency*1000);
 // A kick: out of the room, and out for good.
 const caio=player(name,'Caio');await until(()=>ana.knocks.has(caio.id));ana.admit(caio.id);await until(()=>caio.number);
 ana.kick(caio.id);await until(()=>caio.problem==='expulso');await until(()=>!ana.members.some(m=>m.id===caio.id));
-// F5 on the host: the same tab (token) hosts again; the guest sees it go and come back.
+// F5 on the host: the same tab (token) hosts again, in the car it had (kept by the tab, whatever its
+// car screen asks for now); the guest sees it go and come back.
+ana.closeRace();ana.choose('73');await until(()=>ana.number==='73'&&bia.hostNumber==='73');
 const hostTab=ana.storage,id=ana.id;ana.leave();await until(()=>bia.hostAway);
 const ana2=player(name,'Ana',{storage:hostTab});await until(()=>ana2.role==='host');
-assert.equal(ana2.id,id,'the reloaded host is the same player');await until(()=>!bia.hostAway&&bia.number==='64');
+assert.equal(ana2.id,id,'the reloaded host is the same player');assert.equal(ana2.number,'73','and races the car it had');await until(()=>!bia.hostAway&&bia.number==='64');
 report.flow='ok';
 clearInterval(ticker);for(const r of rooms)try{r.leave();}catch{}
 await wait(200);stop();

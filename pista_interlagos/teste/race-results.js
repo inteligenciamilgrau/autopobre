@@ -10,7 +10,8 @@ export function resultRows(mode){
 }
 export class RaceResults {
  // championship: the scored round (championship.js summary) of a championship race, or null.
- constructor({onRestart,onSettings,onRecords,onMainMenu,onPodium,onNextRound,onChampionship}){this.championship=null;
+ // rerunLabel: what the rerun button says instead of "Correr novamente" (a multiplayer guest's).
+ constructor({onRestart,onSettings,onRecords,onMainMenu,onPodium,onNextRound,onChampionship,rerunLabel}){this.championship=null;this.rerunLabel=rerunLabel;
   this.root=document.createElement('section');this.root.id='raceResults';this.root.hidden=true;this.root.setAttribute('aria-label','Resultado Auto-Pobre Racing');
   this.root.innerHTML=`<div class="results-sheet"><div class="results-top"><div><span class="results-kicker">AUTO-POBRE RACING</span><h1>RESULTADO DA CORRIDA</h1><p class="results-circuit"><b id="resultsCircuit">INTERLAGOS</b> <span id="resultsMode"></span></p></div><img src="./assets/abertura/logo_auto_pobre_racing.webp" alt="Auto-Pobre Racing" width="1774" height="887"></div><div class="results-summary"><strong id="resultsPlace"></strong><span id="resultsTime"></span><span id="resultsFastest"></span></div><div id="resultsChampionshipLine" class="results-championship" hidden></div><div class="results-scroll"><table class="results-table"><thead><tr><th scope="col">POS</th><th scope="col">Nº</th><th scope="col">PILOTO / DUPLA</th><th scope="col">MELHOR VOLTA</th><th scope="col">TEMPO TOTAL</th><th scope="col" class="results-points" hidden>PTS</th></tr></thead><tbody></tbody></table></div><p class="results-footnote">Tempos registrados na sua bandeirada; ≈ é a estimativa de quem ainda estava na pista, completando a prova no ritmo que vinha fazendo. — indica que ainda não houve volta válida.</p><div class="results-actions"><button id="resultsContinue" class="results-primary">Correr novamente →</button><button id="resultsChampionship" hidden>Classificação do campeonato</button><button id="resultsRecords">Recordes de tempo</button><button id="resultsSettings">Configurações</button></div><div id="resultsRecordsPanel" hidden></div></div>`;
   const mainMenu=document.createElement('button');mainMenu.id='resultsMainMenu';mainMenu.textContent='Escolher outra pista';mainMenu.onclick=onMainMenu;this.root.querySelector('.results-actions').insertBefore(mainMenu,this.root.querySelector('#resultsRecords'));
@@ -34,7 +35,7 @@ export class RaceResults {
   // A championship round: its points, the standings and the next round instead of a rerun
   // (in Modo História the podium comes first, as in any story race).
   const champ=this.championship,points=champ?this.championship.points:null;
-  $('resultsContinue').textContent=mode.active?'Continuar para o pódio →':champ?(champ.final?'Ver a classificação final →':`Próxima etapa: ${champ.nextName} →`):'Correr novamente →';
+  $('resultsContinue').textContent=mode.active?'Continuar para o pódio →':champ?(champ.final?'Ver a classificação final →':`Próxima etapa: ${champ.nextName} →`):this.rerunLabel?.()??'Correr novamente →';
   $('resultsChampionship').hidden=!champ;this.root.querySelector('th.results-points').hidden=!champ;$('resultsChampionshipLine').hidden=!champ;
   if(champ){const me=champ.player,mine=champ.rows.find(r=>r.player);
    $('resultsMode').textContent=`/ ${mode.active?'HISTÓRIA · ':''}CAMPEONATO · ETAPA ${champ.round} DE ${champ.total} · ${laps} VOLTA${laps>1?'S':''}`;

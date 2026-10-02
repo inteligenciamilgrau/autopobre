@@ -39,6 +39,14 @@ body.cars-open>:not(#view):not(#cars):not(#rotatePhone):not(#mpRoom):not(dialog)
 .car-note{margin:0;font-size:11px;line-height:1.45;color:#aebdb2}
 #cars .primary{margin:0;padding:14px 16px;border-radius:8px;border:0;background:#f4ce39;color:#171c15;font-size:15px;font-weight:900;text-align:left}
 #cars .primary:hover{background:#ffe574}
+/* A multiplayer guest's way on (car-select.js): at the door, greyed; waiting for the host's race,
+   lime with a breathing light and how to take it back. */
+#cars .primary small{display:block;margin-top:3px;font-size:11px;font-weight:600;opacity:.72}
+#cars .primary:disabled{cursor:default}
+#cars .primary[aria-pressed=true]{background:#e2fb57}
+#cars .primary[aria-pressed=true]::before{content:'';display:inline-block;width:9px;height:9px;margin:0 9px 1px 0;border-radius:50%;background:#171c15;vertical-align:middle;animation:car-wait 1.3s ease-in-out infinite}
+@keyframes car-wait{50%{opacity:.2}}
+@media(prefers-reduced-motion:reduce){#cars .primary[aria-pressed=true]::before{animation:none}}
 @media(max-width:900px){.cars-body{grid-template-columns:minmax(0,1fr) minmax(280px,1fr);gap:14px}.car-cards{gap:6px}.car-cards button{padding:6px 4px}}
 /* Phones in landscape: the whole choice on one screen. */
 @media(max-height:520px){
@@ -51,7 +59,7 @@ body.cars-open>:not(#view):not(#cars):not(#rotatePhone):not(#mpRoom):not(dialog)
  .cars-side{gap:6px;padding:8px}.cars-side>.tracks-kicker,.car-note{display:none}
  .car-cards{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
  .car-cards button{padding:4px 2px 3px;gap:1px}.car-cards span{font-size:8px}
- #cars .primary{padding:8px 10px;font-size:12px;min-height:40px}
+ #cars .primary{padding:8px 10px;font-size:12px;min-height:40px}#cars .primary small{font-size:9px;margin-top:1px}
  #carsPilot{font-size:10px}
 }
 @media(max-width:700px) and (orientation:portrait){.cars-body{grid-template-columns:1fr}.car-stage{min-height:38vh}.cars-head{grid-template-columns:1fr;gap:6px}}

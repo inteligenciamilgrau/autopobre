@@ -161,6 +161,8 @@ let cockpitView=null,photoHidDriver=false;const photoEye=new THREE.Vector3();
 // with another driver; 0 is the player's own Opala.
 let watched=0;const watchForward=new THREE.Vector3(1,0,0),watchTarget=new THREE.Vector3();
 let pointerLocked=false,lockPending=false,lockUnavailable=!$('view').requestPointerLock;
+// The mouse let go on purpose (a multiplayer host's door on the grid): no menu for that.
+let mouseFreed=false;
 const isInside=()=>mode==='cockpit'||mode==='hood';
 // Look-back (B or the touch button): driving from the cockpit only, not on foot, in the pit stop or menus.
 const lookBackAllowed=()=>mode==='cockpit'&&ready&&!paused&&!cockpitView&&!pitstop?.opened&&!immersive?.onFoot()&&!gridPreview()&&!$('settings').open;
@@ -458,14 +460,14 @@ $('view').addEventListener('pointerdown',e=>{
  }else{orbitFromView();$('view').classList.add('dragging');}
 },{capture:true});
 document.addEventListener('pointerlockchange',()=>{
- const wasLocked=pointerLocked;pointerLocked=document.pointerLockElement===$('view');lockPending=false;
+ const wasLocked=pointerLocked,freed=mouseFreed;pointerLocked=document.pointerLockElement===$('view');lockPending=false;mouseFreed=false;
  if(pointerLocked&&paused){document.exitPointerLock();return;}
  orbit.enableRotate=!pointerLocked;document.body.classList.toggle('pointer-locked',pointerLocked);$('view').classList.remove('dragging');
  cameraReturn.manual(performance.now());cameraHint();
  if(pointerLocked)status('');
  // Escape releases the lock without a keydown: that opens the menu. The pause (P) releasing it,
  // or the window going to another app, only pauses with the track on screen (the recon lap goes on).
- if(wasLocked&&!pointerLocked&&!held&&!pitstop?.opened&&!immersive?.blockingUI()){if(document.hasFocus()&&!document.hidden)menu(true);else if(!automatic)hold(true);}
+ if(wasLocked&&!pointerLocked&&!freed&&!held&&!pitstop?.opened&&!immersive?.blockingUI()){if(document.hasFocus()&&!document.hidden)menu(true);else if(!automatic)hold(true);}
 });
 document.addEventListener('pointerlockerror',lockFailed);
 document.addEventListener('mousemove',e=>{
@@ -744,7 +746,7 @@ function updateMenuLabels(){
  // A finished single race can be run again; a scored championship round goes on from the result sheet.
  $('start').hidden=$('storyStart').hidden=sessionStarted;if(!$('start').disabled)$('start').textContent='Modo Corrida →';
  $('resume').hidden=!resume;$('leaveRace').hidden=!sessionStarted;
- $('restartRace').hidden=!(resume||finished&&!scored);$('restartRace').textContent=finished?'Correr novamente →':immersive?.practice?'Recomeçar treino':'Recomeçar corrida';
+ $('restartRace').hidden=!(resume||finished&&!scored&&!multiplayer?.guest());$('restartRace').textContent=finished?'Correr novamente →':immersive?.practice?'Recomeçar treino':'Recomeçar corrida';
  // The track screen races in the mode chosen at the opening.
  const story=menuMode==='historia',laps=preferences.values.laps;
  $('tracks').dataset.mode=menuMode;$('tracksMode').textContent=story?'MODO HISTÓRIA · AUTO-POBRE RACING':'MODO CORRIDA · OLD STOCK RACE';
@@ -797,13 +799,14 @@ function updateScreens(){
  document.body.classList.toggle('cars-open',cars);
  if(tracks)renderTracks();if(cars)openCarScreen();
 }
-function showScreen(name){screen=name;updateScreens();updateMenuLabels();if(name==='tracks')$('singleRace').focus({preventScroll:true});if(name==='cars')$('carCards').querySelector('[aria-checked=true]')?.focus({preventScroll:true});}
+// A multiplayer guest back at the opening no longer waits for the host's race (multiplayer.js wait).
+function showScreen(name){screen=name;if(name==='opening')multiplayer?.wait(false);updateScreens();updateMenuLabels();if(name==='tracks')$('singleRace').focus({preventScroll:true});if(name==='cars')$('carCards').querySelector('[aria-checked=true]')?.focus({preventScroll:true});}
 // Who races, as the track and car screens show it: the pilot and, in Modo Corrida, the car.
 const pilotLine=()=>[pilotPicker.profiles.selected&&`Piloto: ${pilotPicker.profiles.selected}`,menuMode==='corrida'&&`Opala #${menuCar()}`].filter(Boolean).join(' · ');
 // Modo Corrida's car screen (car-select.js): the studio needs the renderer and the car's model, both
-// kept for the race.
+// kept for the race. A multiplayer guest does not pick the track: its button waits for the host's race.
 const carSelect=new CarSelect({root:$('cars'),value:preferences.values.car,carRoot,
- onPick:number=>{preferences.update({car:number});multiplayer?.choose(number);updateMenuLabels();if(ready)showRoster();},onNext:()=>showScreen('tracks'),onBack:()=>showScreen('opening')});
+ onPick:number=>{preferences.update({car:number});multiplayer?.choose(number);updateMenuLabels();if(ready)showRoster();},onNext:()=>{if(multiplayer?.guest())multiplayer.wait();else showScreen('tracks');},onBack:()=>showScreen('opening')});
 function openCarScreen(){
  $('carsPilot').textContent=pilotPicker.profiles.selected?`Piloto: ${pilotPicker.profiles.selected}`:'';if(model&&carSelect.studio.template===model&&activeLivery===$('livery').value)return;
  // No WebGL: the screen says so and the choice still counts.
@@ -831,7 +834,9 @@ const championshipFor=(mode=menuMode)=>championships[mode];
 let championshipRace=null,storyRound=null,scoredChampionship=null,pendingMode=null;
 // Modo Corrida's single races: 'grid' (the whole field), 'solo' (practice alone) or 'duel' (the 1x1).
 let raceKind='grid';
-const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({onRestart:()=>beginRace(true),onSettings:openSettings,onRecords:mode=>lapRecords.open(mode),onMainMenu:returnToMainMenu,
+const lapRecords=new LapRecords(circuit.id),raceResults=new RaceResults({
+ // A multiplayer guest does not rerun alone: it goes back to the car screen to wait for the host's next race.
+ onRestart:()=>{if(multiplayer?.guest())returnToMainMenu();else beginRace(true);},rerunLabel:()=>multiplayer?.guest()?'Aguardar a próxima corrida →':null,onSettings:openSettings,onRecords:mode=>lapRecords.open(mode),onMainMenu:returnToMainMenu,
  onNextRound:()=>{returnToMainMenu();startChampionshipRound();},onChampionship:()=>championshipDialog.open(scoredChampionship??championshipFor()),
  // Closing the sheet opens the podium: that click also gives the mouse to its free camera.
  onPodium:()=>{if(immersive){immersive.podiumCamera=true;immersive.mouseFree=false;immersive.captureMouse();}}});
@@ -898,10 +903,13 @@ async function beginRace(restart=false,tour=false,story=preferences.values.immer
 function returnToMainMenu(){
  $('settings').close();lapRecords.dialog.close();championshipDialog.close();
  if(!sessionStarted){updateMenuLabels();return;}
+ multiplayer?.leaving();
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  pitstop?.reset();
  carLivery.clear();if(ready){immersive.disable();reset();}
- sessionStarted=false;automatic=false;watched=0;championshipRace=storyRound=null;raceResults.root.hidden=true;screen='tracks';menu(true);showCircuitSelection();
+ // A multiplayer guest has no track to pick: Modo Corrida brings it back to the car screen, where it
+ // waits for the host's next race (or, having left this one early, picks again).
+ sessionStarted=false;automatic=false;watched=0;championshipRace=storyRound=null;raceResults.root.hidden=true;screen=multiplayer?.guest()&&carScreen()?'cars':'tracks';menu(true);showCircuitSelection();
 }
 // Scores the championship round when its race is over (once, before the result sheet shows):
 // Modo Corrida at the flag, Modo História when the podium comes, finished or towed in.
@@ -1114,6 +1122,7 @@ async function loadCircuit(){
 $('start').disabled=false;$('storyStart').disabled=false;$('singleRace').disabled=$('soloRace').disabled=$('duelRace').disabled=false;$('championshipStart').disabled=false;status('');updateMenuLabels();updateScreens();
 window.interlagos={ready:false,audioInfo:()=>carAudio.info()};
 // The multiplayer room reaches into the game only through these hooks.
+const typedPilot=()=>(pilotPicker.input.hidden?pilotPicker.select.value:pilotPicker.input.value.trim())||pilotPicker.profiles.selected||'';
 if(roomWanted)import('./multiplayer.js').then(({startMultiplayer})=>{multiplayer=startMultiplayer({
  session:()=>({started:sessionStarted,paused,loading,circuit:circuit.id}),
  immersive:()=>immersive,template:()=>model,withTemplate:withCleanModel,
@@ -1122,7 +1131,12 @@ if(roomWanted)import('./multiplayer.js').then(({startMultiplayer})=>{multiplayer
  fullGrid:()=>!preferences.values.immersive&&!reconLap&&immersive?.lineup==null,
  // The car screen's choice is the car asked for in the room; the room's answer comes back to it.
  wantedCar:()=>preferences.values.car,roomCars:state=>{carSelect.setRoom(state);updateMenuLabels();},
- pilotName:()=>(pilotPicker.input.hidden?pilotPicker.select.value:pilotPicker.input.value.trim())||pilotPicker.profiles.selected||'',
+ pilotName:typedPilot,
+ // A guest the host let in goes from the opening to Modo Corrida's car screen (not with a dialog
+ // open, nor before it has a pilot's name: the room card then says where to go).
+ openCars:()=>{if(sessionStarted||loading||screen!=='opening'||$('settings').open||!typedPilot())return false;chooseMode('corrida');return screen==='cars';},
+ // A knock at the host's door while its grid waits: the mouse is let go to answer it (no menu, no pause).
+ freeMouse:()=>{if(document.pointerLockElement!==$('view'))return;mouseFreed=true;document.exitPointerLock();},
  command:()=>automatic?pilot():input(),
  autopilot:on=>{if(on!==undefined&&ready&&sessionStarted&&!immersive.active){if(on)automatic=true;else takeWheel();}return automatic;},
  hasCircuit:id=>Object.hasOwn(CIRCUITS,id),

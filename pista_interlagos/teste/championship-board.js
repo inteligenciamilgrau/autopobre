@@ -3,7 +3,7 @@ import {CHAMPIONSHIP_ROUNDS,CHAMPIONSHIP_POINTS,pointsText} from './championship
 
 // The championship on screen: the panel of the track screen (calendar, status, top five)
 // and the full standings dialog, opened from there and from the result sheet.
-const SHORT={interlagos:'INT',cascavel:'CAS',piracicaba:'PIR',curvelo:'CUR'};
+const SHORT={interlagos:'INT',cascavel:'CAS',piracicaba:'PIR',chapeco:'CHA',curvelo:'CUR'};
 const el=(tag,props={},...children)=>{const node=document.createElement(tag);Object.assign(node,props);node.append(...children);return node;};
 const ordinal=n=>`${n}º`;
 const MODE_NAME={corrida:'MODO CORRIDA',historia:'MODO HISTÓRIA'};
@@ -14,7 +14,7 @@ export function renderChampionshipPanel(root,championship){
  const $=id=>root.querySelector('#'+id),state=championship.state,round=championship.round;
  const calendar=$('championshipCalendar');calendar.replaceChildren();
  const standings=championship.standings(),player=standings.find(d=>d.player);
- CHAMPIONSHIP_ROUNDS.forEach((id,k)=>{
+ championship.rounds.forEach((id,k)=>{
   const done=state?.results[k],mine=done?.rows.find(r=>r.player),current=championship.active&&k===round;
   const item=el('li',{className:done?'done':current?'next':''},el('b',{textContent:`${k+1}`}),el('span',{textContent:CIRCUITS[id].name}),el('em',{textContent:mine?`${placeText(mine)} · +${mine.points}`:current?'próxima':'—'}));
   calendar.append(item);
@@ -55,11 +55,11 @@ export class ChampionshipDialog {
    :`Depois de ${championship.round} de ${championship.total} etapas · próxima: ${CIRCUITS[championship.nextCircuit]?.name??'—'}`;
   $('championshipBanner').classList.toggle('champion',championship.finished&&player.position===1);
   const head=this.dialog.querySelector('thead');head.replaceChildren(el('tr',{},el('th',{textContent:'POS'}),el('th',{textContent:'Nº'}),el('th',{textContent:'PILOTO / DUPLA'}),
-   ...CHAMPIONSHIP_ROUNDS.map((id,k)=>{const th=el('th',{textContent:SHORT[id],title:CIRCUITS[id].name});if(k>=championship.round)th.className='pending';return th;}),el('th',{textContent:'VIT'}),el('th',{textContent:'PTS'})));
+   ...championship.rounds.map((id,k)=>{const th=el('th',{textContent:SHORT[id],title:CIRCUITS[id].name});if(k>=championship.round)th.className='pending';return th;}),el('th',{textContent:'VIT'}),el('th',{textContent:'PTS'})));
   const body=this.dialog.querySelector('tbody');body.replaceChildren();
   for(const d of standings){
    const row=el('tr',{className:d.player?'player':''},el('td',{textContent:ordinal(d.position)}),el('td',{textContent:d.number}),el('th',{scope:'row',textContent:d.player?`${state?.pilot||d.shortName} · VOCÊ`:d.name}),
-    ...CHAMPIONSHIP_ROUNDS.map((id,k)=>{const r=d.rounds[k];return el('td',{textContent:r?placeText(r):'·',title:r?`${CIRCUITS[id].name}: ${r.dsq?'desclassificado':r.dnf?'abandono':r.position+'º'}, ${r.points} pts`:CIRCUITS[id].name});}),
+    ...championship.rounds.map((id,k)=>{const r=d.rounds[k];return el('td',{textContent:r?placeText(r):'·',title:r?`${CIRCUITS[id].name}: ${r.dsq?'desclassificado':r.dnf?'abandono':r.position+'º'}, ${r.points} pts`:CIRCUITS[id].name});}),
     el('td',{textContent:String(d.wins)}),el('td',{className:'points',textContent:String(d.points)}));
    body.append(row);
   }

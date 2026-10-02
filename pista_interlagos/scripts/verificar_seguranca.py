@@ -7,7 +7,7 @@ import threading
 from urllib.request import Request, urlopen
 from urllib.error import HTTPError
 from playwright.sync_api import sync_playwright
-from browser_config import browser_executable, browser_args, wait_js, enter_track
+from browser_config import browser_executable, browser_args, wait_js, enter_track, pause_race
 from publicacao import ROOT, PUBLIC_FILES, contained_file, security_headers
 from servidor import Handler
 
@@ -118,7 +118,7 @@ def main():
             check('menu_waits_for_mode_choice', page.is_visible('#start') and not page.evaluate('interlagos.ready'))
             enter_track(page, story=True)
             check('immersive_starts', page.evaluate("interlagos.immersiveInfo().phase==='crowd'"))
-            page.keyboard.press('Escape'); page.click('#settingsButton'); page.click('#tab-tour'); page.click('#tour')
+            pause_race(page); page.click('#settingsButton'); page.click('#tab-tour'); page.click('#tour')
             wait_js(page, 'interlagos.ready&&!interlagos.state.paused')
             check('normal_mode_returns', not page.evaluate('interlagos.immersiveInfo().active'))
             page.click('#menuButton')

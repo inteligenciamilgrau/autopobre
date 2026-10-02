@@ -2,7 +2,7 @@
 
     python verificar_campeonato.py [porta]
 
-Modo Corrida: four rounds in a row, points on the result sheet, the next round from there,
+Modo Corrida: five rounds in a row, points on the result sheet, the next round from there,
 resuming after a reload and the final standings. Each round is finished on the spot (the
 player's lap count is set to the race distance), so the player wins every round.
 Modo História: its own championship; a round finished at the flag scores on the result sheet,
@@ -20,8 +20,8 @@ from browser_config import browser_executable, browser_args, wait_js, wait_race_
 PORT = sys.argv[1] if len(sys.argv) > 1 else '8799'
 URL = f'http://127.0.0.1:{PORT}/pista_interlagos/teste/'
 ROOT = Path(__file__).resolve().parents[1]
-ROUNDS = ['interlagos', 'cascavel', 'piracicaba', 'curvelo']
-NAMES = {'cascavel': 'Cascavel', 'piracicaba': 'ECPA Piracicaba', 'curvelo': 'Oval de Curvelo'}
+ROUNDS = ['interlagos', 'cascavel', 'piracicaba', 'chapeco', 'curvelo']
+NAMES = {'cascavel': 'Cascavel', 'piracicaba': 'ECPA Piracicaba', 'chapeco': 'Chapecó', 'curvelo': 'Oval de Curvelo'}
 STORY_KEY = 'opala99-championship-historia-v1'
 FIXTURE = """async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;
  ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();}"""
@@ -33,7 +33,7 @@ def finish_round(page, k):
     circuit = ROUNDS[k]
     wait_js(page, f"interlagos.ready&&interlagos.circuit==='{circuit}'&&!interlagos.state.paused", timeout=240000)
     page.evaluate('interlagos.skipIntro?.()')
-    assert f'ETAPA {k + 1}/4' in page.inner_text('header .session'), page.inner_text('header .session')
+    assert f'ETAPA {k + 1}/{len(ROUNDS)}' in page.inner_text('header .session'), page.inner_text('header .session')
     wait_race_start(page)
     page.evaluate(FIXTURE)
     page.evaluate('interlagos.car.laps=fixture.freeTotalLaps')
@@ -90,9 +90,9 @@ with sync_playwright() as p:
     page.click('#carsNext')
     assert page.inner_text('#championshipStart') == 'Correr a etapa 2 →'
     page.click('#championshipStart')
-    for k in (1, 2, 3):
+    for k in range(1, len(ROUNDS)):
         finish_round(page, k)
-        if k < 3:
+        if k < len(ROUNDS) - 1:
             assert page.inner_text('#resultsContinue') == f'Próxima etapa: {NAMES[ROUNDS[k + 1]]} →'
             page.click('#resultsContinue')
     assert page.inner_text('#resultsContinue') == 'Ver a classificação final →'
@@ -103,7 +103,7 @@ with sync_playwright() as p:
     assert page.locator('#championshipDialog tbody tr').count() == 15
     assert 'CAMPEÃO' in page.inner_text('#championshipBanner') and 'MODO CORRIDA' in page.inner_text('#championshipDialogMode')
     first = page.inner_text('#championshipDialog tbody tr:first-child')
-    assert '100' in first and 'VOCÊ' in first, first
+    assert str(25 * len(ROUNDS)) in first and 'VOCÊ' in first, first
     page.screenshot(path=str(ROOT / 'renders/campeonato_classificacao.png'))
     page.click('#championshipClose')
     page.click('#resultsMainMenu')
@@ -124,7 +124,7 @@ with sync_playwright() as p:
     page.evaluate('interlagos.car.laps=fixture.storyLaps')
     wait_js(page, "fixture.state.phase==='podium'&&!document.querySelector('#raceResults').hidden", timeout=60000)
     line = page.inner_text('#resultsChampionshipLine')
-    assert 'CAMPEONATO' in line and 'pts' in line and 'HISTÓRIA · CAMPEONATO · ETAPA 1 DE 4' in page.inner_text('#resultsMode'), line
+    assert 'CAMPEONATO' in line and 'pts' in line and f'HISTÓRIA · CAMPEONATO · ETAPA 1 DE {len(ROUNDS)}' in page.inner_text('#resultsMode'), line
     assert page.locator('#raceResults tbody td.results-points').count() == 15
     assert page.inner_text('#resultsContinue') == 'Continuar para o pódio →'
     scored = story_saved(page)['results'][0]['rows']
@@ -139,7 +139,7 @@ with sync_playwright() as p:
     wait_js(page, "fixture.state.phase==='disqualified'")
     wait_js(page, f"(()=>{{const r=JSON.parse(localStorage.getItem('{STORY_KEY}')).results[0].rows.find(r=>r.player);return r.dsq&&r.points===0}})()")
     story_round(page, 'cascavel')
-    assert 'ETAPA 2/4' in page.inner_text('header .session') or page.evaluate('fixture.active')
+    assert f'ETAPA 2/{len(ROUNDS)}' in page.inner_text('header .session') or page.evaluate('fixture.active')
     # Round 2 towed in: no points, the player last.
     page.evaluate("()=>{const m=fixture;m.state.fail('Pane de teste');m.state.podium();m.sync();}")
     wait_js(page, f"JSON.parse(localStorage.getItem('{STORY_KEY}')).results.length===2")

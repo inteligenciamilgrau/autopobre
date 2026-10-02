@@ -35,13 +35,13 @@ with sync_playwright() as p:
  page.screenshot(path=str(ROOT/'renders/pistas_celular_historia.png'))
  page.click('#tracksBack');page.click('#start');assert page.is_visible('#cars') and not page.is_visible('#tracks')
  page.click('#carsNext');assert page.get_attribute('#tracks','data-mode')=='corrida' and 'MODO CORRIDA' in page.inner_text('#championshipKicker')
- assert page.locator('#tracks [data-circuit]').count()==4 and page.is_visible('#singleRace') and page.is_visible('#championshipStart') and not page.is_visible('#storyStart')
+ assert page.locator('#tracks [data-circuit]').count()==5 and page.is_visible('#singleRace') and page.is_visible('#championshipStart') and not page.is_visible('#storyStart')
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
  page.screenshot(path=str(ROOT/'renders/pistas_celular.png'))
  assert not heavy(),heavy();assert page.evaluate('gpuContexts')<=1
  page.click('[data-circuit="curvelo"]');wait_js(page,"interlagos.audioInfo().recordings?.playing")
  page.evaluate('window.song=mediaPlayers.find(p=>!p.paused);window.songTime=song.currentTime;window.songSrc=song.src')
- for circuit in ['cascavel','piracicaba','interlagos','curvelo']:
+ for circuit in ['cascavel','piracicaba','chapeco','interlagos','curvelo']:
   page.click('[data-circuit="'+circuit+'"]')
   assert page.get_attribute(f'[data-circuit="{circuit}"]','aria-pressed')=='true'
  page.wait_for_timeout(500)

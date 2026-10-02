@@ -6,7 +6,7 @@ drinks or eats what is in hand, sip by sip. Leonardo's coffee goes into a free h
 offer waits while both hands are busy.
 
 Usage, from the repo root, with the local server running (INTERLAGOS_URL for another port):
-  python pista_interlagos/scripts/verificar_lanchonete_paddock.py [interlagos curvelo cascavel piracicaba]
+  python pista_interlagos/scripts/verificar_lanchonete_paddock.py [interlagos curvelo cascavel piracicaba chapeco]
 Screens in renders/: lanchonete_placa, lanchonete_cardapio, lanchonete_compra, lanchonete_bebendo,
 lanchonete_cafe_do_leo (circuits other than Interlagos get their name appended).
 """

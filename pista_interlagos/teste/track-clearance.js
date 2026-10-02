@@ -97,15 +97,29 @@ export function bandClearance(bands,x,y){
 // --- Start gantry posts on the open-data circuits (open-circuit.js): 2.2 m off the
 // asphalt at the timing line, moved further out while the spot is on paving, in a stand
 // or against a pit wall. ECPA's pit lane is still opening at the line, so that post
-// stands behind the lane's outer wall and the beam reaches over the lane.
+// stands behind the lane's outer wall and the beam reaches over the lane. Where nothing is
+// clear out to 40 m (Chapecó's line faces the middle of the garages: wall, lane, garages)
+// the post is mounted on the pit wall's platform, centred on it.
 export const POST_CLEARANCE=1;
+// A wall wide enough to carry a post (the 3.4 m platform of the open-data circuits) whose
+// centre line passes under (x, y), with the 35 cm post inside its top.
+export function wallUnderPost(geo,x,y){
+ if(!geo)return null;
+ for(const w of wallsNear(geo,x,y,0)){if(w.half<.6)continue;const dx=w.x2-w.x1,dy=w.y2-w.y1,len2=dx*dx+dy*dy||1e-9;let u=((x-w.x1)*dx+(y-w.y1)*dy)/len2;u=u<0?0:u>1?1:u;if(Math.hypot(x-w.x1-u*dx,y-w.y1-u*dy)<w.half-.3)return w;}
+ return null;
+}
 export function gantryPosts(data){
  const p=data.samples[0],base=p[4]/2+2.2,bands=sceneryBands(data).map(b=>({...b,margin:0})),geo=pitGeometry(data);
  return [1,-1].map(side=>{
   const at=d=>[p[1]+p[9]*side*d,p[2]+p[10]*side*d];
   const blocked=d=>{const [x,y]=at(d);return bandClearance(bands,x,y).distance<POST_CLEARANCE||!!geo&&wallsNear(geo,x,y,POST_CLEARANCE).length>0;};
-  let d=base;while(blocked(d)&&d<base+40)d+=.25;if(blocked(d))d=base;
-  const [x,y]=at(d);return {side,d,x,y};
+  let d=base;while(blocked(d)&&d<base+40)d+=.25;
+  if(blocked(d)){
+   // On the widest stretch of pit wall top within 10 m of the asphalt: the middle of it.
+   const on=[];for(let e=p[4]/2+.2;e<p[4]/2+10;e+=.05)if(wallUnderPost(geo,...at(e)))on.push(e);
+   d=on.length?(on[0]+on.at(-1))/2:base;
+  }
+  const [x,y]=at(d);return {side,d,x,y,onWall:!!wallUnderPost(geo,x,y)};
  });
 }
 

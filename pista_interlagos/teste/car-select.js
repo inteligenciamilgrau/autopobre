@@ -75,7 +75,7 @@ class Studio {
 export class CarSelect {
  constructor({root,value,carRoot,onPick,onNext,onBack}){
   this.root=root;this.value=carEntry(value)?value:CAR_CHOICES[0].number;this.onPick=onPick;this.studio=new Studio(carRoot);this.studio.wanted=this.value;this.live=false;
-  this.room=null;this.taken=new Map();this.asked=null;this.tell('');
+  this.room=null;this.taken=new Map();this.asked=null;this.guest=null;this.tell('');
   const $=id=>root.querySelector('#'+id);this.stage=$('carStage');this.status=$('carStageStatus');
   this.cards=$('carCards');this.cards.replaceChildren(...CAR_CHOICES.map(entry=>{
    const b=document.createElement('button');b.type='button';b.dataset.car=entry.number;b.setAttribute('role','radio');
@@ -111,9 +111,11 @@ export class CarSelect {
  tell(text,car=null){this.notice=text;this.noticeCar=car;this.noticeHolder=car&&this.taken.get(car);}
  // A multiplayer room (multiplayer.js, through main.js): taken, the cars other pilots have (number ->
  // name); mine, this window's car once the host has answered its last choice (the room's word wins:
- // the car asked for may have gone to someone else first); asking, the car still being asked for.
- setRoom({taken,mine,asking}){
-  this.room??=this.root.querySelector('.car-note');this.taken=taken;
+ // the car asked for may have gone to someone else first); asking, the car still being asked for;
+ // guest, for a pilot who does not host: whether the host has let it in and whether it waits for the
+ // start (its button then waits for the host's race instead of leading to the tracks).
+ setRoom({taken,mine,asking,guest=null}){
+  this.room??=this.root.querySelector('.car-note');this.taken=taken;this.guest=guest;
   if(this.noticeCar&&taken.get(this.noticeCar)!==this.noticeHolder)this.tell('');
   if(this.asked&&!asking&&mine&&mine!==this.asked)this.tell(`O #${this.asked} já estava com outro piloto: você segue no #${mine}.`,this.asked);
   this.asked=asking;
@@ -136,7 +138,15 @@ export class CarSelect {
    :`Carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele${this.room?'':'; o Stevan Gaipo vai de Opala 99'}.`;
   // In a room the note says how the cars are shared, and what became of the last choice.
   if(this.room)this.room.textContent=this.notice||(this.asked?`Pedindo o #${this.asked} ao anfitrião… Vale a partir da próxima largada.`:
-   'Na sala, cada piloto corre com o carro que escolher, se ninguém estiver com ele; os outros carros correm com a IA. O anfitrião larga em último.');
+   `${this.guest?'Escolha o carro e clique em Aguardar início da corrida: o anfitrião escolhe a pista e dá a largada. ':''}Na sala, cada piloto corre com o carro que escolher, se ninguém estiver com ele; os outros carros correm com a IA. O anfitrião larga em último.`);
+  // The way on: the tracks; for a guest, the host's race (once let in: waiting for it, or not).
+  const next=$('carsNext'),g=this.guest;
+  if(this.room){
+   next.disabled=!!g&&!g.admitted;if(g)next.setAttribute('aria-pressed',String(g.admitted&&g.waiting));else next.removeAttribute('aria-pressed');
+   const label=!g?'Escolher a pista →':!g.admitted?'Esperando o anfitrião aceitar você…':g.waiting?'Aguardando o início da corrida':'Aguardar início da corrida →';
+   const hint=g?.admitted&&g.waiting?'O anfitrião escolhe a pista e dá a largada · clique para cancelar':'';
+   if(next.dataset.label!==label+hint){next.dataset.label=label+hint;const small=document.createElement('small');small.textContent=hint;next.replaceChildren(label,...hint?[small]:[]);}
+  }
   this.status.hidden=!!this.studio.template;if(!this.studio.template)this.status.textContent='Carregando o Opala…';
  }
  // Every frame while the screen shows (main.js): the studio on the page's canvas.
@@ -145,5 +155,5 @@ export class CarSelect {
   if(!live)return;
   const rect=this.stage.getBoundingClientRect();this.studio.render(renderer,Math.min(dt,.05),rect);
  }
- info(){return {value:this.value,live:this.live,taken:Object.fromEntries(this.taken),asked:this.asked,built:this.studio.number,yaw:this.studio.yaw,meshes:(()=>{let n=0;this.studio.car?.traverse(o=>{if(o.isMesh&&o.visible)n++;});return n;})()};}
+ info(){return {value:this.value,live:this.live,taken:Object.fromEntries(this.taken),asked:this.asked,guest:this.guest,built:this.studio.number,yaw:this.studio.yaw,meshes:(()=>{let n=0;this.studio.car?.traverse(o=>{if(o.isMesh&&o.visible)n++;});return n;})()};}
 }

@@ -12,7 +12,7 @@ import sys
 
 import numpy as np
 from PIL import Image, ImageDraw
-from pyproj import Transformer
+from projecao import Transformer
 
 from config import CIRCUITOS, DADOS, pasta_fontes
 

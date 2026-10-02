@@ -25,7 +25,7 @@ MODULES = (
 MULTIPLAYER = ('multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js', 'net-link.js')
 ASSETS = (
     'branding/old_stock_preparada_v1.jpg',
-    'circuitos/cascavel_solo.jpg', 'circuitos/piracicaba_solo.jpg',
+    'circuitos/cascavel_solo.jpg', 'circuitos/piracicaba_solo.jpg', 'circuitos/chapeco_solo.jpg',
     'opala99_assinaturas_omp.glb', 'opala99_seiva_danilo.glb',
     'abertura/desclassificado_v1.jpg', 'abertura/abertura_stevan_opala99.jpg', 'abertura/logo_auto_pobre_racing.webp',
     'piloto/capacete_publico.jpg', 'piloto/referencia_frente.jpg',
@@ -56,6 +56,7 @@ PUBLIC_FILES.update({
     'dados/pista.json': 'pista_interlagos/dados/pista.json',
     'dados/pista_cascavel.json': 'pista_interlagos/dados/pista_cascavel.json',
     'dados/pista_piracicaba.json': 'pista_interlagos/dados/pista_piracicaba.json',
+    'dados/pista_chapeco.json': 'pista_interlagos/dados/pista_chapeco.json',
     'exports/interlagos_pista.glb': 'pista_interlagos/exports/interlagos_pista.glb',
 })
 AUDIO_NAMES = ('intro.mp3', 'race.mp3', 'patrocinio.mp3', 'turbo.mp3', 'hojenaodeu.mp3', 'energia.mp3')

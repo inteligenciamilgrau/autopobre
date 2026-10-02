@@ -4,8 +4,8 @@ import {createCurveloData} from '../teste/curvelo-data.js';
 import {TestCar} from '../teste/physics.js';
 import {RaceField} from '../teste/race-field.js';
 const rows=[];
-// Cascavel and ECPA come from the open-data track files (scripts/circuitos/).
-for(const id of ['interlagos','curvelo','cascavel','piracicaba']){
+// Cascavel, ECPA and Chapecó come from the open-data track files (scripts/circuitos/).
+for(const id of ['interlagos','curvelo','cascavel','piracicaba','chapeco']){
  const data=id==='curvelo'?createCurveloData():JSON.parse(readFileSync(new URL(id==='interlagos'?'../dados/pista.json':`../dados/pista_${id}.json`,import.meta.url)));data.meta.id=id;
  // Both modes race the standard distance (LAPS.standard in player-preferences.js): 3 laps.
  for(const [mode,laps] of [['normal',3],['immersive',3]]){

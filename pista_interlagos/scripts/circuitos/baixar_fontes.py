@@ -62,6 +62,16 @@ def overpass(c, destino):
             print(f'OSM: {url} respondeu {r.status_code}')
         except requests.RequestException as err:
             print(f'OSM: {url} falhou: {err}')
+    # Sem Overpass: a API do OSM entrega a mesma caixa (nos, vias que tocam nela e os nos
+    # delas, relacoes) no mesmo formato JSON; aceita caixas de ate 0,25 grau quadrado.
+    r = requests.get('https://api.openstreetmap.org/api/0.6/map.json', params={'bbox': f'{w},{s},{e},{n}'},
+                     headers=AGENTE, timeout=300)
+    if r.ok:
+        dados = r.json()
+        destino.write_text(json.dumps(dados, ensure_ascii=False), encoding='utf-8')
+        base = max(el.get('timestamp', '') for el in dados['elements'])
+        print(f'OSM: {len(dados["elements"])} elementos (API 0.6, edicao mais recente {base})')
+        return base
     raise SystemExit('Nenhum servidor Overpass respondeu.')
 
 

@@ -44,6 +44,31 @@ CIRCUITOS = {
         'largura_m': None,
         'sentido': 'horario',
     },
+    'chapeco': {
+        'nome': 'Autódromo Internacional de Chapecó Márcio Vaccaro',
+        'cidade': 'Chapecó, SC',
+        # Centro da pista no OSM (way 1523801531, mapeada em 27/05/2026), Linha Cachoeira,
+        # distrito de Marechal Bormann.
+        'centro': (-27.2201, -52.7140),
+        'raio_m': 1500,
+        'epsg': 31982,                 # SIRGAS 2000 / UTM 22S
+        'anadem': '22J',
+        'copernicus': 'Copernicus_DSM_COG_10_S28_00_W053_00_DEM',
+        'worldcover': 'S30W054',
+        # Prefeitura de Chapecó / NSC (2026): 4.004 m, sentido horario, 12 a 15 m de largura,
+        # 12 curvas (7 a direita), retas de 837, 634 e 422 m, desnivel maximo de 18,5 m.
+        'extensao_m': 4004,
+        'centro_cidade': (-27.1051, -52.6137),   # Catedral Santo Antonio
+        'largura_m': 13.5,
+        'sentido': 'horario',
+        'desnivel_m': 18.5,
+        'largura_faixa_m': (12, 15),
+        # A pista ficou pronta em 2026: a imagem aerea Esri (08/2024) so mostra a terraplanagem.
+        'referencia': 'sentinel2',
+        'base_na_grade': True,
+        # Autodromo no meio do mato, a 20 km do centro: lavouras e sitios no horizonte, sem a cidade.
+        'horizonte': 'rural',
+    },
 }
 
 

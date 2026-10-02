@@ -856,7 +856,10 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
  if(houses.length)root.add(chunked('Casas',houseGeometry(false),houseMaterial,houses,composeHouse,{size:450}));
  if(flats.length)root.add(chunked('Predios',houseGeometry(true),houseMaterial,flats,composeHouse,{size:900}));
  if(lajes.length)root.add(chunked('Casas_laje',houseGeometry('laje'),houseMaterial,lajes,composeHouse,{size:450}));
- const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado',cityAngle});root.add(horizon.root);
+ // A circuit far out in the countryside (data.meta.horizon 'rural': Chapecó, 20 km from town) sees
+ // farmland and the odd farmhouse to the horizon, not the city's rooftops and towers.
+ const rural=data.meta?.horizon==='rural';
+ const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado'&&!rural,rural,cityAngle});root.add(horizon.root);
  Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
  let realistic=false;
  return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
@@ -899,7 +902,7 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
 
 // Ground continues past the surveyed terrain, rising into hazy hills and a
 // distant skyline so the world never ends at the edge of the LiDAR grid.
-function createHorizon(data,field,rand,{mobile,urban,cityAngle=Math.PI/2}){
+function createHorizon(data,field,rand,{mobile,urban,rural=false,cityAngle=Math.PI/2}){
  const t=data.terrain,root=new THREE.Group();root.name='Horizonte';
  const border=[],x1=t.x0+(t.nx-1)*t.step,y1=t.y0+(t.ny-1)*t.step,cx=(t.x0+x1)/2,cy=(t.y0+y1)/2;
  for(let i=0;i<t.nx-1;i++)border.push([t.x0+i*t.step,t.y0,0,-1]);
@@ -914,7 +917,7 @@ function createHorizon(data,field,rand,{mobile,urban,cityAngle=Math.PI/2}){
   for(const [k,dist] of rings.entries()){
    const x=bx+dx/dl*dist,y=by+dy/dl*dist,f=smooth(0,1400,dist),z=k===0?edgeZ-.05:edgeZ*(1-f)+(base+22+hill(x,y)*38+dist*.012)*f;
    positions.push(x,z,-y);const g=.75+.25*Math.sin(x*.01)*Math.cos(y*.013);
-   const c=urban?[.21*g,.2*g,.17*g]:[.2*g,.2*g,.1*g];colors.push(...c);
+   const c=urban?[.21*g,.2*g,.17*g]:rural?[.17*g,.21*g,.11*g]:[.2*g,.2*g,.1*g];colors.push(...c);
   }
  });
  const R=rings.length,N=border.length;
@@ -940,6 +943,17 @@ function createHorizon(data,field,rand,{mobile,urban,cityAngle=Math.PI/2}){
   root.add(chunked('Horizonte_casas',houseGeometry(false),material,items,compose,{size:1100,shadows:false}));
   root.add(chunked('Horizonte_predios',houseGeometry(true),material,towers,compose,{size:3000,shadows:false}));
   buildings=items.length+towers.length;
+ }else if(rural){
+  // Farmhouses and sheds scattered over the fields, one or two hundred metres apart.
+  const items=[],count=mobile?60:160;
+  for(let i=0;i<count;i++){
+   const b=border[Math.floor(rand()*N)],rx=b[0]-cx,ry=b[1]-cy,rl=Math.hypot(rx,ry),dx=b[2]*.4+rx/rl*.6,dy=b[3]*.4+ry/rl*.6,dl=Math.hypot(dx,dy);
+   const dist=40+Math.pow(rand(),1.3)*1500,x=b[0]+dx/dl*dist+(rand()-.5)*120,y=b[1]+dy/dl*dist+(rand()-.5)*120;
+   const f=smooth(0,1400,dist),edgeZ=terrainHeight(data,b[0],b[1]),z=edgeZ*(1-f)+(base+22+hill(x,y)*38+dist*.012)*f,shed=rand()<.3;
+   items.push({x,y,z:z-1.2,w:shed?12+rand()*14:7+rand()*4,d:shed?20+rand()*30:8+rand()*5,h:shed?5+rand()*2:3.6+rand()*1.2,turn:rand()*Math.PI,color:shed?[.55,.56,.57]:[.45+rand()*.14,.13+rand()*.05,.06]});
+  }
+  root.add(chunked('Horizonte_sitios',houseGeometry(false),sceneryMaterial('house'),items,(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);},{size:1100,shadows:false}));
+  buildings=items.length;
  }
  return {root,buildings};
 }
