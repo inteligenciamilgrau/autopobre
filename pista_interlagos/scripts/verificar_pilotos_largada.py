@@ -27,10 +27,10 @@ with sync_playwright() as p:
   wait_js(page,"JSON.parse(localStorage.getItem('autopobre-records-v1')||'[]').some(r=>r.name==='Ana <99>'&&r.bestLap===42&&r.bestRace===null)")
   # Leaving an incomplete race keeps the valid lap; a second pilot gets a separate record.
   # Leaving lands on the track screen; the pilot is changed back on the opening.
-  page.evaluate('fixture.onMainMenu()');page.click('#tracksBack');page.fill('#pilotName','Bruno');choose_race(page);wait_js(page,'!interlagos.state.paused')
+  page.evaluate('fixture.onMainMenu()');page.click('#tracksBack');page.click('#carsBack');page.fill('#pilotName','Bruno');choose_race(page);wait_js(page,'!interlagos.state.paused')
   page.evaluate('fixture.freeCountdown=0;interlagos.car.best=40;interlagos.car.laps=3;interlagos.car.clock=129;fixture.stepFree(1/120,{})')
   wait_js(page,"JSON.parse(localStorage.getItem('autopobre-records-v1')).some(r=>r.name==='Bruno'&&r.bestRace===129)")
-  page.evaluate('fixture.onMainMenu()');page.click('#tracksBack');assert page.is_visible('#pilotSelect');assert page.locator('#pilotSelect option').count()==3;assert page.input_value('#pilotSelect')=='Bruno'
+  page.evaluate('fixture.onMainMenu()');page.click('#tracksBack');page.click('#carsBack');assert page.is_visible('#pilotSelect');assert page.locator('#pilotSelect option').count()==3;assert page.input_value('#pilotSelect')=='Bruno'
   page.click('#recordsButton');assert page.locator('#lapRecords select').count()==0;assert page.locator('#lapRecords tbody tr').count()==16;assert page.get_attribute('.records-source-options button:first-child','data-records-source')=='all';page.click('[data-records-source="human"]');assert page.locator('#lapRecords tbody tr').count()==2
   page.click('[data-records-source="ai"]');assert page.locator('#lapRecords tbody tr').count()==14;assert 'Kleber Eletric' in page.inner_text('#lapRecords tbody')
   page.click('[data-records-source="all"]');assert page.locator('#lapRecords tbody tr').count()==16

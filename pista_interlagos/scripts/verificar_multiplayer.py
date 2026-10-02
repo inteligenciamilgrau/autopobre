@@ -94,7 +94,10 @@ def race_room(context, host, pages):
     host.fill('#pilotName', PILOTS['host'][0])
     guest = guest_window(context, host, pages, 'guest', PILOTS['guest'][1])
     wait_js(host, f"interlagosSala.info().members.some(m=>m.name==={PILOTS['guest'][0]!r})", timeout=10000)
+    # A room always races the 99: Modo Corrida skips the car screen.
     host.click('#start')
+    assert host.is_visible('#tracks') and not host.is_visible('#cars') and host.inner_text('#tracksBack') == '← Início'
+    assert 'Opala #99' in host.inner_text('#tracksPilot'), host.inner_text('#tracksPilot')
     host.screenshot(path=str(SHOTS / '1_anfitriao_pistas.png'))
     guest.screenshot(path=str(SHOTS / '1_convidado_espera.png'))
     host.click('#singleRace')

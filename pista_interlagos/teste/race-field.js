@@ -189,9 +189,11 @@ export class RaceField {
  // ace: Koyzinho drives as the ace from the next reset (the race option, main.js); level: the rivals'
  // level (AI_LEVELS), also taken at the next reset; retirements: one to four cars break down (the
  // race option "Abandonos", on in the game, off by default here so seeded checks race full fields).
- constructor(data,{onStep,onReset,seed,ace=false,level='facil',retirements=false}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.ace=ace;this.level=level;this.retirements=retirements;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
+ constructor(data,{onStep,onReset,seed,ace=false,level='facil',retirements=false,roster=RIVAL_ROSTER}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.ace=ace;this.level=level;this.retirements=retirements;this.roster=roster;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
  // entrants: the roster numbers that race (null: all of them; [] a solo practice, [number] a 1x1). A
  // short field closes up to the front of the grid, the player in the next slot (playerGridSlot).
+ // roster (taken here too): the drivers, RIVAL_ROSTER or, when the player races another team's car,
+ // race-roster.js fieldRoster with the Opala 99 in that car's seat.
  reset(startS=0,{grid=false,seed=this.seed,entrants=null}={}){
   this.time=0;this.collisions=0;this.cooldowns.clear();this.nextSlot=0;this.hero=null;
   // A fresh seed per start: the same grid never races the same way twice.
@@ -200,16 +202,16 @@ export class RaceField {
   // Qualifying on the day: the grid follows the drivers' level, shuffled by a good or bad session.
   // The ace starts from the last rival slot, just ahead of the player.
   const ace=entry=>this.ace&&entry.number===ACE_NUMBER,level=AI_LEVELS.includes(this.level)?this.level:'facil';
-  const roster=entrants?RIVAL_ROSTER.filter(entry=>entrants.includes(entry.number)):RIVAL_ROSTER,playerBack=playerGridSlot(roster.length).back;this.entrants=entrants;
+  const field=this.roster,roster=entrants?field.filter(entry=>entrants.includes(entry.number)):field,playerBack=playerGridSlot(roster.length).back;this.entrants=entrants;
   const slots=[];roster.map((entry,i)=>({i,time:-levelRating(entry,level)+pick(-.18,.18)+(ace(entry)?1e3:0)})).sort((a,b)=>a.time-b.time).forEach((q,slot)=>slots[q.i]=slot);
-  // rosterIndex: the car's place in RIVAL_ROSTER (and among the visuals' cars), whatever the field.
+  // rosterIndex: the car's place in the roster (and among the visuals' cars), whatever the field.
   this.rivals=roster.map((entry,i)=>{
    const slot=slots[i],style=ace(entry)?ACE_STYLE:styleForLevel(entry,level),progress=playerBack-gridSlot(slot).back;
    const L=this.data.meta.reconstructed_xy_m,s=((startS+progress)%L+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;
    const car=new TestCar(this.data);car.reset(index);car.awaitingStart=grid;car.engineScale=style.engineScale;if(style.heavy)car.contactMass=style.heavy;
    const lane=gridSlot(slot).lane;car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);
    const rating=levelRating(entry,level);
-   const rival={car,entry,rosterIndex:RIVAL_ROSTER.indexOf(entry),style,level,progress,lastS:car.surface.s,finished:false,finishTime:null,stun:0,
+   const rival={car,entry,rosterIndex:field.indexOf(entry),style,level,progress,lastS:car.surface.s,finished:false,finishTime:null,stun:0,
     // Personal line: share of the road used, apex timing and a slow wander of a few decimetres.
     lineUse:clamp(style.lineUse*pick(.95,1.04),.8,1),apex:style.apex+Math.round(pick(-1.4,1.4)),
     wander:{amp:pick(.08,.3)*(1.4-rating),rate:pick(.06,.14)*2*Math.PI,phase:pick(0,2*Math.PI)},

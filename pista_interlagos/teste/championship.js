@@ -1,5 +1,5 @@
 import {CIRCUITS} from './circuits.js';
-import {RIVAL_ROSTER,PLAYER_ENTRY} from './race-roster.js';
+import {RIVAL_ROSTER,PLAYER_ENTRY,carEntry} from './race-roster.js';
 
 // Campeonato Old Stock do jogo: todas as pistas, uma corrida em cada, pontos pela posição de
 // chegada e uma classificação geral com os 15 carros do grid. Each game mode (Modo Corrida,
@@ -23,15 +23,21 @@ function validState(s,mode){
 }
 
 // Overall standings: points, then wins, podiums, best finish and the last round's order.
+const PLAYER_KEY=Symbol('player');
 export function championshipStandings(state){
  const drivers=new Map(),add=(number,name,shortName)=>{if(!drivers.has(number))drivers.set(number,{number,name,shortName:shortName??name,points:0,wins:0,podiums:0,best:Infinity,rounds:[],player:false});return drivers.get(number);};
  for(const entry of RIVAL_ROSTER)add(entry.number,entry.name,entry.shortName);
- const player=add(PLAYER_ENTRY.number,state?.pilot||PLAYER_ENTRY.name,state?.pilot||PLAYER_ENTRY.shortName);player.player=true;
+ // The player's rows are the player's whatever the car (Modo Corrida's car screen: another team's
+ // number), shown with the car of the latest round. The Opala 99 that Stevan Gaipo then races, and the
+ // driver whose car the player took, keep rows of their own.
+ const player={number:PLAYER_ENTRY.number,name:state?.pilot||PLAYER_ENTRY.name,shortName:state?.pilot||PLAYER_ENTRY.shortName,points:0,wins:0,podiums:0,best:Infinity,rounds:[],player:true};drivers.set(PLAYER_KEY,player);
  for(const [k,round] of (state?.results??[]).entries())for(const r of round.rows){
   // A retirement (dnf) or disqualification (dsq) scores nothing and counts as no finish.
-  const d=add(r.number,r.name,r.name),out=r.dnf||r.dsq;d.points+=r.points;if(!out&&r.position===1)d.wins++;if(!out&&r.position<=3)d.podiums++;if(!out)d.best=Math.min(d.best,r.position);d.rounds[k]={position:r.position,points:r.points,dnf:!!r.dnf,dsq:!!r.dsq};
+  const d=r.player?Object.assign(player,{number:r.number}):add(r.number,r.name,carEntry(r.number)?.shortName),out=r.dnf||r.dsq;d.points+=r.points;if(!out&&r.position===1)d.wins++;if(!out&&r.position<=3)d.podiums++;if(!out)d.best=Math.min(d.best,r.position);d.rounds[k]={position:r.position,points:r.points,dnf:!!r.dnf,dsq:!!r.dsq};
  }
- const last=d=>d.rounds.at(-1)?.position??Infinity;
+ // The last round raced in the championship; a driver who sat it out (the one whose car the player
+ // took, or Stevan's 99 when the player raced it) comes after those who raced it.
+ const n=(state?.results??[]).length-1,last=d=>d.rounds[n]?.position??Infinity;
  return [...drivers.values()].sort((a,b)=>b.points-a.points||b.wins-a.wins||b.podiums-a.podiums||a.best-b.best||last(a)-last(b)||a.number.localeCompare(b.number,'pt-BR',{numeric:true}))
   .map((d,i)=>({...d,position:i+1}));
 }

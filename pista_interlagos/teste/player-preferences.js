@@ -1,5 +1,5 @@
 import {circuitId} from './circuits.js';
-import {DUEL_DEFAULT,rivalEntry,AI_LEVELS} from './race-roster.js';
+import {DUEL_DEFAULT,carEntry,AI_LEVELS,PLAYER_CAR_DEFAULT} from './race-roster.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
 // 'tv' films from the trackside towers and verge cameras (tv-camera.js).
 // Race length in laps, for the free race and the story alike, on every circuit.
@@ -27,8 +27,10 @@ export function normalizePreferences(value){
   classicInterior:typeof source.classicInterior==='boolean'?source.classicInterior:false,
   // Film look (cinematic.js): 'auto' is the full look on computers and the light one on phones.
   cinematic:['auto','full','lite','off'].includes(source.cinematic)?source.cinematic:'auto',
-  // The rival of the 1x1 (Modo Corrida's track screen), by car number.
-  duelRival:typeof source.duelRival==='string'&&rivalEntry(source.duelRival)?source.duelRival:DUEL_DEFAULT,
+  // The rival of the 1x1 (Modo Corrida's track screen), by car number (the 99 when the player races another car).
+  duelRival:typeof source.duelRival==='string'&&carEntry(source.duelRival)?source.duelRival:DUEL_DEFAULT,
+  // The car the player races in Modo Corrida (the car screen, car-select.js), by number; the story is the 99's.
+  car:typeof source.car==='string'&&carEntry(source.car)?source.car:PLAYER_CAR_DEFAULT,
   // Laps of every race (Modo Corrida and Modo História): 3 unless the player picks more or fewer.
   laps:Number.isInteger(source.laps)&&source.laps>=LAPS.min&&source.laps<=LAPS.max?source.laps:LAPS.standard
  };

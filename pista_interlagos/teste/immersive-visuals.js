@@ -1,21 +1,42 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {FANS,strapPath} from './immersive-state.js';
-import {RIVAL_ROSTER} from './race-roster.js';
+import {RIVAL_ROSTER,OPALA_99_RIVAL} from './race-roster.js';
 import {createPeople,setPose,POSES,OUTFITS,Idler} from './pit-crew.js';
 import {curveloPitFrame,serviceSpot,garageBays,pitPoint} from './pit-lane.js';
 import {footState,stepOnFoot,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
 import {shutOpenings,CarOpenings,carSpot,SPOT_OPENING} from './car-openings.js';
-import {createRivalDriver,CABIN_DROP} from './rival-driver.js';
-import {createBrakeLights} from './brake-lights.js';
+import {createRivalDriver,CABIN_DROP,sharedDriverMaterials} from './rival-driver.js';
+import {createBrakeLights,sharedBrakeLights} from './brake-lights.js';
 import {podiumBanner,podiumPlate,podiumRibbon,signBoard} from './pit-textures.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
 const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
 // The 99's livery (by material): sponsors, logos, drivers' names (Branco: with the tail's 99), its numbers, the
 // hood, roof and trunk lid decals and the window stickers. The other cars carry none of it, only their own number.
-const LIVERY_99=/^(Adesivo|Decal_|Pilotos_99_parabrisa|Invent_parabrisa|Jesus_|Logo_frontal|Stickers_vigia_|Branco$)/;
+export const LIVERY_99=/^(Adesivo|Decal_|Pilotos_99_parabrisa|Invent_parabrisa|Jesus_|Logo_frontal|Stickers_vigia_|Branco$)/;
+// A team's colours on the 99's model (rivalCar; the player's car, car-livery.js): the body paint takes
+// the team's colour (and finish), the side stripe its stripe; one clone per material, kept in cache.
+export const TEAM_PAINTS=Object.freeze(['Pintura_preta','Faixa_amarela']);
+export const teamPaint=(cache,{color,stripe,finish=null})=>m=>{
+ if(!TEAM_PAINTS.includes(m.name))return m;
+ if(!cache.has(m)){const c=m.clone(),body=m.name==='Pintura_preta';c.color.setHex(body?color:stripe);if(body&&finish)Object.assign(c,finish);cache.set(m,c);}
+ return cache.get(m);
+};
+// The number plates in numberPlates' order: both rear quarters, the roof, the tail.
+export const PLATE_NAMES=Object.freeze(['Numero_lateral_','Numero_lateral_','Numero_teto_','Numero_traseiro_']);
+// The distant rivals' side profile (farProxy; the car screen's card icons, car-select.js): metres in the
+// car frame, nose to +x: the body, the side windows, the axles along the car and the wheels' radius.
+export const FAR_PROFILE=Object.freeze({
+ body:[[-2.35,.2],[2.42,.2],[2.46,.32],[2.46,.62],[2.35,.8],[.85,.9],[.05,1.4],[-.95,1.4],[-1.65,1],[-2.3,.97],[-2.39,.4]],
+ glass:[[.9,.92],[.08,1.37],[-.97,1.37],[-1.7,.99]],axles:[1.55,-1.117],wheel:.316});
 const up=new THREE.Vector3(0,1,0);
+// A car's number as the rivals carry it where the Opala 99 has its 99: white italic numerals outlined in
+// black, so they read on every paint (rivalCar; the player's car in another team's colours, car-livery.js).
+export function numberSticker(number){
+ const canvas=document.createElement('canvas');canvas.width=256;canvas.height=200;const ctx=canvas.getContext('2d');ctx.font='italic 900 170px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=16;ctx.strokeStyle='#101314';ctx.strokeText(number,128,108,228);ctx.fillStyle='#f4f3ee';ctx.fillText(number,128,108,228);
+ const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;return new THREE.MeshStandardMaterial({map,transparent:true,depthWrite:false,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+}
 // A sticker grid bent onto a car body: from center (car-local), w along right and h along up,
 // each vertex cast inward onto the body meshes (world space; the clone keeps the model's own
 // transform) and kept 6 mm off the paint, stored car-local.
@@ -167,9 +188,10 @@ export class ImmersiveVisuals {
  // A sponsor sticker on both doors of a rival (car 70's Old Stock ads): on the door skin below the
  // window (the V06 doors run from x -0.29 to 0.89 m, car frame), bent onto the body, with the
  // detailed model (hidden with it in the distance).
- doorStickers(obj,material,{x=.3,y=.47,w=.52,h=.35}={}){
-  const detail=obj.userData.detail;if(!detail)return [];
-  const body=[];detail.parent.updateMatrixWorld(true);detail.traverse(o=>{if(o.isMesh&&o.visible&&!o.name.startsWith('Numero_'))body.push(o);});
+ // body: the meshes to bend onto, for a car that is not a rival's clone (the player's, car-livery.js).
+ doorStickers(obj,material,{x=.3,y=.47,w=.52,h=.35,body=null}={}){
+  const detail=obj.userData.detail??(body?obj:null);if(!detail)return [];
+  detail.parent.updateMatrixWorld(true);if(!body){body=[];detail.traverse(o=>{if(o.isMesh&&o.visible&&!o.name.startsWith('Numero_'))body.push(o);});}
   return [-1,1].map(side=>{const sticker=new THREE.Mesh(bendOnBody(detail,body,new THREE.Vector3(x,y,side*.9),new THREE.Vector3(side,0,0),new THREE.Vector3(0,1,0),w,h),material);sticker.renderOrder=2;detail.add(sticker);return sticker;});
  }
  // The team's own Opala for the paddock: the player's model, livery and cage.
@@ -227,10 +249,10 @@ export class ImmersiveVisuals {
   const paint=new THREE.Color().setHex(color),parts=[];
   const add=(geometry,rgb)=>{let g=geometry.index?geometry.toNonIndexed():geometry;for(const key of Object.keys(g.attributes))if(key!=='position'&&key!=='normal')g.deleteAttribute(key);const c=new Float32Array(g.attributes.position.count*3);for(let i=0;i<c.length;i+=3){c[i]=rgb.r;c[i+1]=rgb.g;c[i+2]=rgb.b;}g.setAttribute('color',new THREE.BufferAttribute(c,3));parts.push(g);};
   const profile=(points,width,rgb)=>{const shape=new THREE.Shape(points.map(([x,y])=>new THREE.Vector2(x,y)));add(new THREE.ExtrudeGeometry(shape,{depth:width,bevelEnabled:false}).translate(0,0,-width/2),rgb);};
-  profile([[-2.35,.2],[2.42,.2],[2.46,.32],[2.46,.62],[2.35,.8],[.85,.9],[.05,1.4],[-.95,1.4],[-1.65,1],[-2.3,.97],[-2.39,.4]],1.84,paint);
-  profile([[.9,.92],[.08,1.37],[-.97,1.37],[-1.7,.99]],1.86,new THREE.Color(.02,.025,.03));
-  const tyre=new THREE.Color(.025,.025,.025),trim=new THREE.Color(.05,.05,.05);
-  for(const x of [1.55,-1.117])for(const z of [-.8,.8])add(new THREE.CylinderGeometry(.316,.316,.26,8).rotateX(Math.PI/2).translate(x,.316,z),tyre);
+  profile(FAR_PROFILE.body,1.84,paint);
+  profile(FAR_PROFILE.glass,1.86,new THREE.Color(.02,.025,.03));
+  const tyre=new THREE.Color(.025,.025,.025),trim=new THREE.Color(.05,.05,.05),r=FAR_PROFILE.wheel;
+  for(const x of FAR_PROFILE.axles)for(const z of [-.8,.8])add(new THREE.CylinderGeometry(r,r,.26,8).rotateX(Math.PI/2).translate(x,r,z),tyre);
   for(const z of [-.55,.55]){add(new THREE.BoxGeometry(.05,.08,.35).translate(-2.37,.95,z),new THREE.Color(.5,.02,.02));add(new THREE.BoxGeometry(.04,.1,.25).translate(2.45,.63,z*1.1),new THREE.Color(.8,.78,.6));}
   add(new THREE.BoxGeometry(.06,.14,1.8).translate(2.47,.42,0),trim);add(new THREE.BoxGeometry(.06,.14,1.8).translate(-2.41,.45,0),trim);
   const geometry=mergeGeometries(parts,false);parts.forEach(g=>g.dispose());
@@ -243,10 +265,34 @@ export class ImmersiveVisuals {
  detailLevel(obj){const u=obj.userData;if(!u.far)return;const cam=this.viewCamera;
   const far=cam?obj.position.distanceTo(cam.position)*Math.tan(cam.fov*Math.PI/360)/Math.tan(29*Math.PI/180)>40:obj.position.distanceToSquared(this.carRoot.position)>40*40;
   u.far.visible=far;u.detail.visible=!far;}
+ // Modo Corrida's car selection (race-roster.js fieldRoster): while the player races the car `number`,
+ // its place among the rivals' models is the Opala 99's, driven, in its own livery (built on first use,
+ // from the template as loaded: main.js paints the player's car only after). '99' puts them all back
+ // and hides it: the story's update() only shows or hides the cars in this.rivals. A new model (the
+ // 99's other paint, main.js setLivery) builds it again.
+ seatOpala99(template,number){
+  this.rosterCars??=[...this.rivals];this.rivals.splice(0,this.rivals.length,...this.rosterCars);if(this.opala99)this.opala99.visible=false;
+  const i=RIVAL_ROSTER.findIndex(e=>e.number===number);if(i<0)return null;
+  if(this.opala99&&this.opala99Template!==template){this.opala99.removeFromParent();this.disposeCar(this.opala99,this.opala99Template);this.opala99=null;}
+  if(!this.opala99){const e=OPALA_99_RIVAL;this.opala99=this.rivalCar(template,e.color,e.number,e.shortName,{driven:true,stripe:e.stripe,livery99:true});this.opala99.name='Opala_99_rival';this.opala99.userData.entry=e;this.opala99Template=template;this.root.add(this.opala99);}
+  this.rivals[i]=this.opala99;return this.opala99;
+ }
+ // Frees what rivalCar made for one car (merged bodywork, distant model, interior, driver, labels,
+ // stickers), keeping what it shares: the template's geometries and materials and its number plates,
+ // the cabin structure of the player's car, this.materials, the brake lights', the drivers' suits and
+ // three.js's sprite quad.
+ disposeCar(obj,template){
+  const keep=new Set(),hold=root=>root?.traverse(o=>{if(o.geometry)keep.add(o.geometry);for(const m of [o.material??[]].flat())keep.add(m);});
+  hold(template);hold(this.carRoot.getObjectByName('Estrutura_cabine_V04'));
+  for(const r of [...(this.plateShapes?.get(template)??[]),...Object.values(this.materials),...sharedBrakeLights(),...sharedDriverMaterials()])keep.add(r);
+  obj.traverse(o=>{if(o.geometry&&!o.isSprite&&!keep.has(o.geometry))o.geometry.dispose();for(const m of [o.material??[]].flat())if(!keep.has(m)){if(m.map?.isCanvasTexture)m.map.dispose();m.dispose();}});
+ }
  // driven: a rival out on track, with its driver (rival-driver.js) in the team's suit and helmet;
  // the cars parked at the garages before the race stand empty. color paints the body, stripe the
- // side stripe (race-roster.js), finish overrides the paint's metalness/roughness (gold).
- rivalCar(template,color,number,name='',{driven=false,stripe=0xe4e4d5,finish=null}={}){
+ // side stripe (race-roster.js), finish overrides the paint's metalness/roughness (gold). livery99: the
+ // Opala 99 as loaded, its paint, sponsors and numbers (raced by Stevan Gaipo when the player takes
+ // another car; color then only tints the distant model and the driver's suit).
+ rivalCar(template,color,number,name='',{driven=false,stripe=0xe4e4d5,finish=null,livery99=false}={}){
   if(!template)return this.car(color,number);
   const root=template.clone(true),materials=new Map(),pivots=[];
   const structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
@@ -257,8 +303,9 @@ export class ImmersiveVisuals {
     const mats=Array.isArray(o.material)?o.material:[o.material];
     o.castShadow=mats.some(m=>!m.transparent||m.opacity>=.95);o.receiveShadow=true;
     // No sponsor, name or number of the 99 on the other cars: their own number replaces it.
+    if(livery99)return;
     if(mats.some(m=>LIVERY_99.test(m.name))){o.visible=false;return;}
-    const recolor=m=>{if(!['Pintura_preta','Faixa_amarela'].includes(m.name))return m;if(!materials.has(m)){const c=m.clone(),body=m.name==='Pintura_preta';c.color.setHex(body?color:stripe);if(body&&finish)Object.assign(c,finish);materials.set(m,c);}return materials.get(m);};
+    const recolor=teamPaint(materials,{color,stripe,finish});
     o.material=Array.isArray(o.material)?mats.map(recolor):recolor(o.material);
    }
    if(!o.isMesh&&o.name.startsWith('Roda_')&&o.name.includes('PIVO'))pivots.push({obj:o,base:o.quaternion.clone()});
@@ -276,11 +323,11 @@ export class ImmersiveVisuals {
   const lamps=[createBrakeLights(),createBrakeLights({far:true})];detail.add(lamps[0]);far.add(lamps[1]);root.userData.brake=v=>{for(const l of lamps)l.userData.set(v);};
   const label=name?this.tag(root,name,[0,2.08,0],2.7,.30,'#fff','#172a2ddb'):null;
   // The rival's own number where the Opala 99 carries its 99 (those stickers are
-  // hidden): big on both rear quarters and on the roof, small on the tail. White
-  // italic numerals outlined in black, so they read on every paint; one texture each.
-  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=200;const ctx=canvas.getContext('2d');ctx.font='italic 900 170px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=16;ctx.strokeStyle='#101314';ctx.strokeText(number,128,108,228);ctx.fillStyle='#f4f3ee';ctx.fillText(number,128,108,228);
-  const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;const sticker=new THREE.MeshStandardMaterial({map,transparent:true,depthWrite:false,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
-  this.numberPlates(template,detail).forEach((g,i)=>{const decal=new THREE.Mesh(g,sticker);decal.name=['Numero_lateral_','Numero_lateral_','Numero_teto_','Numero_traseiro_'][i]+number;decal.renderOrder=2;detail.add(decal);});
+  // hidden): big on both rear quarters and on the roof, small on the tail; one texture each.
+  // The Opala 99 itself (livery99) keeps its own.
+  if(livery99){root.userData.wheels=pivots;root.userData.nameLabel=label;return root;}
+  const sticker=numberSticker(number);
+  this.numberPlates(template,detail).forEach((g,i)=>{const decal=new THREE.Mesh(g,sticker);decal.name=PLATE_NAMES[i]+number;decal.renderOrder=2;detail.add(decal);});
   root.userData.wheels=pivots;root.userData.nameLabel=label;return root;
  }
  // Flatbed tow truck ("guincho plataforma"): white cab with an orange stripe, aluminium bed,
@@ -494,3 +541,6 @@ export class ImmersiveVisuals {
   view?.addEventListener('wheel',e=>{if(active())this.podiumView.distance=Math.max(1.2,Math.min(45,this.podiumView.distance*(e.deltaY>0?1.15:1/1.15)));},{passive:true});
  }
 }
+// rivalCar and its helpers (light interior, number plates, distant model) without a circuit: the car
+// screen's studio (car-select.js). carRoot lends the cabin structure, as on track.
+export function carWorkshop(carRoot){return Object.assign(Object.create(ImmersiveVisuals.prototype),{carRoot,materials:{}});}

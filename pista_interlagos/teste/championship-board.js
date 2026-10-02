@@ -51,7 +51,7 @@ export class ChampionshipDialog {
   const player=standings.find(d=>d.player);
   $('championshipDialogMode').textContent=`CAMPEONATO OLD STOCK · ${MODE_NAME[championship.mode]??MODE_NAME.corrida}`;
   $('championshipBanner').textContent=championship.finished
-   ?(player.position===1?`CAMPEÃO! ${player.shortName} e o Opala 99 levam o título com ${pointsText(player.points)}.`:`Campeão: #${standings[0].number} ${standings[0].name} (${standings[0].points} pts). Você fechou em ${ordinal(player.position)}.`)
+   ?(player.position===1?`CAMPEÃO! ${player.shortName} e o Opala ${player.number} levam o título com ${pointsText(player.points)}.`:`Campeão: #${standings[0].number} ${standings[0].name} (${standings[0].points} pts). Você fechou em ${ordinal(player.position)}.`)
    :`Depois de ${championship.round} de ${championship.total} etapas · próxima: ${CIRCUITS[championship.nextCircuit]?.name??'—'}`;
   $('championshipBanner').classList.toggle('champion',championship.finished&&player.position===1);
   const head=this.dialog.querySelector('thead');head.replaceChildren(el('tr',{},el('th',{textContent:'POS'}),el('th',{textContent:'Nº'}),el('th',{textContent:'PILOTO / DUPLA'}),

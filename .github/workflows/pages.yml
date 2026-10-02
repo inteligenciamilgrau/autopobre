@@ -5,7 +5,8 @@ name: Publicar Auto-Pobre Racing
 # The main link shows `versao` (the announced release, apr-2.0), /apr_v1/ keeps `versao_v1`
 # (the first release, apr-1.0) online for history, and /dev/ shows `versao_dev` (the one in
 # progress, main). Each is built from its own checkout, tested and packed into one Pages
-# site. An empty versao_v1 or versao_dev leaves that address out.
+# site. An empty versao_v1 or versao_dev leaves that address out. The multiplayer test room
+# is published only under /dev/; the run fails if the main link or /apr_v1/ would carry it.
 on:
   workflow_dispatch:
     inputs:
@@ -83,16 +84,34 @@ jobs:
             done
             echo "::endgroup::"
           done
+      # The multiplayer test room goes only to /dev/: the main link and /apr_v1/ are built without it.
       - name: Gerar somente os arquivos publicos (/apr_v1/ e /dev/ em subpastas)
         run: |
           (cd principal && python pista_interlagos/scripts/preparar_publicacao.py)
+          [ ! -d apr_v1 ] || (cd apr_v1 && python pista_interlagos/scripts/preparar_publicacao.py)
+          [ ! -d dev ] || (cd dev && python pista_interlagos/scripts/preparar_publicacao.py --multiplayer)
           mkdir site
           cp -a principal/dist/. site/
           for pasta in apr_v1 dev; do
             [ -d "$pasta" ] || continue
-            (cd "$pasta" && python pista_interlagos/scripts/preparar_publicacao.py)
             mkdir "site/$pasta"
             cp -a "$pasta/dist/." "site/$pasta/"
+          done
+      # A commit from before the build knew --multiplayer always packs it: that one cannot go to these addresses.
+      - name: Conferir que o multiplayer ficou so em /dev/
+        run: |
+          for pasta in principal apr_v1; do
+            [ -d "$pasta" ] || continue
+            for arquivo in multiplayer.js multiplayer.css net-room.js net-cars.js net-link.js; do
+              if [ -e "$pasta/dist/$arquivo" ]; then
+                echo "::error::A versao de $pasta tem o multiplayer ($arquivo); ele so pode ir para /dev/."
+                exit 1
+              fi
+            done
+            if grep -rqF 'sala.inteligenciamilgrau.com.br' --include='*.js' --include='*.html' "$pasta/dist"; then
+              echo "::error::A versao de $pasta conecta ao servidor das salas; o multiplayer so pode ir para /dev/."
+              exit 1
+            fi
           done
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0

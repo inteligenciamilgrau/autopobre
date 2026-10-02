@@ -1,0 +1,51 @@
+/* Car screen (Modo Corrida, before the track screen): the chosen Opala turning on the left, drawn by
+   the game's canvas behind this screen's open middle (car-select.js), and the grid's cars on the right. */
+/* Only the canvas (the studio) and this screen show; the race's HUD and tools hide meanwhile. */
+body.cars-open>:not(#view):not(#cars):not(#rotatePhone):not(dialog){visibility:hidden!important}
+#cars{z-index:30;align-items:stretch;justify-content:center;padding:22px 4vw;overflow:auto;backdrop-filter:none;
+ background:radial-gradient(ellipse at 34% 58%,#20403a 0,#10231f 48%,#060d0c 100%)}
+/* With the studio drawn, only the edges darken (the head and the cards keep their own backgrounds). */
+#cars.live{background:linear-gradient(180deg,#060d0cb3 0,transparent 16%),linear-gradient(90deg,transparent 0,transparent 55%,#060d0ca6 75%)}
+.cars-shell{width:min(1240px,100%);display:flex;flex-direction:column;gap:14px;margin:auto 0;min-height:min(640px,100%)}
+#carsPilot{margin:0;font-size:12px;color:#c9d3c4;font-weight:700}
+.cars-body{flex:1;display:grid;grid-template-columns:minmax(0,1.3fr) minmax(330px,1fr);gap:22px;align-items:stretch}
+.car-stage{position:relative;min-height:360px;border-radius:12px;cursor:grab;touch-action:none;user-select:none}
+.car-stage.dragging{cursor:grabbing}
+.car-stage-status{position:absolute;inset:0;display:grid;place-items:center;margin:0;font-size:13px;font-weight:700;color:#c9d3c4;letter-spacing:.04em}
+.car-stage-status[hidden]{display:none}
+.car-plate{position:absolute;left:0;right:0;bottom:0;display:flex;align-items:center;gap:14px;padding:12px 14px;border-radius:0 0 12px 12px;background:linear-gradient(0deg,#060d0cdd,#060d0c00)}
+#carNumber{flex-shrink:0;min-width:74px;padding:6px 10px;border-radius:7px;text-align:center;font-size:30px;font-style:italic;font-weight:900;line-height:1;color:#f4f3ee;
+ background:linear-gradient(180deg,var(--body,#17191b) 0 58%,var(--stripe,#f0cd1f) 58% 72%,var(--body,#17191b) 72%);border:1px solid #ffffff40;
+ text-shadow:-2px 0 #101314,2px 0 #101314,0 -2px #101314,0 2px #101314,0 3px 8px #000a}
+.car-plate h3{margin:0;font-size:clamp(17px,2vw,23px);font-weight:900;color:#fff6dc}
+.car-plate p{margin:3px 0 0;font-size:12px;line-height:1.45;color:#d3ddd0;max-width:560px}
+.car-hint{position:absolute;top:10px;right:12px;font-size:10px;letter-spacing:.1em;text-transform:uppercase;color:#b7c4bacc;pointer-events:none}
+.cars-side{display:flex;flex-direction:column;gap:10px;padding:14px;border-radius:12px;background:#0b1a18e8;border:1px solid #88978c40}
+.car-cards{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:8px}
+.car-cards button{display:flex;flex-direction:column;align-items:center;gap:3px;min-width:0;margin:0;padding:8px 6px 7px;border:1px solid #88978c45;border-radius:8px;
+ background:linear-gradient(160deg,#16332de8,#0e211ee8);color:#dce6d7;cursor:pointer;white-space:normal}
+.car-cards button:hover{border-color:#d9b93c99;background:linear-gradient(160deg,#1c3c35ee,#11271fe8)}
+.car-cards button[aria-checked=true]{border-color:#f4ce39;background:linear-gradient(160deg,#2a4a3cf2,#17302af0);box-shadow:inset 0 -3px #f4ce39,0 8px 24px #0006}
+.car-cards button:focus-visible{outline:2px solid #f4ce39;outline-offset:2px}
+.car-cards svg{width:100%;max-width:120px;height:auto;aspect-ratio:100/34}
+.car-cards span{max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;font-size:11px;font-weight:700;color:#e6ecdf}
+.car-cards button[aria-checked=true] span{color:#f4d055}
+.car-note{margin:0;font-size:11px;line-height:1.45;color:#aebdb2}
+#cars .primary{margin:0;padding:14px 16px;border-radius:8px;border:0;background:#f4ce39;color:#171c15;font-size:15px;font-weight:900;text-align:left}
+#cars .primary:hover{background:#ffe574}
+@media(max-width:900px){.cars-body{grid-template-columns:minmax(0,1fr) minmax(280px,1fr);gap:14px}.car-cards{gap:6px}.car-cards button{padding:6px 4px}}
+/* Phones in landscape: the whole choice on one screen. */
+@media(max-height:520px){
+ #cars{padding:8px max(14px,env(safe-area-inset-right)) 8px max(14px,env(safe-area-inset-left))}
+ .cars-shell{gap:6px;min-height:100%}
+ .cars-body{grid-template-columns:minmax(0,1fr) minmax(300px,1.15fr);gap:10px}
+ .car-stage{min-height:0}
+ .car-plate{padding:6px 8px;gap:8px}#carNumber{min-width:50px;font-size:19px;padding:4px 6px}.car-plate h3{font-size:13px}.car-plate p{display:none}
+ .car-hint{display:none}
+ .cars-side{gap:6px;padding:8px}.cars-side>.tracks-kicker,.car-note{display:none}
+ .car-cards{grid-template-columns:repeat(5,minmax(0,1fr));gap:4px}
+ .car-cards button{padding:4px 2px 3px;gap:1px}.car-cards span{font-size:8px}
+ #cars .primary{padding:8px 10px;font-size:12px;min-height:40px}
+ #carsPilot{font-size:10px}
+}
+@media(max-width:700px) and (orientation:portrait){.cars-body{grid-template-columns:1fr}.car-stage{min-height:38vh}.cars-head{grid-template-columns:1fr;gap:6px}}

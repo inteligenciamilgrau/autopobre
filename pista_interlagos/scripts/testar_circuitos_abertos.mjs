@@ -52,6 +52,16 @@ for(const id of ['cascavel','piracicaba']){
  // Box 99 stands on the pit lane, clear of the track asphalt.
  const s99=car.sample(...(()=>{const p=data.pit.samples.find(r=>r[pc.s]>=data.pit.box99.s);return [p[pc.x]+p[pc.lx]*(data.pit.box99.front+8),p[pc.y]+p[pc.ly]*(data.pit.box99.front+8)];})());
  assert(Math.abs(s99.d)>s99.width/2+3,'Box 99 is off the racing surface');
+ // The team stand (registration, story mode) is built on the pit wall under it, from its nearest
+ // point on any stretch: a 0.6 m wall (Cascavel's rule where lane and track are far apart) left
+ // the stand and its sign behind the fence, out of reach. The wall there must hold its 2.2 m
+ // floor and still keep its track face off the asphalt (ECPA's wall runs 0.6 m from it by design).
+ {const p=data.pit.samples.find(r=>r[pc.s]>=data.pit.box99.s),near=data.pit.walls.filter(w=>w.name==='Muro_boxes').flatMap(w=>w.points).map(q=>({q,dist:Math.hypot(q[0]-p[pc.x],q[1]-p[pc.y])})).sort((u,v)=>u.dist-v.dist);
+  assert(near[0].dist<12,`${id}: pit wall by Box 99 (${near[0].dist.toFixed(1)} m)`);
+  for(const {q} of near.slice(0,3))assert(q[3]>=3.2,`${id}: pit wall under the team stand ${q[3]} m thick`);
+  const q=near[0].q,lat=(q[0]-p[pc.x])*p[pc.lx]+(q[1]-p[pc.y])*p[pc.ly]-q[3]/2,face=[p[pc.x]+p[pc.lx]*lat,p[pc.y]+p[pc.ly]*lat];
+  car.index=car.nearest(...face,true).i;const edge=car.sample(...face);assert(Math.abs(edge.d)>edge.width/2+.5,`${id}: stand wall ${(Math.abs(edge.d)-edge.width/2).toFixed(1)} m from the asphalt`);
+  out.standWall={thick:+near[0].q[3].toFixed(1),clear:+(Math.abs(edge.d)-edge.width/2).toFixed(1)};}
  out.pit={length:Math.round(data.pit.length_m),entry:Math.round(data.pit.entry_main_s),exit:Math.round(data.pit.exit_main_s),garages:data.pit.garages,slots:route.slots.length};
  // No guardrail across the pit side while the lane runs along the track.
  const railLeft=guardrailSections(data,1);

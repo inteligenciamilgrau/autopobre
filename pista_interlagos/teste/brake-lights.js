@@ -27,6 +27,8 @@ function parts(){
   haloMaterial:new THREE.MeshBasicMaterial({name:'Luz_de_freio_halo',map:glow,color:new THREE.Color().setRGB(1.6,.06,.03),transparent:true,depthWrite:false,blending:THREE.AdditiveBlending})};
  return shared;
 }
+// The geometries and materials every car's lamps share (kept when one car is thrown away).
+export const sharedBrakeLights=()=>shared?[shared.lens,shared.halo,shared.lensMaterial,shared.haloMaterial]:[];
 // A car's brake lights; far: placed for the distant rival's simple body. set(brake) shows them.
 export function createBrakeLights({far=false}={}){
  const {lens,halo,lensMaterial,haloMaterial}=parts(),group=new THREE.Group();group.name='Luz_de_freio';

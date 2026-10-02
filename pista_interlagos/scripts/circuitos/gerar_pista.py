@@ -30,6 +30,7 @@ from scipy.optimize import brentq
 from scipy.spatial import cKDTree
 
 from config import ASSETS, CIRCUITOS, DADOS, pasta_fontes
+from muro_barraca import FOLGA_PISTA_M, LARGURA_M, largura_muro, trecho_cheio
 
 PASSO = 4.0          # grade do terreno (m), como Interlagos
 MARGEM = 460.0       # terreno alem da caixa da pista e do pit (m)
@@ -596,6 +597,14 @@ def completar_pit(pxy, pw_lo, pw_hi, pz, pbank, main_s, gap, garagens, superfici
     folga = np.maximum(gap, 0)
     recuo = .6 + .9 * ramp(folga, 6, 9)
     esp = np.where(folga <= 6, np.maximum(folga - 1.2, .6), np.clip(4.8 - (folga - 6) * 1.4, .6, 4.8))
+    # Sob a banca do Box 99 o muro alarga para o lado da pista principal (muro_barraca.py): onde a
+    # folga e grande ele ficaria a 0,6 m e a banca iria parar do outro lado do alambrado. Sem
+    # passar da face da pista a 0,6 m do asfalto: onde a folga e curta a banca fica mais estreita.
+    esp = largura_muro(ps, s99, esp, folga - recuo - FOLGA_PISTA_M)
+    cheio = trecho_cheio(ps, s99)
+    if cheio.any() and esp[cheio].min() < LARGURA_M - 1e-3:
+        print(f'AVISO: folga de {folga[cheio].min():.1f} m entre os boxes e a pista no Box 99: o muro da banca '
+              f'fica com {esp[cheio].min():.1f} m (a banca pede {LARGURA_M:.1f} m) para nao invadir a pista')
     muro_off = lane_lo - recuo - esp / 2
     walls = []
     for a, b in muro_trechos:

@@ -17,7 +17,9 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v=20260923-capotagem';
-import {RIVAL_ROSTER,PLAYER_ENTRY,ACE_NUMBER,playerGridSlot,rivalEntry} from './race-roster.js';
+import {PLAYER_ENTRY,ACE_NUMBER,playerGridSlot,carEntry,fieldRoster,duelRivalFor,cssColor} from './race-roster.js';
+import {CarSelect} from './car-select.js';
+import {CarLivery} from './car-livery.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260927-omp-retrovisores';
 import {CarOpenings} from './car-openings.js';
@@ -77,9 +79,17 @@ $('carDamage').checked=preferences.values.damage;
 $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked});pitstop?.setDamage(preferences.values.damage);};
 // The grid list in the race settings; Koyzinho is marked while he races as the ace. Fácil shows the
 // standings pace, the harder levels the pilots' table.
+// The player's car is the 99 or, in Modo Corrida, the car screen's choice, whose driver then sits out
+// and the 99 races in its seat (race-roster.js fieldRoster).
+// The car of the next race: Modo Corrida's choice; the story and a multiplayer room race the 99, so
+// they skip the car screen.
+const menuCar=()=>menuMode==='historia'||roomWanted?'99':preferences.values.car;
+const carScreen=()=>menuMode==='corrida'&&!roomWanted;
+// The settings' grid list: the field racing now or, between races, the next one. Rebuilt each time
+// the settings open (openSettings).
 function showRoster(){
- const roster=$('gridRoster');roster.replaceChildren();
- for(const entry of [...RIVAL_ROSTER,PLAYER_ENTRY]){const row=document.createElement('li');row.textContent=`#${entry.number} · ${entry.name}${entry.number==='99'?' · VOCÊ':entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':preferences.values.aiLevel==='facil'?` · Ritmo ${entry.level}/100`:` · Nível ${entry.skill}/10`}`;roster.append(row);}
+ const roster=$('gridRoster'),mine=sessionStarted?raceCar:menuCar(),you=mine==='99'?PLAYER_ENTRY:carEntry(mine);roster.replaceChildren();
+ for(const entry of [...fieldRoster(mine),you]){const row=document.createElement('li');row.textContent=entry===you&&mine!=='99'?`#${mine} · VOCÊ, no carro de ${you.name}`:`#${entry.number} · ${entry.name}${entry===you?' · VOCÊ':entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':preferences.values.aiLevel==='facil'?` · Ritmo ${entry.level}/100`:` · Nível ${entry.skill}/10`}`;roster.append(row);}
 }
 // Koyzinho Indestrutível: taken at the next start (RaceField.reset), like the race length.
 $('aceKoyzinho').checked=preferences.values.aceKoyzinho;
@@ -96,8 +106,9 @@ $('realisticWater').onchange=()=>{preferences.update({realisticWater:$('realisti
 // preference, taken at the next start, so a race under way keeps its own.
 for(const laps of [$('raceLaps'),$('tracksLaps')]){for(let n=LAPS.min;n<=LAPS.max;n++)laps.add(new Option(`${n} volta${n>1?'s':''}${n===LAPS.standard?' (padrão)':''}`,String(n)));laps.value=String(preferences.values.laps);
  laps.onchange=()=>{preferences.update({laps:Number(laps.value)});$('raceLaps').value=$('tracksLaps').value=String(preferences.values.laps);if(immersive)immersive.laps=preferences.values.laps;updateMenuLabels();};}
-// The 1x1's rival, on the track screen: any driver of the roster (labels in updateMenuLabels).
-{const pick=$('duelRival');for(const entry of RIVAL_ROSTER)pick.add(new Option(`#${entry.number} ${entry.shortName}`,entry.number));pick.value=preferences.values.duelRival;
+// The 1x1's rival, on the track screen: any driver of the field the chosen car races in (options and
+// labels in updateMenuLabels).
+{const pick=$('duelRival');
  pick.onchange=()=>{preferences.update({duelRival:pick.value});updateMenuLabels();};}
 $('classicInterior').checked=preferences.values.classicInterior;
 $('classicInterior').onchange=()=>{preferences.update({classicInterior:$('classicInterior').checked});if(ready)cabinVisibility();};
@@ -215,8 +226,13 @@ $('volume').oninput=e=>{carAudio.setVolume(Number(e.target.value)/100);audioCont
 $('mute').onclick=()=>{carAudio.toggleMute();carAudio.unlock();audioControls();};
 let sessionStarted=false,loading=false,loadedCircuit=null;
 // Multiplayer test room (multiplayer.js): loaded only for an address with #sala=NOME; no menu leads there.
-const roomWanted=new URLSearchParams(window.location.hash.slice(1)).has('sala');let multiplayer=null;
+// Only /dev/ publishes it: the main link's build (preparar_publicacao.py without --multiplayer) turns this off.
+const MULTIPLAYER=true;
+const roomWanted=MULTIPLAYER&&new URLSearchParams(window.location.hash.slice(1)).has('sala');let multiplayer=null;
 let pitstop,immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
+// The car raced now ('99', or Modo Corrida's choice), its paint on the player's model, and the track
+// branding's Old Stock ads that car 70 carries on its doors.
+let raceCar='99',oldStockMaterial=null,modelLoading=null;const carLivery=new CarLivery();
 // The story's grid countdown is shown from behind the car; the engine start before it
 // ('starting') is played in the cockpit (ImmersiveMode switches the view).
 const gridPreview=()=>immersive?.active&&immersive.state.phase==='grid';
@@ -258,7 +274,7 @@ async function setLivery(value){
  try{
  const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=06-pecas-separadas`);
  if(token!==loadToken)return;
- if(model)carBody.remove(model);model=gltf.scene;wheels=[];
+ carLivery.clear();if(model)carBody.remove(model);model=gltf.scene;wheels=[];
  // Meshes inside the shut body (engine bay, trunk, hinges: glTF extra "interno") cast no shadow.
  model.traverse(o=>{if(o.isMesh){o.castShadow=!o.userData.interno;o.receiveShadow=true;
   for(const m of Array.isArray(o.material)?o.material:[o.material]){if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
@@ -275,7 +291,7 @@ async function setLivery(value){
  model.updateMatrixWorld(true);const structuralParts=[];
  model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
  for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
- carBody.add(model,carStructure);sideMirrors.attach(model,carBody,cockpit.eye);cabinVisibility();activeLivery=value;status('');
+ carBody.add(model,carStructure);sideMirrors.attach(model,carBody,cockpit.eye);cabinVisibility();activeLivery=value;status('');if(sessionStarted&&immersive)paintCar();
  preferences.update({livery:value});if(ready)carAudio.effect('paint');
  }finally{
   if(token===loadToken){
@@ -286,8 +302,15 @@ async function setLivery(value){
   }
  }
 }
+// The Opala's model in the chosen paint: the car screen and the circuit load share one download.
+function ensureCarModel(){
+ if(model&&activeLivery===$('livery').value)return Promise.resolve();
+ return modelLoading??=setLivery($('livery').value).finally(()=>{modelLoading=null;});
+}
+// The 99's two paints (V): another team's car has only its own (the settings' Pintura then only
+// saves the choice, loaded when the next race in the 99, or the car screen, needs it).
 async function cycleLivery(){
- if(!ready||$('skinButton').disabled)return;
+ if(!ready||$('skinButton').disabled||raceCar!=='99')return;
  try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
@@ -303,7 +326,7 @@ function drawMap(){
  const ctx=$('map').getContext('2d'),w=260,h=300;ctx.clearRect(0,0,w,h);
  const xy=p=>projectMap(p[1],p[2]);
  ctx.beginPath();data.samples.forEach((p,i)=>{const [x,y]=xy(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.lineWidth=8;ctx.strokeStyle='#ffffff16';ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle='#b6c5b5';ctx.stroke();
- if(immersive&&(!immersive.active||['starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle='#'+r.entry.mark.toString(16).padStart(6,'0');ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
+ if(immersive&&(!immersive.active||['starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle=cssColor(r.entry.mark);ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
  if(pitstop){ctx.beginPath();let started=false;const nodes=data.samples.filter(p=>pitLane(data,p[0])).sort((a,b)=>pitLane(data,a[0]).u-pitLane(data,b[0]).u);for(const p of nodes){const d=pitLane(data,p[0]).offset,[x,y]=projectMap(p[1]-p[8]*d,p[2]+p[7]*d);if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y);}ctx.strokeStyle='#55e0db';ctx.lineWidth=2;ctx.stroke();const [px,py]=projectMap(pitstop.anchor.x,-pitstop.anchor.z);ctx.fillStyle='#114e43';ctx.fillRect(px-9,py-21,18,16);ctx.fillStyle='#fff5a1';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillText('P',px,py-9);}
  if(data.pit){const c=data.pit.columns,x=c.indexOf('x'),y=c.indexOf('y');ctx.beginPath();data.pit.samples.forEach((p,i)=>{const [px,py]=projectMap(p[x],p[y]);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.lineWidth=1.5;ctx.strokeStyle=car.surface.pit?'#55e0db':'#7fa7a0';ctx.stroke();}
  const [sx,sy]=xy(data.samples[0]);ctx.fillStyle='#ffffff';ctx.fillRect(sx-3,sy-3,6,6);
@@ -575,7 +598,7 @@ function introContext(){
  // Track centre line k metres ahead of the car, on the road surface.
  const center=k=>{const t=((s+k)%L+L)%L,i=Math.max(0,a.findIndex(q=>q[0]>=t)),p=a[i];probe.index=i;return new THREE.Vector3(p[1],probe.sample(p[1],p[2]).z,-p[2]);};
  const here=center(0),position=immersive.active?immersive.state.position:immersive.freePosition;
- return {car:carRoot.position.clone(),forward:forward.clone(),inward:here.sub(carRoot.position),center,pilot:immersive.pilotName||'Stevan',position,grid:immersive.fieldSize,laps:immersive.active?immersive.storyLaps:immersive.freeTotalLaps,practice:immersive.practice,duel:!immersive.active&&immersive.freeLineup?.length===1?rivalEntry(immersive.freeLineup[0]):null,
+ return {car:carRoot.position.clone(),number:raceCar,forward:forward.clone(),inward:here.sub(carRoot.position),center,pilot:immersive.pilotName||'Stevan',position,grid:immersive.fieldSize,laps:immersive.active?immersive.storyLaps:immersive.freeTotalLaps,practice:immersive.practice,duel:!immersive.active&&immersive.freeLineup?.length===1?carEntry(immersive.freeLineup[0]):null,
   circuit:circuit.name,venue:circuit.id==='interlagos'?'Autódromo José Carlos Pace':circuit.venue??circuit.label,weather:circuit.id==='interlagos'?'São Paulo · 16h40 · 27 °C · pista seca':circuit.weather??'Fim de tarde · 26 °C · pista seca',
   hero:immersive.visual?.hero?immersive.visual.hero.getWorldPosition(new THREE.Vector3()):carRoot.position.clone(),
   // People face their local +x.
@@ -626,7 +649,7 @@ function lapBanner(dt){
  bestBefore=car.best;
  if(lapShown>0){lapShown-=dt;if(lapShown<=0)banner.hidden=true;}
 }
-function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);multiplayer?.frame(dt);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);return;}
+function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);multiplayer?.frame(dt);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);if(renderer&&!sessionStarted&&!$('cars').classList.contains('hidden'))carSelect.render(renderer,dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(intro.active&&automatic)intro.stop();
  if(intro.active&&!immersive.active&&immersive.freeCountdown>0){immersive.freeCountdown=3;$('raceCountdown').hidden=true;}
@@ -719,13 +742,14 @@ function updateMenuLabels(){
  $('singleRace').querySelector('.mode-label').textContent=loading&&pendingMode==='single'?'Carregando circuito…':'Corrida única →';
  $('singleRaceDetail').textContent=`Só esta pista · ${laps} volta${laps>1?'s':''}${story?' · vaquinha, boxes e o sonho da Blazer':' contra 14 adversários'}`;
  // Modo Corrida's solo practice and 1x1 (the story's track screen hides them: pistas.css).
- const rival=rivalEntry(preferences.values.duelRival),colour=n=>`#${n.toString(16).padStart(6,'0')}`;
+ const myCar=menuCar(),rival=carEntry(duelRivalFor(myCar,preferences.values.duelRival));
  $('soloRace').querySelector('.mode-label').textContent=loading&&pendingMode==='solo'?'Carregando circuito…':'Treino solo →';
  $('duelRace').querySelector('.mode-label').textContent=loading&&pendingMode==='duel'?'Carregando circuito…':'Corrida 1x1 →';
  $('duelRaceDetail').textContent=`Você contra #${rival.number} ${rival.shortName} · ${laps} volta${laps>1?'s':''}`;
- $('duelSwatch').style.setProperty('--body',colour(rival.color));$('duelSwatch').style.setProperty('--stripe',colour(rival.stripe));
- for(const option of $('duelRival').options){const entry=rivalEntry(option.value);option.textContent=`#${entry.number} ${entry.shortName}${entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':''}`;}
- $('duelRival').value=rival.number;$('tracksLaps').value=String(laps);
+ $('duelSwatch').style.setProperty('--body',cssColor(rival.color));$('duelSwatch').style.setProperty('--stripe',cssColor(rival.stripe));
+ const pick=$('duelRival'),field=fieldRoster(myCar);if(pick.options.length!==field.length||field.some((e,i)=>pick.options[i].value!==e.number))pick.replaceChildren(...field.map(e=>new Option('',e.number)));
+ for(const option of pick.options){const entry=carEntry(option.value);option.textContent=`#${entry.number} ${entry.shortName}${entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':''}`;}
+ $('duelRival').value=rival.number;$('tracksLaps').value=String(laps);$('tracksBack').textContent=carScreen()?'← Carro':'← Início';
  if(loading&&pendingMode==='championship')$('championshipStart').textContent=`Etapa ${championshipFor().round+1}: carregando ${circuit.name}…`;
  $('settingsResume').hidden=!sessionStarted||(!immersive?.active&&immersive?.freeResultReady);$('settingsRestart').hidden=$('settingsResume').hidden;
  $('settingsBack').textContent=sessionStarted?'Sair para a escolha de pista →':screen==='tracks'?'Voltar à escolha de pista →':'Voltar ao início →';
@@ -738,7 +762,7 @@ function freeRaceTitle(){
  const lineup=immersive?.active?null:immersive?.freeLineup;
  if(!lineup)return 'CORRIDA ÚNICA';
  if(!lineup.length)return `TREINO SOLO · ${car.laps} VOLTA${car.laps===1?'':'S'}${car.best?` · MELHOR ${fmt(car.best)}`:''}`;
- return `1x1 CONTRA #${lineup[0]} ${rivalEntry(lineup[0])?.shortName.toUpperCase()??''}`;
+ return `1x1 CONTRA #${lineup[0]} ${carEntry(lineup[0])?.shortName.toUpperCase()??''}`;
 }
 function resumeRace(){if(!sessionStarted||(!immersive.active&&immersive.freeResultReady))return;$('settings').close();menu(false);}
 $('settingsResume').onclick=resumeRace;
@@ -758,21 +782,38 @@ function hold(on){
 $('pauseBadge').onclick=()=>hold(false);
 function menu(show){held=false;$('pauseBadge').hidden=true;if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());updateScreens();keys.clear();mobile?.clear();status('');}
 function updateScreens(){
- const tracks=paused&&!sessionStarted&&screen==='tracks';
- $('menu').classList.toggle('hidden',!paused||tracks);$('tracks').classList.toggle('hidden',!tracks);
- if(tracks)renderTracks();
+ const free=paused&&!sessionStarted,tracks=free&&screen==='tracks',cars=free&&screen==='cars';
+ $('menu').classList.toggle('hidden',!paused||tracks||cars);$('tracks').classList.toggle('hidden',!tracks);$('cars').classList.toggle('hidden',!cars);
+ // The car screen is the canvas's window: the race's HUD steps aside (carros.css).
+ document.body.classList.toggle('cars-open',cars);
+ if(tracks)renderTracks();if(cars)openCarScreen();
 }
-function showScreen(name){screen=name;updateScreens();updateMenuLabels();if(name==='tracks')$('singleRace').focus({preventScroll:true});}
+function showScreen(name){screen=name;updateScreens();updateMenuLabels();if(name==='tracks')$('singleRace').focus({preventScroll:true});if(name==='cars')$('carCards').querySelector('[aria-checked=true]')?.focus({preventScroll:true});}
+// Who races, as the track and car screens show it: the pilot and, in Modo Corrida, the car.
+const pilotLine=()=>[pilotPicker.profiles.selected&&`Piloto: ${pilotPicker.profiles.selected}`,menuMode==='corrida'&&`Opala #${menuCar()}`].filter(Boolean).join(' · ');
+// Modo Corrida's car screen (car-select.js): the studio needs the renderer and the car's model, both
+// kept for the race.
+const carSelect=new CarSelect({root:$('cars'),value:preferences.values.car,carRoot,
+ onPick:number=>{preferences.update({car:number});updateMenuLabels();if(ready)showRoster();},onNext:()=>showScreen('tracks'),onBack:()=>showScreen('opening')});
+function openCarScreen(){
+ $('carsPilot').textContent=pilotPicker.profiles.selected?`Piloto: ${pilotPicker.profiles.selected}`:'';if(model&&carSelect.studio.template===model&&activeLivery===$('livery').value)return;
+ // No WebGL: the screen says so and the choice still counts.
+ try{initializeRenderer();}catch(err){console.error(err);carSelect.failed();return;}
+ ensureCarModel().then(()=>{if(model&&carSelect.studio.template!==model)carSelect.setTemplate(model);}).catch(err=>{console.error(err);carSelect.failed();});
+}
+window.interlagosCarros={info:()=>({...carSelect.info(),raceCar,painted:carLivery.number,decals:carLivery.decals.length,hidden:carLivery.hidden.length,paint:carLivery.materials.find(m=>m.name==='Pintura_preta')?.color.getHex()??null,skin:!$('skinButton').hidden,touchSkin:!$('touchSkin').hidden,screen,livery:activeLivery,
+ // Stevan's Opala 99 built from the model as loaded now (null: not built on this circuit).
+ stevanCurrent:immersive?.visual?.opala99?immersive.visual.opala99Template===model:null})};
 // The track screen: the pilot, each circuit's best lap and the championship panel.
 function renderTracks(){
- const pilot=pilotPicker.profiles.selected||'';$('tracksPilot').textContent=pilot?`Piloto: ${pilot}`:'';
+ const pilot=pilotPicker.profiles.selected||'';$('tracksPilot').textContent=pilotLine();
  for(const slot of document.querySelectorAll('[data-best]')){
   const lap=trackRecords(pilotStorage(),slot.dataset.best,'normal',pilot,8).lap,mine=lap.find(r=>r.me);
   slot.textContent=mine?`Seu recorde · ${mine.time}`:lap[0]?`Recorde · ${lap[0].time}`:'';
  }
  renderChampionshipPanel($('tracks'),championshipFor());
 }
-const openSettings=setupSettings(()=>menu(true),returnToMainMenu);
+const openSettings=setupSettings(()=>{menu(true);showRoster();},returnToMainMenu);
 // Championship (championship.js): all circuits in turn, one per mode. championshipRace is the
 // round on track; storyRound, a Modo História round already scored that the judge can still
 // disqualify and whose next vaquinha is the next round.
@@ -794,7 +835,7 @@ document.addEventListener('keydown',e=>{
  if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape')openSettings();else if(e.code==='KeyP')hold(!held);else if(!paused){if(pitstop.coffee&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(!e.repeat&&pitstop.handleKey(e.code))e.preventDefault();}return;}
  if($('settings').open){if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}return;}
  // Without a race, Escape goes back from the track screen to the opening; P does nothing.
- if(!sessionStarted&&['Escape','KeyP'].includes(e.code)){if(e.code==='Escape'&&screen==='tracks'&&!loading)showScreen('opening');return;}
+ if(!sessionStarted&&['Escape','KeyP'].includes(e.code)){if(e.code==='Escape'&&screen!=='opening'&&!loading)showScreen(screen==='tracks'&&carScreen()?'cars':'opening');return;}
  if(['INPUT','SELECT'].includes(e.target.tagName)&&!['Escape','KeyP'].includes(e.code))return;
  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();if(e.code!=='Space')keys.add(e.code);if(e.repeat||!ready)return;
  if(!paused&&immersive?.handleKey(e.code)){e.preventDefault();return;}
@@ -831,11 +872,15 @@ async function beginRace(restart=false,tour=false,story=preferences.values.immer
  // A championship round races the championship's laps; everything else the chosen ones.
  if(tour)championshipRace=null;storyRound=null;raceResults.championship=null;
  immersive.laps=championshipRace?championshipRace.championship.laps:preferences.values.laps;
- immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[preferences.values.duelRival];
+ // The car: Modo Corrida's choice; the story, the recon lap and a multiplayer room race the 99.
+ raceCar=preferences.values.immersive||tour||roomWanted?'99':preferences.values.car;
+ immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[duelRivalFor(raceCar,preferences.values.duelRival)];
+ seatCar();
  document.querySelector('.session').childNodes[1].textContent=championshipRace?` CAMPEONATO · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total} `:immersive.lineup?.length===0?' TREINO SOLO ':immersive.lineup?` 1x1 · #${immersive.lineup[0]} `:' PISTA LIVRE ';
  pitstop?.reset();automatic=false;watched=0;
  if(preferences.values.immersive){immersive.start();}
  else{if(immersive.active)immersive.disable();reset();setCameraMode('chase');updateCar(1);updateCamera(1);}
+ paintCar();
  if(!immersive.active&&!tour)immersive.beginCountdown();
  sessionStarted=true;automatic=tour&&!immersive.active;menu(false);
 }
@@ -846,7 +891,7 @@ function returnToMainMenu(){
  if(!sessionStarted){updateMenuLabels();return;}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  pitstop?.reset();
- if(ready){immersive.disable();reset();}
+ if(ready){immersive.disable();reset();}carLivery.clear();
  sessionStarted=false;automatic=false;watched=0;championshipRace=storyRound=null;raceResults.root.hidden=true;screen='tracks';menu(true);showCircuitSelection();
 }
 // Scores the championship round when its race is over (once, before the result sheet shows):
@@ -882,11 +927,25 @@ function nextStoryRound(){
  if(championship.active)startChampionshipRound(championship.mode);else championshipDialog.open(championship);
 }
 // The opening picks the mode; the track screen then the circuit and a single race or the championship.
-function chooseMode(mode){if(sessionStarted||loading||!pilotPicker.commit())return;menuMode=mode;showScreen('tracks');}
+function chooseMode(mode){if(sessionStarted||loading||!pilotPicker.commit())return;menuMode=mode;showScreen(carScreen()?'cars':'tracks');}
+// The chosen car on track: the field with the 99 in its seat (RaceField's roster, the rivals' models)
+// and the player's result rows under its number; set before the grid. The model goes back to the 99
+// first, since the 99 that Stevan Gaipo races is cloned from it.
+function seatCar(){
+ carLivery.clear();const entry=raceCar==='99'?null:carEntry(raceCar);
+ immersive.field.roster=fieldRoster(raceCar);immersive.visual.seatOpala99(model,raceCar);
+ immersive.playerEntry=entry?{...entry,name:immersive.pilotName,shortName:immersive.pilotName}:undefined;
+}
+// Once the grid is set: the player's Opala in that car's colours (car-livery.js), the map's legend, and
+// the paint button only for the 99's two liveries.
+function paintCar(){
+ carLivery.apply(model,raceCar==='99'?null:carEntry(raceCar),immersive.visual,{doorAds:oldStockMaterial});
+ $('skinButton').hidden=$('touchSkin').hidden=raceCar!=='99';document.querySelector('.map-legend').childNodes[1].textContent=` ${raceCar} · VOCÊ `;
+}
 $('start').onclick=()=>chooseMode('corrida');
 $('storyStart').onclick=()=>chooseMode('historia');
 $('pilotName').addEventListener('keydown',e=>{if(e.key==='Enter'&&!$('start').disabled){e.preventDefault();$(menuMode==='historia'?'storyStart':'start').click();}});
-$('tracksBack').onclick=()=>{if(!loading)showScreen('opening');};
+$('tracksBack').onclick=()=>{if(!loading)showScreen(carScreen()?'cars':'opening');};
 $('singleRace').onclick=()=>{if(sessionStarted)return;championshipRace=null;pendingMode='single';beginRace(false,false,menuMode==='historia');};
 $('soloRace').onclick=()=>{if(sessionStarted)return;championshipRace=null;pendingMode='solo';beginRace(false,false,false);};
 $('duelRace').onclick=()=>{if(sessionStarted)return;championshipRace=null;pendingMode='duel';beginRace(false,false,false);};
@@ -898,7 +957,7 @@ $('championshipTableButton').onclick=()=>championshipDialog.open(championshipFor
 $('championshipReset').onclick=()=>{const b=$('championshipReset');if(b.dataset.armed){championshipFor().reset();delete b.dataset.armed;renderTracks();return;}b.dataset.armed='1';b.textContent='Apagar pontos? Clique de novo';setTimeout(()=>{delete b.dataset.armed;b.textContent='Recomeçar campeonato';},4000);};
 $('restartRace').onclick=()=>beginRace(true);
 $('settingsRestart').onclick=()=>{$('settings').close();beginRace(true);};
-$('tour').onclick=()=>{$('settings').close();beginRace(true,true,false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted)return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
+$('tour').onclick=()=>{$('settings').close();beginRace(true,true,false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted||raceCar!=='99')return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
 // Keep the car and audio session; release the previous circuit before loading another.
 function clearCircuit(){
  intro.stop();const retired=[];
@@ -963,7 +1022,7 @@ async function loadCircuit(){
   Object.assign(landscape.stats,{ground:groundFit.stats,stands:stands.stats,legacyStands});
  }
  scene.add(landscape.root);
- const crowd=createCrowd(standTops,{mobile:touchDevice});scene.add(crowd.root);landscape.stats.fans=crowd.count;if(!model||activeLivery!==$('livery').value)await setLivery($('livery').value);
+ const crowd=createCrowd(standTops,{mobile:touchDevice});scene.add(crowd.root);landscape.stats.fans=crowd.count;await ensureCarModel();
  const guardrails=createGuardrails(data);scene.add(guardrails.root);cameraObstacles.push(guardrails.rails);
  scene.add(createCurbs(data));
  // Surveyed pit lane: entry after the Cafe, garages, exit around the S do Senna.
@@ -981,6 +1040,7 @@ async function loadCircuit(){
  // The trees left standing are posts the Opala can hit.
  treeField=new TreeField(landscape.trunks(),{mobile:touchDevice});scene.add(treeField.points);car.posts=treeField;
  restBodyPose();
+ carLivery.clear();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
  // In a Modo História championship the story's own restarts lead to the next round (after this frame).
@@ -997,7 +1057,7 @@ async function loadCircuit(){
  landscape.setRealisticWater(preferences.values.realisticWater);
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');
  // Car 70's Old Stock ads sit on its doors, bent onto the body.
- const oldStockMaterial=new THREE.MeshStandardMaterial({map:branding.oldStock,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+ oldStockMaterial=new THREE.MeshStandardMaterial({map:branding.oldStock,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
  for(const decal of immersive.visual.doorStickers(kleber,oldStockMaterial))decal.name='OldStock_no_Opala70';
  showRoster();
  // Compile the new programs while the loading label is still shown, instead of

@@ -17,6 +17,8 @@ def main():
     if not (dist / 'index.html').is_file():
         raise SystemExit('Build the release first: python pista_interlagos/scripts/preparar_publicacao.py')
     report = {'checks': {}, 'browser_errors': []}
+    # The main link's build leaves the multiplayer out; a --multiplayer build is the /dev/ one.
+    multiplayer = (dist / 'multiplayer.js').is_file()
 
     def check(name, value):
         report['checks'][name] = bool(value)
@@ -29,7 +31,7 @@ def main():
             return translated
 
         def end_headers(self):
-            for name, value in security_headers((dist / 'index.html').read_text(encoding='utf-8')).items():
+            for name, value in security_headers((dist / 'index.html').read_text(encoding='utf-8'), multiplayer=multiplayer).items():
                 self.send_header(name, value)
             super().end_headers()
 
@@ -121,6 +123,12 @@ def main():
             check('normal_mode_returns', not page.evaluate('interlagos.immersiveInfo().active'))
             page.click('#menuButton')
             page.screenshot(path=str(ROOT / '.audit-local/security_release.png'))
+            if not multiplayer:
+                # A room address on the main link opens the plain game and asks for no multiplayer file.
+                page.goto(base + 'index.html#sala=verificacao', wait_until='networkidle')
+                page.wait_for_selector('#start:not([disabled])')
+                check('room_address_ignored_without_multiplayer', page.locator('#mpRoom').count() == 0
+                      and not any('/multiplayer.' in url or '/net-' in url for url in requests))
             check('no_external_network', all(url.startswith(base) or url.startswith('blob:') or url.startswith('data:') for url in requests))
             check('no_unexpected_browser_errors', not report['browser_errors'] and not console_errors)
             page.evaluate("()=>{const s=document.createElement('script');s.textContent='window.inlineInjectionRan=true';document.body.append(s)}")

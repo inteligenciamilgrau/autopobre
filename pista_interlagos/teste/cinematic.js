@@ -19,7 +19,9 @@ export const LOOK={
  shadowTint:[.978,1.0,1.028],highlightTint:[1.03,1.0,.955],
  vignette:.3,grain:.03,aberration:.0011,
  bloom:.075,bloomThreshold:1.05,bloomKnee:.7,
- // Ambient occlusion: radius in metres, strength and the distance it fades out.
+ // Ambient occlusion: radius in metres, strength and the distance it fades out. A surface
+ // drawn with alpha -1 (the door mirrors' glass) shows light from elsewhere and takes no
+ // occlusion; materials write 0..1 there (foliage and lake water their cut-out alpha).
  aoRadius:1.2,aoIntensity:2.2,aoBias:.2,aoFade:[70,160],
  // Aerial perspective: metres of clear air, density of the haze and how fast it thins with height.
  hazeDensity:.00032,hazeFalloff:.012,hazeStart:40,hazeColor:[.62,.69,.76],hazeSun:[1.0,.8,.58],
@@ -158,7 +160,7 @@ void main(){
   for(int j=0;j<2;j++)for(int i=0;i<2;i++){
    vec2 c=(base+vec2(float(i),float(j))+.5)/aoSize;vec2 s=texture2D(tAO,c).rg;
    float w=(i==0?1.0-f.x:f.x)*(j==0?1.0-f.y:f.y)*exp(-abs(s.g-z)/(.03*z+.05))+1e-4;ao+=s.r*w;wsum+=w;}
-  ao=ao/wsum;color*=mix(1.0,ao,aoStrength);
+  ao=mix(1.0,ao/wsum,clamp(1.0+texture2D(tColor,uv).a,0.0,1.0));color*=mix(1.0,ao,aoStrength);
   if(debugView>.5){gl_FragColor=vec4(vec3(ao),1.0);return;}
  }
  #endif

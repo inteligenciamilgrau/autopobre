@@ -21,6 +21,8 @@ let shared=null;
 const materials=()=>shared??=[
  new THREE.MeshStandardMaterial({name:'Piloto_rival_tecido',vertexColors:true,roughness:.86}),
  new THREE.MeshStandardMaterial({name:'Piloto_rival_capacete',vertexColors:true,roughness:.24,metalness:.08})];
+// Every driver's suit and helmet materials (kept when one car is thrown away).
+export const sharedDriverMaterials=()=>shared??[];
 const luminance=hex=>{const c=new THREE.Color(hex);return .2126*c.r+.7152*c.g+.0722*c.b;};
 // Helmet and visor for a team: three paint schemes and three visors, picked by the car number.
 export function rivalKit(color,number){

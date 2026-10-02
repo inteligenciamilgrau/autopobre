@@ -71,6 +71,7 @@ with sync_playwright() as p:
     page.fill('#pilotName', 'Piloto campeonato')
     # Modo Corrida, then the championship on the track screen.
     page.click('#start')
+    page.click('#carsNext')
     assert page.get_attribute('#tracks', 'data-mode') == 'corrida'
     assert page.inner_text('#championshipStart').startswith('Começar campeonato')
     page.click('#championshipStart')
@@ -86,6 +87,7 @@ with sync_playwright() as p:
     page.reload(wait_until='domcontentloaded')
     wait_js(page, "window.interlagos&&!document.querySelector('#start').disabled")
     page.click('#start')
+    page.click('#carsNext')
     assert page.inner_text('#championshipStart') == 'Correr a etapa 2 →'
     page.click('#championshipStart')
     for k in (1, 2, 3):
@@ -111,6 +113,7 @@ with sync_playwright() as p:
 
     # Modo História: a championship of its own.
     page.click('#tracksBack')
+    page.click('#carsBack')
     page.click('#storyStart')
     assert page.get_attribute('#tracks', 'data-mode') == 'historia' and 'MODO HISTÓRIA' in page.inner_text('#championshipKicker')
     assert page.inner_text('#championshipStart').startswith('Começar campeonato'), page.inner_text('#championshipStart')
@@ -157,6 +160,7 @@ with sync_playwright() as p:
     # The race championship is untouched.
     page.click('#tracksBack')
     page.click('#start')
+    page.click('#carsNext')
     assert page.inner_text('#championshipStart') == 'Novo campeonato →'
     report['historia'] = {'calendar': calendar.split('\n'), 'player': player_row}
     browser.close()

@@ -11,8 +11,7 @@ MODULES = (
     'car-condition.js', 'pit-lane.js', 'interlagos-pit.js', 'pit-building.js', 'pit-box99.js', 'pit-crew.js', 'pit-textures.js', 'on-foot.js', 'pitstop.js', 'pitstop.css',
     'circuits.js', 'curvelo-data.js', 'curvelo-scene.js', 'open-circuit.js', 'track-clearance.js', 'interlagos-stands.js',
     'race-results.js', 'race-results.css', 'lap-records.js', 'championship.js', 'championship-board.js', 'pistas.css',
-    'race-roster.js',
-    'multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js', 'net-link.js',
+    'race-roster.js', 'car-select.js', 'car-livery.js', 'carros.css',
     "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", "mobile-controls.js", "mobile.css",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'car-openings.js', 'cockpit.js', 'cockpit-materials.js', 'cockpit-instruments.js', 'cockpit-rear.js', 'cockpit-equipment.js',
     'driver.js', 'driver-rig.js', 'driver-controls.js', 'driver-helmet.js', 'rival-driver.js', 'family-phone.js',
@@ -21,6 +20,9 @@ MODULES = (
     'style.css', 'immersive.css', 'abertura.css', 'index.html', 'sobre.html',
     'favicon.svg', 'favicon.ico', 'apple-touch-icon.png',
 )
+# The multiplayer test room is published only under /dev/ (preparar_publicacao.py --multiplayer);
+# the main link's build leaves these files and the room server out. The local preview serves them.
+MULTIPLAYER = ('multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js', 'net-link.js')
 ASSETS = (
     'branding/old_stock_preparada_v1.jpg',
     'circuitos/cascavel_solo.jpg', 'circuitos/piracicaba_solo.jpg',
@@ -47,7 +49,7 @@ THREE = (
     'examples/jsm/utils/BufferGeometryUtils.js', 'examples/jsm/utils/SkeletonUtils.js',
     'LICENSE',
 )
-PUBLIC_FILES = {name: GAME + name for name in MODULES}
+PUBLIC_FILES = {name: GAME + name for name in MODULES + MULTIPLAYER}
 PUBLIC_FILES.update({'assets/' + name: GAME + 'assets/' + name for name in ASSETS})
 PUBLIC_FILES.update({'vendor/three/' + name: GAME + 'node_modules/three/' + name for name in THREE})
 PUBLIC_FILES.update({
@@ -88,11 +90,12 @@ def contained_file(root, relative):
 
 # The multiplayer room server (sala-cloudflare), the page's only connection outside its own origin;
 # the same address as ROOM_SERVER in teste/net-link.js. The local preview also allows wrangler dev.
+# A build without the multiplayer connects to nothing outside its origin.
 ROOM_SERVER = 'wss://sala.inteligenciamilgrau.com.br'
 LOCAL_ROOM_SERVER = 'ws://127.0.0.1:8787'
 
 
-def content_policy(html, dev=False):
+def content_policy(html, dev=False, multiplayer=True):
     inline = re.search(r'<script type="importmap">(.*?)</script>', html, re.S)
     if not inline:
         raise ValueError('Missing import map')
@@ -102,15 +105,15 @@ def content_policy(html, dev=False):
         f"script-src 'self' 'sha256-{digest}'; "
         "script-src-attr 'none'; style-src 'self' 'unsafe-inline'; "
         "img-src 'self' data: blob:; "
-        f"connect-src 'self' blob: {ROOM_SERVER}{' ' + LOCAL_ROOM_SERVER if dev else ''}; "
+        f"connect-src 'self' blob:{' ' + ROOM_SERVER if multiplayer else ''}{' ' + LOCAL_ROOM_SERVER if dev else ''}; "
         "font-src 'self'; media-src 'self' blob:; worker-src 'none'; "
         "object-src 'none'; base-uri 'none'; form-action 'none'"
     )
 
 
-def security_headers(html, dev=False):
+def security_headers(html, dev=False, multiplayer=True):
     return {
-        'Content-Security-Policy': content_policy(html, dev) + "; frame-ancestors 'none'",
+        'Content-Security-Policy': content_policy(html, dev, multiplayer) + "; frame-ancestors 'none'",
         'X-Content-Type-Options': 'nosniff',
         'X-Frame-Options': 'DENY',
         'Referrer-Policy': 'no-referrer',

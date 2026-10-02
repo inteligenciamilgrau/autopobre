@@ -24,7 +24,7 @@ with sync_playwright() as p:
  page=context.new_page();page.set_default_timeout(120000)
  page.on('pageerror',lambda e:(errors.append(str(e)),print(str(e),flush=True)))
  page.goto(URL+'?intro=0',wait_until='domcontentloaded');wait_js(page,"window.interlagos&&!document.querySelector('#start').disabled")
- page.fill('#pilotName','Piloto 1x1');page.click('#start');wait_js(page,"!document.querySelector('#tracks').classList.contains('hidden')")
+ page.fill('#pilotName','Piloto 1x1');page.click('#start');page.click('#carsNext');wait_js(page,"!document.querySelector('#tracks').classList.contains('hidden')")
  assert page.is_visible('#soloRace') and page.is_visible('#duelRace') and page.is_visible('#duelRival') and page.is_visible('#tracksLaps')
  assert page.input_value('#tracksLaps')=='3' and page.input_value('#duelRival')=='73' and '#73' in page.inner_text('#duelRaceDetail')
  assert page.locator('#duelRival option').count()==14
@@ -33,8 +33,8 @@ with sync_playwright() as p:
  assert page.input_value('#raceLaps')=='5' and '5 voltas' in page.inner_text('#singleRaceDetail') and '5 voltas' in page.inner_text('#duelRaceDetail')
  assert page.evaluate("JSON.parse(localStorage.getItem('opala99-preferences-v1')).laps")==5
  # (The settings button is on the opening.)
- page.click('#tracksBack');page.click('#settingsButton');page.click('#tab-race')
- page.select_option('#raceLaps','2');page.click('#settingsClose');page.click('#start')
+ page.click('#tracksBack');page.click('#carsBack');page.click('#settingsButton');page.click('#tab-race')
+ page.select_option('#raceLaps','2');page.click('#settingsClose');page.click('#start');page.click('#carsNext')
  assert page.input_value('#tracksLaps')=='2' and '2 voltas' in page.inner_text('#singleRaceDetail')
  page.select_option('#tracksLaps','3')
  # The rival: kept in the preferences, shown with his colours.
@@ -44,9 +44,9 @@ with sync_playwright() as p:
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
  page.screenshot(path=str(RENDERS/'pistas_solo_1x1.png'))
  # Modo História's track screen has neither.
- page.click('#tracksBack');page.click('#storyStart');assert page.get_attribute('#tracks','data-mode')=='historia'
+ page.click('#tracksBack');page.click('#carsBack');page.click('#storyStart');assert page.get_attribute('#tracks','data-mode')=='historia'
  assert not page.is_visible('#soloRace') and not page.is_visible('#duelRace') and page.is_visible('#tracksLaps')
- page.click('#tracksBack');page.click('#start')
+ page.click('#tracksBack');page.click('#start');page.click('#carsNext')
 
  # 1x1 against #19 at Interlagos: two cars, the rival on pole, the player beside him.
  page.click('#duelRace');wait_js(page,"interlagos.ready&&interlagos.circuit==='interlagos'&&!interlagos.state.paused")
@@ -91,7 +91,7 @@ with sync_playwright() as p:
  phone.add_init_script("""localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false,duelRival:'2'}));""")
  small=phone.new_page();small.on('pageerror',lambda e:(errors.append(str(e)),print(str(e),flush=True)))
  small.goto(URL,wait_until='domcontentloaded');wait_js(small,"window.interlagos&&!document.querySelector('#start').disabled")
- small.fill('#pilotName','Piloto celular');small.tap('#start');wait_js(small,"!document.querySelector('#tracks').classList.contains('hidden')")
+ small.fill('#pilotName','Piloto celular');small.tap('#start');small.tap('#carsNext');wait_js(small,"!document.querySelector('#tracks').classList.contains('hidden')")
  fit=small.evaluate("""()=>{const t=document.querySelector('#tracks'),r=id=>document.querySelector(id).getBoundingClientRect();return {width:document.documentElement.scrollWidth<=innerWidth,scroll:t.scrollHeight-t.clientHeight,duel:r('#duelRace').bottom,pick:r('#duelRival').bottom,height:innerHeight}}""")
  assert fit['width'],fit;assert small.input_value('#duelRival')=='2'
  small.screenshot(path=str(RENDERS/'pistas_solo_1x1_celular.png'));result['phone']=fit

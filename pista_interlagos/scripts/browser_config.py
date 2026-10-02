@@ -5,6 +5,52 @@ from time import monotonic
 
 GAME_URL = 'http://127.0.0.1:8799/pista_interlagos/teste/'
 
+# Pointer lock kept inside the page, with the browser's rules: a user gesture (or a page that let go
+# by exitPointerLock) locks, Escape unlocks and never reaches the page as a keydown.
+PAGE_POINTER_LOCK = """(()=>{
+ let locked=null,exited=false;
+ const fire=type=>setTimeout(()=>document.dispatchEvent(new Event(type)),0);
+ const release=programmatic=>{if(!locked)return;exited=programmatic;locked=null;fire('pointerlockchange');};
+ Object.defineProperty(Document.prototype,'pointerLockElement',{get:()=>locked,configurable:true});
+ Object.defineProperty(Document.prototype,'exitPointerLock',{value:()=>release(true),configurable:true,writable:true});
+ Object.defineProperty(Element.prototype,'requestPointerLock',{value(){
+  if(!exited&&navigator.userActivation?.isActive===false){fire('pointerlockerror');return Promise.reject(new DOMException('Pointer lock needs a user gesture','NotAllowedError'));}
+  if(locked!==this){locked=this;fire('pointerlockchange');}
+  return Promise.resolve();
+ },configurable:true,writable:true});
+ addEventListener('keydown',e=>{if(locked&&e.key==='Escape'){e.stopImmediatePropagation();e.preventDefault();release(false);}},true);
+})();"""
+
+
+def _off_screen(launch):
+    def headless_launch(self, *args, **kwargs):
+        kwargs['headless'] = True
+        return launch(self, *args, **kwargs)
+    return headless_launch
+
+
+def _page_lock(new):
+    def new_with_page_lock(self, *args, **kwargs):
+        made = new(self, *args, **kwargs)
+        getattr(made, 'context', made).add_init_script(PAGE_POINTER_LOCK)
+        return made
+    return new_with_page_lock
+
+
+# Checks run while someone uses this PC: a browser window would take their focus, and the game's
+# pointer lock clips their real cursor to the page's rectangle, even in a headless Edge. Every
+# launch from a script that imports this module is headless (even with headless=False) and every
+# page gets PAGE_POINTER_LOCK; INTERLAGOS_HEADED=1 keeps the browser as it is, window and real lock.
+try:
+    from playwright.sync_api import Browser, BrowserType
+except ImportError:
+    Browser = BrowserType = None
+if BrowserType and not os.environ.get('INTERLAGOS_HEADED'):
+    BrowserType.launch = _off_screen(BrowserType.launch)
+    BrowserType.launch_persistent_context = _page_lock(_off_screen(BrowserType.launch_persistent_context))
+    Browser.new_context = _page_lock(Browser.new_context)
+    Browser.new_page = _page_lock(Browser.new_page)
+
 
 def browser_executable():
     configured = os.environ.get('INTERLAGOS_BROWSER')
@@ -67,15 +113,20 @@ def race_options(page, camera=None, livery=None, tap=False):
 def choose_race(page, story=False, championship=False, tap=False):
     """From the opening or the track screen, start a race without waiting for it to load.
 
-    The opening picks the mode: #start (Modo Corrida) or #storyStart (Modo História); both open
-    the track screen, where #singleRace is Corrida única and #championshipStart the
-    championship of that mode. A track screen showing the other mode goes back to the opening
-    (#tracksBack) to choose again."""
+    The opening picks the mode: #start (Modo Corrida) or #storyStart (Modo História). Modo Corrida
+    shows the car screen first (#cars; #carsNext keeps the car chosen there), then both open the
+    track screen, where #singleRace is Corrida única and #championshipStart the championship of
+    that mode. A track or car screen of the other mode goes back to the opening (#tracksBack, which
+    in Modo Corrida leads to the car screen, then #carsBack) to choose again."""
     press = page.tap if tap else page.click
     if page.is_visible('#tracks') and page.get_attribute('#tracks', 'data-mode') != ('historia' if story else 'corrida'):
         press('#tracksBack')
-    if not page.is_visible('#tracks'):
+    if story and page.is_visible('#cars'):
+        press('#carsBack')
+    if not page.is_visible('#tracks') and not page.is_visible('#cars'):
         press('#storyStart' if story else '#start')
+    if page.is_visible('#cars'):
+        press('#carsNext')
     press('#championshipStart' if championship else '#singleRace')
 
 

@@ -10,7 +10,9 @@ import * as THREE from 'three';
 // degrees out past the car's flank, whatever the eye does; it is somewhat convex (widen) so a
 // car alongside stays in it. The reflected ray of every pixel meets the scene `distance`
 // metres away and is looked up where the rear camera saw that point: exact for cars about
-// that far, a little off for those very close.
+// that far, a little off for those very close. The glass is written with alpha -1: the film
+// look (cinematic.js) then keeps its ambient occlusion off it, which read the glass sunk in its
+// housing as a deep dark corner and left it about a third as bright as the rear-view mirror.
 export const SIDE_MIRRORS=Object.freeze({outward:.12,down:-.02,widen:3.4,distance:14,reflectance:.82,fill:.84,ahead:.075});
 const vertexShader=`varying vec3 vWorld;varying vec2 vGlass;
 void main(){vGlass=position.xy;vec4 world=modelMatrix*vec4(position,1.);vWorld=world.xyz;gl_Position=projectionMatrix*viewMatrix*world;}`;
@@ -20,7 +22,7 @@ void main(){
  float e=length(vGlass);
  vec3 ray=reflect(normalize(vWorld-cameraPosition),glassNormal);ray=normalize(centerRay+(ray-centerRay)*widen);
  vec4 clip=rearViewProjection*vec4(glassCenter+ray*distance,1.);vec2 uv=clamp(clip.xy/max(clip.w,1e-3)*.5+.5,0.,1.);
- gl_FragColor=vec4(texture2D(map,uv).rgb*reflectance*(1.-.6*smoothstep(.9,1.,e)),1.);
+ gl_FragColor=vec4(texture2D(map,uv).rgb*reflectance*(1.-.6*smoothstep(.9,1.,e)),-1.);
  #include <colorspace_fragment>
 }`;
 const eyeToGlass=new THREE.Vector3(),back=new THREE.Vector3(),out=new THREE.Vector3(),up=new THREE.Vector3(),basis=new THREE.Matrix3(),viewProjection=new THREE.Matrix4();

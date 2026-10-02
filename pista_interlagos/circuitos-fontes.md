@@ -48,6 +48,13 @@ e, no navegador, `scripts/verificar_circuitos_abertos.py [porta]`.
   distantes na volta que correm lado a lado não podem se fundir. Em Cascavel o pit lane é
   refinado primeiro e fica sempre do lado de dentro; ao lado do prédio ele está sob a
   cobertura e é posicionado pela borda do telhado medida na imagem (faixa de 9 m).
+- **Muro dos boxes e a banca do Box 99** (`gerar_pista.py`, `muro_barraca.py`): o muro fica
+  entre a pista de boxes e a pista e afina até 0,6 m onde a folga entre elas passa de 6 m
+  (Cascavel: ~11 m). A banca da equipe, onde se faz a inscrição no Modo História, é montada
+  sobre o muro e precisa de 3,4 m: em volta do Box 99 o muro alarga para o lado da pista
+  principal, com a face da pista de boxes intacta, e o alambrado acompanha. Sem isso a banca
+  ficava do outro lado do alambrado. `ajustar_muro_barraca.py <id>` aplica a mesma regra a um
+  JSON já gerado (idempotente), para quando as fontes não podem ser reprocessadas.
 - **Suavização** (`gerar_pista.py`): o rumo do eixo é suavizado de 40 m nas retas a 5 m nas
   curvas e reintegrado, com a deriva devolvida em baixa frequência (desvio médio de 0,8 m do
   eixo medido); estações reamostradas a cada 2 m.

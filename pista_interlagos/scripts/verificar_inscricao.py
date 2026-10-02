@@ -3,15 +3,16 @@
 The pilot climbs the steps beside the Box 99 stand to the yellow circle by the engineers'
 computers; stepping in opens the team's panel with the kitty against the costs. Without
 enough money he goes back for more; with it, Enter takes him to the fuel purchase on the grid.
-Both circuits (Interlagos and Curvelo) are checked.
+All four circuits (Interlagos, Curvelo, Cascavel and Piracicaba) are checked: Cascavel's pit wall is thin
+where the lane runs far from the track, so its stand needs the widened wall under it (muro_barraca.py).
 
 Usage, from the repo root, with the local server running (INTERLAGOS_URL for another port):
-  python pista_interlagos/scripts/verificar_inscricao.py
+  python pista_interlagos/scripts/verificar_inscricao.py [interlagos curvelo cascavel piracicaba]
 """
 from browser_config import browser_executable, browser_args, wait_js, open_menu, enter_track, GAME_URL
 from pathlib import Path
 from playwright.sync_api import sync_playwright
-import json, math, os
+import json, math, os, sys
 ROOT = Path(__file__).resolve().parents[1]
 URL = os.environ.get('INTERLAGOS_URL', GAME_URL)
 report = {'errors': [], 'checks': {}}
@@ -41,7 +42,7 @@ def run(page, circuit):
     page.evaluate(place, [lane['x'] + 2.2, lane['d'], -math.pi / 2])
     y0 = hero()[1]; page.keyboard.down('KeyW'); page.wait_for_timeout(1500); page.keyboard.up('KeyW')
     # Curvelo's stand sits on a 42 cm plinth on the grass, low enough to step onto anywhere.
-    if circuit == 'interlagos': check('wall_under_stand_not_climbed_from_lane', abs(hero()[1] - y0) < .15 and not page.evaluate('fixtureMode.state.desk'))
+    if circuit != 'curvelo': check('wall_under_stand_not_climbed_from_lane', abs(hero()[1] - y0) < .15 and not page.evaluate('fixtureMode.state.desk'))
     # Up the steps with W: the feet rise tread by tread onto the wall top.
     page.evaluate(place, [lane['x'], lane['d'], -math.pi / 2])
     y0 = hero()[1]; page.keyboard.down('KeyW'); page.wait_for_timeout(1400); page.keyboard.up('KeyW')
@@ -82,7 +83,7 @@ def run(page, circuit):
 with sync_playwright() as p:
     browser = p.chromium.launch(executable_path=browser_executable(), headless=True, args=browser_args())
     try:
-        for circuit in ['interlagos', 'curvelo']:
+        for circuit in sys.argv[1:] or ['interlagos', 'curvelo', 'cascavel', 'piracicaba']:
             context = browser.new_context(viewport={'width': 1280, 'height': 800})
             context.add_init_script(f"localStorage.setItem('opala99-preferences-v1',JSON.stringify({{...JSON.parse(localStorage.getItem('opala99-preferences-v1')||'{{}}'),circuit:'{circuit}'}}))")
             page = context.new_page(); page.set_default_timeout(120000)

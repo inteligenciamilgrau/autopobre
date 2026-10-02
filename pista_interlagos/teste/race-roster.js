@@ -13,7 +13,9 @@ export const ACE_NUMBER='2';
 export const AI_LEVELS=Object.freeze(['facil','medio','alto','impossivel']);
 export const AI_LEVEL_NAMES=Object.freeze({facil:'Fácil',medio:'Médio',alto:'Alto',impossivel:'Impossível'});
 // The pilots' table: skill 1-10 and chance of a mistake 1-10 ("Aluisio is so slow he can't go wrong").
-const PILOT_TABLE={'2':[10,1],'73':[9,2],'7':[8,2],'64':[8,3],'00':[8,3],'19':[7,3],'51':[9,1],'93':[9,2],'312':[5,1],'70':[10,1],'9':[7,3],'74':[7,3],'88':[7,3],'42':[6,3]};
+// It has no line for the 99 (the player's own car): when Stevan Gaipo races it as a rival (Modo
+// Corrida's car screen), mid-field, a game adaptation like the others.
+const PILOT_TABLE={'2':[10,1],'73':[9,2],'7':[8,2],'64':[8,3],'00':[8,3],'19':[7,3],'51':[9,1],'93':[9,2],'312':[5,1],'70':[10,1],'9':[7,3],'74':[7,3],'88':[7,3],'42':[6,3],'99':[7,3]};
 const entries=[
  ['73','Konrad Viehmann','Konrad Viehmann',192,1,3,4,1,0xe8731c,null],
  ['00','Koy Bechtold','Clóvis “Koy” Bechtold',166,2,5,3,2,0xeeeeea,0x1f4fb5],
@@ -30,17 +32,27 @@ const entries=[
  ['88','Ailson Jr. / Lucas','Ailson Jr. / Lucas Lastellas',null,null,14,null,2,0xb5bbc4,null],
  ['42','Rodrigo Battistel','Rodrigo Battistel',null,null,15,null,4,0x161718,0xf2c418],
 ];
-const luminance=hex=>(.2126*(hex>>16&255)+.7152*(hex>>8&255)+.0722*(hex&255))/255;
+// A 0xRRGGBB colour's relative luminance (0 black, 1 white) and its CSS form.
+export const luminance=hex=>(.2126*(hex>>16&255)+.7152*(hex>>8&255)+.0722*(hex&255))/255;
+export const cssColor=hex=>`#${hex.toString(16).padStart(6,'0')}`;
 // color: the body; stripe: the side stripe; finish: paint other than the plain gloss (gold);
-// mark: the colour that reads on the dark track map (the stripe of a black car).
-export const RIVAL_ROSTER=Object.freeze(entries.map(([number,shortName,name,points,rank,stage3,stage4,styleIndex,color,stripe,finish=null])=>{
+// mark: the colour that reads on the dark track map (the stripe of a black car). A driver with no
+// stage result counts as mid-form.
+const rosterEntry=([number,shortName,name,points,rank,stage3,stage4,styleIndex,color,stripe,finish=null])=>{
  const results=[stage3===null?null:(15-stage3)/14,stage4===null?null:(11-stage4)/10].filter(v=>v!==null);
- const form=results.reduce((sum,v)=>sum+v,0)/results.length;
+ const form=results.length?results.reduce((sum,v)=>sum+v,0)/results.length:.5;
  const rating=points===null?.3+form*.15:.75*(points/192)+.25*form;
  stripe??=LIGHT_STRIPE;const mark=luminance(color)<.15?stripe:color;const [skill,errors]=PILOT_TABLE[number];
  return Object.freeze({number,shortName,name,points,rank,stage3,stage4,styleIndex,color,stripe,finish:finish&&Object.freeze(finish),mark,rating,level:Math.round(70+rating*28),skill,errors});
-}));
+};
+export const RIVAL_ROSTER=Object.freeze(entries.map(rosterEntry));
 export const PLAYER_ENTRY=Object.freeze({number:'99',shortName:'Stevan Gaipo',name:'Stevan Gaipo / Edu Neves',points:67,rank:12,color:0xe2fb57});
+// Modo Corrida's car selection (car-select.js): the player may race any car of the grid. Every car is
+// the same Opala (same physics); what changes is the team's paint and number. The driver of the car
+// taken sits the race out and Stevan Gaipo races the Opala 99 in its seat, with the 99's own livery
+// (black, the yellow stripe). His pace: the pilots' table's '99' line and the standings rating from
+// his 67 points.
+export const OPALA_99_RIVAL=rosterEntry(['99',PLAYER_ENTRY.shortName,PLAYER_ENTRY.name,PLAYER_ENTRY.points,PLAYER_ENTRY.rank,null,null,3,0x17191b,0xf0cd1f]);
 export const GRID_SIZE=RIVAL_ROSTER.length+1;
 export const GRID_ROW_SPACING=8;
 export const GRID_START_BACK=Math.ceil(GRID_SIZE/2)*GRID_ROW_SPACING+12;
@@ -52,3 +64,13 @@ export const playerGridSlot=(rivals=RIVAL_ROSTER.length)=>rivals<RIVAL_ROSTER.le
 // Solo practice (no rivals, no flag) and the 1x1 against one chosen driver: Modo Corrida's single races.
 export const DUEL_DEFAULT='73';
 export const rivalEntry=number=>RIVAL_ROSTER.find(e=>e.number===number)??null;
+// The cars on the selection screen, the Opala 99 first; the player's car by number.
+export const PLAYER_CAR_DEFAULT='99';
+export const CAR_CHOICES=Object.freeze([OPALA_99_RIVAL,...RIVAL_ROSTER]);
+export const carEntry=number=>CAR_CHOICES.find(e=>e.number===number)??null;
+// The rivals when the player races `car`: the roster, that car's seat taken by the Opala 99 (same
+// index, so the grid's cars and their models keep their places).
+export const fieldRoster=(car=PLAYER_CAR_DEFAULT)=>car===PLAYER_CAR_DEFAULT||!rivalEntry(car)?RIVAL_ROSTER:Object.freeze(RIVAL_ROSTER.map(e=>e.number===car?OPALA_99_RIVAL:e));
+// The 1x1's rival when the player races `car`: the one asked for; asking for that car's own driver
+// gives the 99, now in its seat.
+export function duelRivalFor(car,wanted){const number=wanted===car?OPALA_99_RIVAL.number:wanted;return fieldRoster(car).some(e=>e.number===number)?number:DUEL_DEFAULT;}

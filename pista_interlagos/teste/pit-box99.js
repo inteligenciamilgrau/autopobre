@@ -57,7 +57,7 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
   storefront:std('Pastilhas_fachada',0xffffff,{map:art.storefrontTiles(),roughness:.5}),
   fridge:std('Geladeira_bebidas',0xffffff,{map:art.fridgeDoor(),roughness:.2,metalness:.1}),
   poster:std('Cartaz_corrida',0xffffff,{map:art.racePoster(),roughness:.8}),
-  opening:std('Quadro_abertura',0xffffff,{map:image('./assets/abertura/abertura_stevan_opala99.jpg'),roughness:.6}),
+  opening:std('Quadro_abertura',0xffffff,{map:image('./assets/abertura/abertura_stevan_opala99.jpg?v=20261002-omp-q6'),roughness:.6}),
   logo:std('Banner_logo_box99',0xffffff,{map:image('./assets/abertura/logo_auto_pobre_racing.webp'),transparent:true,roughness:.7,...decal}),
   screen:new THREE.MeshBasicMaterial({name:'Monitores_cronometragem',map:art.timingScreen(rows,'CRONOMETRAGEM · '+(labels?.track??'INTERLAGOS'))}),
  };
@@ -237,7 +237,8 @@ export function createBox99({pit,c,lerp,at,root,obstacles,textures,people,crowd,
  let standBox,standFloor,onStand,desk;
  {const p0=lerp(S);let dw,t,top;
   if(pit.stand)({d:dw,thickness:t,top}=pit.stand);
-  else{const o=at(p0,0);let best=null;for(const q of pit.walls.find(w=>w.name==='Muro_boxes').points){const dist=Math.hypot(q[0]-o.x,q[1]+o.z);if(!best||dist<best[0])best=[dist,q];}
+  // The pit wall may come in several stretches (Cascavel has three): the nearest point of any.
+  else{const o=at(p0,0);let best=null;for(const q of pit.walls.filter(w=>w.name==='Muro_boxes').flatMap(w=>w.points)){const dist=Math.hypot(q[0]-o.x,q[1]+o.z);if(!best||dist<best[0])best=[dist,q];}
    const q=best[1];dw=(q[0]-p0[c.x])*p0[c.lx]+(q[1]-p0[c.y])*p0[c.ly];t=q[3];top=q[2]+1.05-p0[c.z];}
   const W=Math.min(2.2,t-.5),dc=dw+t/2-.2-W/2;
   // The plinth runs under the steps' landing too (x -2.65 to 1.95, as the pit wall top).

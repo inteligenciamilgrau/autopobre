@@ -48,7 +48,7 @@ def heard(page, samples=4):
 
 
 with sync_playwright() as p:
-    browser = p.chromium.launch(executable_path=browser_executable(), args=browser_args(), headless=False)
+    browser = p.chromium.launch(executable_path=browser_executable(), args=browser_args(), headless=True)
     page = browser.new_page(viewport={'width': 1280, 'height': 720})
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.on('console', lambda m: errors.append(m.text) if m.type == 'error' else None)

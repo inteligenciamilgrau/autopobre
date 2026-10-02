@@ -22,7 +22,9 @@ with sync_playwright() as p:
  requests=[];navigations=[]
  page.on('request',lambda r:requests.append(r.url))
  page.on('request',lambda r:navigations.append(r.url) if r.is_navigation_request() and r.resource_type=='document' else None)
- def heavy():return [u for u in requests if any(s in u for s in ['.glb','/dados/pista','asfalto_','cockpit_faixa','/piloto/'])]
+ # The circuits' files. Modo Corrida's car screen loads the car itself (its model, the cockpit, the
+ # renderer) for its studio; the race then reuses them.
+ def heavy():return [u for u in requests if any(s in u for s in ['interlagos_pista.glb','/dados/pista','asfalto_','/piloto/'])]
  page.goto(URL,wait_until='domcontentloaded');wait_js(page,"window.interlagos&&!document.querySelector('#start').disabled")
  assert page.is_visible('#start') and page.is_visible('#storyStart') and not page.is_visible('#tracks') and not page.is_visible('#singleRace')
  assert page.inner_text('#start')=='Modo Corrida →' and page.inner_text('#storyStart')=='Modo História →'
@@ -31,11 +33,12 @@ with sync_playwright() as p:
  page.fill('#pilotName','Piloto selecao');page.click('#storyStart');wait_js(page,"!document.querySelector('#tracks').classList.contains('hidden')")
  assert page.get_attribute('#tracks','data-mode')=='historia' and 'MODO HISTÓRIA' in page.inner_text('#tracksMode') and 'MODO HISTÓRIA' in page.inner_text('#championshipKicker')
  page.screenshot(path=str(ROOT/'renders/pistas_celular_historia.png'))
- page.click('#tracksBack');page.click('#start');assert page.get_attribute('#tracks','data-mode')=='corrida' and 'MODO CORRIDA' in page.inner_text('#championshipKicker')
+ page.click('#tracksBack');page.click('#start');assert page.is_visible('#cars') and not page.is_visible('#tracks')
+ page.click('#carsNext');assert page.get_attribute('#tracks','data-mode')=='corrida' and 'MODO CORRIDA' in page.inner_text('#championshipKicker')
  assert page.locator('#tracks [data-circuit]').count()==4 and page.is_visible('#singleRace') and page.is_visible('#championshipStart') and not page.is_visible('#storyStart')
  assert page.evaluate('document.documentElement.scrollWidth<=innerWidth')
  page.screenshot(path=str(ROOT/'renders/pistas_celular.png'))
- assert not heavy(),heavy();assert page.evaluate('gpuContexts')==0
+ assert not heavy(),heavy();assert page.evaluate('gpuContexts')<=1
  page.click('[data-circuit="curvelo"]');wait_js(page,"interlagos.audioInfo().recordings?.playing")
  page.evaluate('window.song=mediaPlayers.find(p=>!p.paused);window.songTime=song.currentTime;window.songSrc=song.src')
  for circuit in ['cascavel','piracicaba','interlagos','curvelo']:
@@ -44,13 +47,13 @@ with sync_playwright() as p:
  page.wait_for_timeout(500)
  assert len(navigations)==1,navigations
  assert page.evaluate('song===mediaPlayers.find(p=>!p.paused)&&song.src===songSrc&&song.currentTime>songTime')
- assert not heavy(),heavy();assert page.evaluate('gpuContexts')==0
+ assert not heavy(),heavy();assert page.evaluate('gpuContexts')<=1
  assert page.evaluate("JSON.parse(localStorage.getItem('opala99-preferences-v1')).circuit")=='curvelo'
  # Back to the opening and forward again keeps the choice; the records dialog opens there.
- page.click('#tracksBack');assert page.is_visible('#start') and not page.is_visible('#tracks')
+ page.click('#tracksBack');assert page.is_visible('#cars') and not page.is_visible('#tracks');page.click('#carsBack');assert page.is_visible('#start') and not page.is_visible('#cars')
  page.click('#recordsButton');assert page.get_attribute('[data-records-circuit="curvelo"]','aria-pressed')=='true';page.click('#recordsClose')
  page.click('#settingsButton');page.select_option('#camera','hood');page.select_option('#livery','seiva_danilo');page.click('#settingsClose')
- page.click('#start');assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
+ page.click('#start');page.click('#carsNext');assert page.get_attribute('[data-circuit="curvelo"]','aria-pressed')=='true'
  assert not heavy(),heavy()
  print(json.dumps({'modeNeedsPilot':True,'modeFirst':True,'trackScreen':True,'selectionNoReload':True,'sameSongContinues':True,'noRaceAssetsOrGPU':True}),flush=True)
  page.click('#singleRace');wait_js(page,"interlagos.ready&&interlagos.circuit==='curvelo'&&!interlagos.state.paused")
