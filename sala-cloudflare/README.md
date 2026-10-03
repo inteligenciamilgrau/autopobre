@@ -8,7 +8,7 @@ O servidor garante, seja lá o que o navegador mande:
 - **Origem:** só as páginas listadas em `ORIGENS` (`wrangler.jsonc`) conseguem conectar.
 - **Quem é quem:** o servidor carimba cada mensagem com o id de quem mandou; ninguém se passa por outro.
 - **Papéis:** só o anfitrião fala com todos. Os convidados falam só com o anfitrião, e só depois de aceitos na porta.
-- **Porteiro:** o anfitrião aceita, recusa ou expulsa. Quem foi expulso não volta com a mesma aba.
+- **Porteiro:** o anfitrião aceita, recusa ou expulsa. Quem foi expulso não volta com a mesma aba; quem foi recusado bate de novo como alguém novo. Se o anfitrião sai de vez, a sala passa só para quem já foi aceito: quem ainda está na porta nunca vira anfitrião.
 - **Limites:** tamanho de cada mensagem, mensagens e bytes por segundo por conexão, 19 conexões por sala, e uma pausa de um minuto depois de 20 chaves erradas numa sala.
 
 ## Publicar (uma vez)

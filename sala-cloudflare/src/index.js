@@ -14,8 +14,9 @@
 //   keys per room.
 // A tab keeps its token (sessionStorage): back within HOST_GRACE after a reload, a host hosts again
 // and a guest keeps its id and its admission; a host that does not come back hands the room to the
-// guest that has been there longest. During a race (the host's lobby says so) a host whose line dropped
-// (no goodbye: a reload or a closed tab says one, and its race is gone with its page) keeps its place
+// admitted guest that has been there longest (one still at the door never hosts). During a race (the
+// host's lobby says so) a host whose line dropped (no goodbye: a reload or a closed tab says one, and
+// its race is gone with its page) keeps its place
 // for RACE_GRACE instead: its guests' game stands the race still until it is back (players' wish: a
 // race on the host's machine, a championship's round, must never pass to another for a dropped line).
 const MAX_PEERS=19;          // 15 seats and a few watching
@@ -149,7 +150,9 @@ export class Sala {
   switch(m.t){
    case 'config':this.porteiro=m.porteiro!==false;return;
    case 'admit':{if(!to)return;const e=this.tokens.get(to.token);if(e&&!e.admitted){e.admitted=true;this.send(to,{t:'admitted'});}return;}
-   case 'deny':if(to&&!this.tokens.get(to.token)?.admitted)this.shut(to,CLOSE.denied,'Entrada recusada');return;
+   // Refused: the room forgets that tab, so knocking again it is someone new (not one that has
+   // waited since its first knock).
+   case 'deny':if(to&&!this.tokens.get(to.token)?.admitted){this.tokens.delete(to.token);this.shut(to,CLOSE.denied,'Entrada recusada');}return;
    case 'kick':if(to&&to!==peer){this.banned.add(to.token);this.shut(to,CLOSE.kicked,'Removido pelo anfitrião');}return;
    case 'pong':if(to)this.send(to,m);return;
    case 'bye':peer.bye=true;this.shut(peer,1000,'Saiu');return;
@@ -171,7 +174,10 @@ export class Sala {
   clearTimeout(this.hostAwayTimer);
   this.hostAwayTimer=setTimeout(()=>{
    this.hostAwayTimer=null;if(this.peers.has(this.hostId))return;
-   const next=[...this.peers.values()].sort((a,b)=>this.tokens.get(a.token).since-this.tokens.get(b.token).since)[0];
+   // Only a guest the host let in takes its place: one at the door, however long it waited, would
+   // get the room it was never let into. With nobody let in, the room has no host until someone
+   // comes in (the host back, too); those at the door knock again for it.
+   const next=[...this.peers.values()].filter(p=>this.tokens.get(p.token)?.admitted).sort((a,b)=>this.tokens.get(a.token).since-this.tokens.get(b.token).since)[0];
    this.hostId=null;this.hostToken=null;this.racing=false;if(!next)return;
    this.makeHost(next);this.send(next,{t:'role',role:'host'});this.toGuests({t:'host',id:next.id});this.knocks();
   },this.racing&&!peer.bye?this.raceGrace:this.grace);

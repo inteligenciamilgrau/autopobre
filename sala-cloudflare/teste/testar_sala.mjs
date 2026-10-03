@@ -100,6 +100,30 @@ const report={};
  report.reload='ok';
 }
 
+// The door holds through a handover: one still knocking never takes the room, however long it has
+// waited (refused, it knocks again as someone new), and with nobody let in the room has no host until
+// someone comes in; the host back hosts again and hears the knock.
+{
+ const room=fresh(),host=await open(room,{name:'Ana'});
+ const eva=await open(room,{name:'Eva'});await host.until(()=>host.of('knock').some(k=>k.id===eva.me.id));
+ host.send({t:'deny',to:eva.me.id});await eva.until(()=>eva.closed);
+ const knocking=await open(room,{token:eva.me.token,name:'Eva'});
+ assert.equal(knocking.me.pending,true);assert.notEqual(knocking.me.id,eva.me.id,'refused: it knocks again as someone new');
+ const bia=await open(room,{name:'Bia'});await host.until(()=>host.of('knock').some(k=>k.id===bia.me.id));
+ host.send({t:'admit',to:bia.me.id});await bia.until(()=>bia.of('admitted')[0]);
+ // Eva came first, but only Bia was let in.
+ host.send({t:'bye'});await bia.until(()=>bia.of('role')[0],GRACE+2000);
+ assert.equal(knocking.of('role').length,0,'one at the door never hosts');
+ await bia.until(()=>bia.of('knock').some(k=>k.id===knocking.me.id));
+ // Nobody let in is left: no host, until the old host is back.
+ bia.send({t:'bye'});await wait(GRACE+700);
+ assert.equal(knocking.of('role').length,0,'not even when it is alone');assert.equal(knocking.closed,null);
+ const back=await open(room,{token:host.me.token,name:'Ana'});assert.equal(back.me.role,'host','the room hosts the first to come in');
+ await back.until(()=>back.of('knock').some(k=>k.id===knocking.me.id));
+ for(const c of [back,knocking])c.ws.close();
+ report.handoverDoor='ok';
+}
+
 // A host whose line drops in the middle of its race (its lobby says the race is under way) keeps its
 // place much longer (RACE_GRACE): its guests' game stands the race still until it is back (players'
 // wish: a championship's round on the host's machine must not pass to another), and back it is still the
