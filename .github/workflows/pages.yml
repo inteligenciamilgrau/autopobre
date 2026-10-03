@@ -2,7 +2,7 @@ name: Publicar Auto-Pobre Racing
 
 # Publishing is manual: pushes to main no longer replace the live game.
 # Actions -> Publicar Auto-Pobre Racing -> Run workflow, choosing what to publish.
-# The main link shows `versao` (the announced release, apr-2.1-rc2), /apr_v1/ keeps `versao_v1`
+# The main link shows `versao` (the announced release, apr-2.1-rc3), /apr_v1/ keeps `versao_v1`
 # (the first release, apr-1.0) online for history, and /dev/ shows `versao_dev` (the one in
 # progress, main). Each is built from its own checkout, tested and packed into one Pages
 # site. An empty versao_v1 or versao_dev leaves that address out. The multiplayer test room
@@ -11,9 +11,9 @@ on:
   workflow_dispatch:
     inputs:
       versao:
-        description: 'Link principal (inteligenciamilgrau.github.io/autopobre/): qual versão do jogo vai ali. Tag (apr-2.1-rc2), branch (main) ou commit.'
+        description: 'Link principal (inteligenciamilgrau.github.io/autopobre/): qual versão do jogo vai ali. Tag (apr-2.1-rc3), branch (main) ou commit.'
         required: true
-        default: apr-2.1-rc2
+        default: apr-2.1-rc3
       versao_v1:
         description: 'Endereço .../autopobre/apr_v1/ (versão antiga, histórico): qual versão vai ali. Se apagar este campo, o /apr_v1/ sai do ar.'
         required: false
