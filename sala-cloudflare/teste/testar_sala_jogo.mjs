@@ -7,7 +7,7 @@ import {Room} from '../../pista_interlagos/teste/net-room.js';
 import {ServerLink} from '../../pista_interlagos/teste/net-link.js';
 import {packCar} from '../../pista_interlagos/teste/net-cars.js';
 const PORT=8798,KEY='chave-de-teste-local',ORIGIN='http://teste.local',wait=(ms=50)=>new Promise(r=>setTimeout(r,ms));
-const stop=await startWrangler({port:PORT,vars:{HOST_GRACE_MS:800}});
+const stop=await startWrangler({port:PORT,vars:{CHAVE_GRUPO:KEY,ORIGENS:ORIGIN,HOST_GRACE_MS:800}});
 // A browser tab: its sessionStorage (the server's token for a reload), its key and name.
 const tab=()=>{const store=new Map();return {getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v))};};
 const rooms=[];

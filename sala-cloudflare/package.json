@@ -6,9 +6,9 @@
   "scripts": {
     "dev": "wrangler dev",
     "deploy": "wrangler deploy",
-    "test": "node teste/testar_sala.mjs"
+    "test": "node teste/testar_seguranca.mjs && node teste/testar_sala.mjs"
   },
   "devDependencies": {
-    "wrangler": "^4.142.0"
+    "wrangler": "^4.143.1"
   }
 }

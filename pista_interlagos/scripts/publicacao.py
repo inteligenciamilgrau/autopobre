@@ -22,7 +22,7 @@ MODULES = (
 )
 # The multiplayer test room is published only under /dev/ (preparar_publicacao.py --multiplayer);
 # the main link's build leaves these files and the room server out. The local preview serves them.
-MULTIPLAYER = ('multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js', 'net-link.js')
+MULTIPLAYER = ('multiplayer.js', 'multiplayer.css', 'net-room.js', 'net-cars.js', 'net-link.js', 'net-verify.js')
 ASSETS = (
     'branding/old_stock_preparada_v1.jpg',
     'circuitos/cascavel_solo.jpg', 'circuitos/piracicaba_solo.jpg', 'circuitos/chapeco_solo.jpg', 'circuitos/brasilia_solo.jpg',

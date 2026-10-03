@@ -11,7 +11,7 @@
 // - the doorman: a guest waits outside until the host admits it; the host can refuse or kick;
 // - the line check: an echo the server answers itself, so a player's game can tell a dead connection;
 // - limits: message size, messages and bytes per second per connection, players per room, failed
-//   keys per room.
+//   keys per IP (never a room-wide lockout).
 // A tab keeps its token (sessionStorage): back within HOST_GRACE after a reload, a host hosts again
 // and a guest keeps its id and its admission; a host that does not come back hands the room to the
 // admitted guest that has been there longest (one still at the door never hosts). During a race (the
@@ -25,7 +25,9 @@ const RATE_MESSAGES=90;      // per connection, per second
 const RATE_BYTES=320000;     // per connection, per second
 const OVER_LIMIT_CLOSE=3;    // seconds over the limit before the connection is closed
 const AUTH_WAIT=10000;       // ms to present the key
-const FAILS_PER_MINUTE=20;   // wrong keys in a room before it refuses new connections for a minute
+const FAILS_PER_MINUTE=20;   // wrong keys per IP in a room before that IP waits a minute
+const MAX_AUTH_SOURCES=1024,MAX_PENDING=64,MAX_PENDING_PER_IP=MAX_PEERS+2;
+const TOKEN_TTL=24*60*60*1000,MAX_TOKENS=256; // bounded reconnect history; active identities are kept
 const HOST_GRACE=15000;      // ms a host that left may take to come back (env HOST_GRACE_MS in tests)
 const RACE_GRACE=600000;     // the same during a race (env RACE_GRACE_MS in tests)
 const HOST_TYPES=new Set(['lobby','go','snap','pong','admit','deny','kick','config','bye']);
@@ -35,9 +37,10 @@ const ROOM=/^[a-z0-9-]{1,24}$/,ID=/^[0-9a-f]{8}$/,TOKEN=/^[0-9a-f]{32}$/;
 // connection, not a wrong key) it just tries again.
 export const CLOSE={key:4001,full:4002,denied:4003,kicked:4004,flood:4008,busy:4009,elsewhere:4010,origin:4011,late:4012};
 const hex=bytes=>[...crypto.getRandomValues(new Uint8Array(bytes))].map(b=>b.toString(16).padStart(2,'0')).join('');
-const cleanName=value=>String(value??'').replace(/\p{C}/gu,'').replace(/\s+/g,' ').trim().slice(0,24)||'Piloto';
+const cleanName=value=>(typeof value==='string'?value:'').replace(/\p{C}/gu,'').replace(/\s+/g,' ').trim().slice(0,24)||'Piloto';
 // Same length and every byte compared: the time taken says nothing about the key.
 function sameKey(a,b){
+ if(typeof a!=='string'||typeof b!=='string')return false;
  const x=new TextEncoder().encode(String(a??'')),y=new TextEncoder().encode(String(b??''));
  let diff=x.length^y.length;for(let i=0;i<Math.max(x.length,y.length);i++)diff|=(x[i]??0)^(y[i]??0);
  return diff===0&&y.length>0;
@@ -61,14 +64,21 @@ export class Sala {
   this.state=state;this.env=env;
   this.peers=new Map();        // id -> peer (authenticated connections)
   this.tokens=new Map();       // token -> {id, token, admitted, since}: who has been in this room
-  this.banned=new Set();       // tokens the host kicked
+  this.banned=new Set();       // kicked tokens, retained with their bounded token history
+  this.pending=new Set();      // sockets that have not authenticated yet
   this.hostId=null;this.hostToken=null;this.hostAwayTimer=null;this.porteiro=true;this.racing=false;
-  this.fails=[];this.refuseUntil=0;this.grace=Number(env.HOST_GRACE_MS)||HOST_GRACE;this.raceGrace=Number(env.RACE_GRACE_MS)||RACE_GRACE;this.authWait=Number(env.AUTH_WAIT_MS)||AUTH_WAIT;
+  this.attempts=new Map();this.grace=Number(env.HOST_GRACE_MS)||HOST_GRACE;this.raceGrace=Number(env.RACE_GRACE_MS)||RACE_GRACE;this.authWait=Number(env.AUTH_WAIT_MS)||AUTH_WAIT;
  }
- async fetch(){
+ async fetch(request){
+  // Cloudflare supplies this header at the edge. Do not trust X-Forwarded-For supplied by a client.
+  const ip=request.headers.get('CF-Connecting-IP')||'local';
   const [client,socket]=Object.values(new WebSocketPair());
   socket.accept();
-  const peer={socket,id:null,token:null,authed:false,window:{since:Date.now(),messages:0,bytes:0,over:0}};
+  const peer={socket,ip,id:null,token:null,authed:false,window:{since:Date.now(),messages:0,bytes:0,over:0}};
+  if(this.pending.size>=MAX_PENDING||[...this.pending].filter(p=>p.ip===ip).length>=MAX_PENDING_PER_IP){
+   this.shut(peer,CLOSE.late,'Muitas conexões aguardando chave');return new Response(null,{status:101,webSocket:client});
+  }
+  this.pending.add(peer);
   peer.authTimer=setTimeout(()=>{if(!peer.authed)this.shut(peer,CLOSE.late,'Sem chave a tempo');},this.authWait);
   socket.addEventListener('message',e=>this.message(peer,e.data));
   socket.addEventListener('close',()=>this.gone(peer));
@@ -88,8 +98,11 @@ export class Sala {
   w.messages++;w.bytes+=size;return w.messages<=RATE_MESSAGES&&w.bytes<=RATE_BYTES;
  }
  message(peer,data){
+  if(peer.shut||peer.authed&&this.peers.get(peer.id)!==peer)return;
   if(typeof data!=='string'||data.length>MAX_BYTES){this.shut(peer,CLOSE.flood,'Mensagem grande demais');return;}
-  if(!this.allow(peer,data.length))return;
+  const size=new TextEncoder().encode(data).byteLength;
+  if(size>MAX_BYTES){this.shut(peer,CLOSE.flood,'Mensagem grande demais');return;}
+  if(!this.allow(peer,size))return;
   let m;try{m=JSON.parse(data);}catch{return;}
   if(!m||typeof m!=='object'||Array.isArray(m)||typeof m.t!=='string')return;
   if(!peer.authed){if(m.t==='auth')this.auth(peer,m);return;}
@@ -111,20 +124,37 @@ export class Sala {
  }
  auth(peer,m){
   const now=Date.now();
-  if(now<this.refuseUntil){this.shut(peer,CLOSE.busy,'Tente de novo em um minuto');return;}
+  this.pruneTokens(now);
+  const token=typeof m.token==='string'&&TOKEN.test(m.token)?m.token:null;
+  let entry=token?this.tokens.get(token):null;
+  const ip=peer.ip||'local';
+  for(const [source,a] of this.attempts)if(now-a.since>=60000&&now>=a.until)this.attempts.delete(source);
+  const attempt=this.attempts.get(ip);
+  // An already authenticated identity may reconnect even behind the same NAT as a mistyping
+  // player, but only with both its unguessable token and the current group key.
+  if(attempt&&now<attempt.until&&!(entry&&!this.banned.has(token)&&sameKey(m.key,this.env.CHAVE_GRUPO))){
+   this.shut(peer,CLOSE.busy,'Tente de novo em um minuto');return;
+  }
   if(!this.env.CHAVE_GRUPO||!sameKey(m.key,this.env.CHAVE_GRUPO)){
-   this.fails=this.fails.filter(t=>now-t<60000);this.fails.push(now);
-   if(this.fails.length>=FAILS_PER_MINUTE)this.refuseUntil=now+60000;
+   const a=attempt&&now-attempt.since<60000?attempt:{since:now,count:0,until:0};
+   if(++a.count>=FAILS_PER_MINUTE)a.until=now+60000;
+   if(!this.attempts.has(ip)&&this.attempts.size>=MAX_AUTH_SOURCES)this.attempts.delete(this.attempts.keys().next().value);
+   this.attempts.set(ip,a);
    this.shut(peer,CLOSE.key,'Chave errada');return;
   }
-  const token=typeof m.token==='string'&&TOKEN.test(m.token)?m.token:null;
   if(token&&this.banned.has(token)){this.shut(peer,CLOSE.kicked,'Removido pelo anfitrião');return;}
-  let entry=token?this.tokens.get(token):null;
+  const old=entry?this.peers.get(entry.id):null;
+  // The absent host's place remains reserved throughout its grace. Reusing an inactive token
+  // consumes a place too; only replacing the same live identity leaves occupancy unchanged.
+  const reserved=this.hostAwayTimer&&!this.peers.has(this.hostId)?1:0;
+  const returningHost=reserved&&entry?.token===this.hostToken;
+  if(!old&&this.peers.size+reserved>=MAX_PEERS&&!returningHost){this.shut(peer,CLOSE.full,'Sala cheia');return;}
   // The same tab again (a reload, or a duplicated tab): the newer connection keeps the identity.
-  if(entry){const old=this.peers.get(entry.id);if(old&&old!==peer){this.peers.delete(entry.id);try{old.socket.close(CLOSE.elsewhere,'Aberta em outra aba');}catch{}}}
-  if(!entry&&this.peers.size>=MAX_PEERS){this.shut(peer,CLOSE.full,'Sala cheia');return;}
-  if(!entry){entry={id:this.newId(),token:hex(16),admitted:false,since:now};this.tokens.set(entry.token,entry);}
+  if(old&&old!==peer){this.peers.delete(entry.id);this.shut(old,CLOSE.elsewhere,'Aberta em outra aba');}
+  if(!entry){this.pruneTokens(now,true);entry={id:this.newId(),token:hex(16),admitted:false,since:now};this.tokens.set(entry.token,entry);}
+  entry.lastSeen=now;
   peer.token=entry.token;peer.id=entry.id;peer.name=cleanName(m.name);peer.authed=true;clearTimeout(peer.authTimer);
+  this.pending.delete(peer);
   this.peers.set(peer.id,peer);
   // The first in an empty room hosts it; a host back within the grace takes it again.
   const hostBack=this.hostToken===peer.token;
@@ -137,6 +167,21 @@ export class Sala {
   this.send(peer,{t:'welcome',id:peer.id,token:peer.token,role,host:this.hostId,pending:!entry.admitted});
   if(hostBack)this.toGuests({t:'host',id:peer.id});
   if(role==='host')this.knocks();else if(!entry.admitted)this.toHost({t:'knock',id:peer.id,name:peer.name});
+ }
+ // Expire disconnected sessions and evict the oldest disconnected identity when the history is
+ // full. A live peer or a host in its grace is never evicted. Kicks share this bounded lifetime;
+ // an expired identity must ask the doorman again, just as after a room/server restart.
+ pruneTokens(now,space=false){
+  const inactive=[];
+  for(const [token,e] of this.tokens){
+   if(this.peers.has(e.id)||this.hostAwayTimer&&token===this.hostToken)continue;
+   if(now-e.lastSeen>=TOKEN_TTL){this.tokens.delete(token);this.banned.delete(token);}
+   else inactive.push(e);
+  }
+  if(space){
+   inactive.sort((a,b)=>a.lastSeen-b.lastSeen);
+   for(const e of inactive){if(this.tokens.size<MAX_TOKENS)break;this.tokens.delete(e.token);this.banned.delete(e.token);}
+  }
  }
  // Everyone still waiting at the door knocks again for a host that has just (re)taken the room.
  knocks(){for(const p of this.peers.values())if(p.id!==this.hostId&&!this.tokens.get(p.token)?.admitted)this.toHost({t:'knock',id:p.id,name:p.name});}
@@ -165,8 +210,10 @@ export class Sala {
  toGuests(m){const data=JSON.stringify(m);for(const p of this.peers.values())if(p.id!==this.hostId&&this.tokens.get(p.token)?.admitted){try{p.socket.send(data);}catch{}}}
  gone(peer){
   clearTimeout(peer.authTimer);
+  this.pending.delete(peer);
   if(!peer.id||this.peers.get(peer.id)!==peer)return;
   this.peers.delete(peer.id);
+  const entry=this.tokens.get(peer.token);if(entry)entry.lastSeen=Date.now();
   if(peer.id!==this.hostId){this.toHost({t:'bye',from:peer.id});return;}
   // The host left (a reload, or its line dropped): its guests wait for it before one of them hosts,
   // a long while when its line dropped in the middle of its race.

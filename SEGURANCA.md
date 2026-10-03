@@ -1,5 +1,19 @@
 # Revisão para publicação — 13/09/2026
 
+## Atualização — 03/10/2026
+
+A revisão do multiplayer encontrou bloqueio coletivo por tentativas de chave errada e reconexões capazes de ultrapassar as 19 vagas. O Worker agora limita erros por IP, admite a reconexão de uma identidade conhecida com token e chave válidos, conta tokens inativos na ocupação e reserva a vaga do anfitrião durante a tolerância de queda. Conexões aguardando autenticação, histórico de tokens e contadores de tentativas têm limites; o histórico desconectado expira em 24 horas. Mensagens usam o tamanho real em bytes UTF-8. Os detalhes e prazos das expulsões estão no [README do servidor](sala-cloudflare/README.md).
+
+No jogo, o anfitrião passou a conferir deslocamentos e a contar checkpoints, voltas e tempos dos convidados pela trajetória observada e pelo próprio relógio da corrida. Os campos de progresso e resultado declarados pelo convidado são substituídos antes da retransmissão. É uma verificação de plausibilidade: não há simulação física autoritativa no servidor, e um anfitrião adulterado ou trajetórias falsas que respeitem os limites continuam fora da garantia desta proteção.
+
+O sufixo escondido depois de `_` foi preservado: é uma proteção visual para streams. A chave do grupo e o porteiro controlam o acesso às salas.
+
+As ferramentas do servidor foram atualizadas para Wrangler 4.143.1, Miniflare 5.20260926.1-alpha e undici 7.29.1. O `npm audit` do lock do servidor retornou **zero vulnerabilidades**, incluindo dependências de desenvolvimento. A atualização incorpora a correção do [aviso oficial do undici sobre WebSocket](https://github.com/nodejs/undici/security/advisories/GHSA-rfgv-xxqx-mfg5). O lock do jogo, com Three.js 0.183.2, também retornou zero avisos na consulta desta revisão.
+
+Verificações locais: testes de segurança do Worker, protocolo WebSocket no runtime Cloudflare local, integração do código de sala do jogo com o Worker e corrida em três janelas do navegador. Os testes de estados dos convidados exercitam a física das sete pistas, resultados fabricados, deslocamentos impossíveis, pausas e recuperação de conexão. O fluxo de publicação passa a executar também `testar_multiplayer.mjs` e `testar_estados_sala.mjs`.
+
+Esta atualização foi preparada e testada localmente; não publica o site nem o Worker. Os achados e a verificação de setembro abaixo são o registro histórico da preparação inicial.
+
 ## Resultado
 
 O jogo foi preparado para hospedagem estática a partir de `dist/`. A inspeção dos arquivos selecionados para Git e do pacote público não encontrou caminhos absolutos de máquina nem candidatos a credenciais pelos padrões examinados. A consulta ao registro oficial do npm para o lock atual, com Three.js 0.183.2, retornou zero vulnerabilidades conhecidas nas dependências em 13/09/2026. Isso não equivale a uma garantia de ausência de falhas.

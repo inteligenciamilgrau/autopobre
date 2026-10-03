@@ -1,20 +1,20 @@
 // The room server (src/index.js) in Cloudflare's local runtime (wrangler dev, as in development):
 // the group key, the origin, who is who, the roles, the doorman, the limits, a host's reload and
-// its handover. Run: npm test (from sala-cloudflare). The key and the allowed origins come from
-// .dev.vars (CHAVE_GRUPO=chave-de-teste-local, ORIGENS with http://teste.local).
+// its handover. Run: npm test (from sala-cloudflare). The fixture key and origin below override
+// local configuration; these checks never require a production credential.
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {startWrangler} from './wrangler-dev.mjs';
 const PORT=8797,KEY='chave-de-teste-local',ORIGIN='http://teste.local',GRACE=600,RACE_GRACE=2500,AUTH_WAIT=1500;
 const wait=(ms=40)=>new Promise(r=>setTimeout(r,ms));
-const stop=await startWrangler({port:PORT,vars:{HOST_GRACE_MS:GRACE,RACE_GRACE_MS:RACE_GRACE,AUTH_WAIT_MS:AUTH_WAIT}});
+const stop=await startWrangler({port:PORT,vars:{CHAVE_GRUPO:KEY,ORIGENS:ORIGIN,HOST_GRACE_MS:GRACE,RACE_GRACE_MS:RACE_GRACE,AUTH_WAIT_MS:AUTH_WAIT}});
 let rooms=0;const fresh=()=>'sala-'+(++rooms)+'-'+Math.random().toString(36).slice(2,6);
 // The HTTP status of a WebSocket request that is turned away before the upgrade.
 const refused=(path,origin)=>new Promise(done=>{const req=http.request({host:'127.0.0.1',port:PORT,path,headers:{Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Version':'13','Sec-WebSocket-Key':'dGhlIHNhbXBsZSBub25jZQ==',...(origin?{Origin:origin}:{})}});
  req.on('response',res=>{res.resume();done(res.statusCode);});req.on('upgrade',(res,socket)=>{socket.destroy();done(101);});req.on('error',()=>done(0));req.end();});
 // A client: its messages, its close, and helpers to wait for them.
-async function open(room,{origin=ORIGIN,key=KEY,token=null,name='Piloto',auth=true}={}){
- const ws=new WebSocket(`ws://127.0.0.1:${PORT}/sala/${room}`,{headers:{Origin:origin}}),c={ws,got:[],closed:null};
+async function open(room,{origin=ORIGIN,key=KEY,token=null,name='Piloto',auth=true,ip='192.0.2.1'}={}){
+ const ws=new WebSocket(`ws://127.0.0.1:${PORT}/sala/${room}`,{headers:{Origin:origin,'CF-Connecting-IP':ip}}),c={ws,got:[],closed:null};
  ws.onmessage=e=>c.got.push(JSON.parse(e.data));ws.onclose=e=>{c.closed={code:e.code,reason:e.reason};};ws.onerror=()=>{};
  await new Promise(r=>{ws.onopen=r;const t=setInterval(()=>{if(c.closed){clearInterval(t);r();}},20);});
  c.send=m=>{try{ws.send(typeof m==='string'?m:JSON.stringify(m));}catch{}};
@@ -145,15 +145,37 @@ const report={};
  report.raceGrace='ok';
 }
 
-// A full room, and a room that saw too many wrong keys.
+// Capacity includes inactive tokens. Authentication failures affect only their IP, and a known
+// identity with the current key can reconnect even behind that same shared IP.
 {
  const room=fresh(),host=await open(room);host.send({t:'config',porteiro:false});await wait(30);
  const others=[];for(let i=0;i<18;i++)others.push(await open(room,{name:'P'+i}));
  assert(others.every(o=>o.me?.role==='guest'));
  const late=await open(room);assert.equal(late.closed?.code,4002,'19 in the room: the 20th is turned away');
  for(const c of [host,...others])c.ws.close();
- const locked=fresh();for(let i=0;i<20;i++)await open(locked,{key:'errada'});
- const right=await open(locked);assert.equal(right.closed?.code,4009,'after 20 wrong keys the room waits a minute');
+ const locked=fresh(),owner=await open(locked);
+ for(let i=0;i<20;i++)await open(locked,{key:'errada'});
+ const right=await open(locked,{ip:'192.0.2.2'});assert(right.me,'another IP can still enter');
+ const blocked=await open(locked,{key:'errada'});assert.equal(blocked.closed?.code,4009,'only the offending IP waits');
+ const back=await open(locked,{token:owner.me.token});assert.equal(back.me?.role,'host','known host resumes on the same IP');
+ for(const c of [owner,right,back])c.ws.close();
+ const retained=fresh(),keeper=await open(retained),tokens=[];
+ for(let i=0;i<20;i++){
+  const guest=await open(retained);tokens.push(guest.me.token);guest.ws.close();await guest.until(()=>guest.closed);
+  await keeper.until(()=>keeper.of('bye').some(m=>m.from===guest.me.id));
+ }
+ const rejoined=[];
+ for(const token of tokens)rejoined.push(await open(retained,{token}));
+ assert.equal(rejoined.filter(c=>c.me).length,18,'old tokens cannot exceed the 19 slots');
+ assert(rejoined.slice(18).every(c=>c.closed?.code===4002));
+ for(const c of [keeper,...rejoined])c.ws.close();
+ // An unauthenticated source also has a bounded number of sockets awaiting its key.
+ const pending=fresh(),idle=[];
+ for(let i=0;i<21;i++)idle.push(await open(pending,{auth:false}));
+ const extra=await open(pending,{auth:false});await extra.until(()=>extra.closed);
+ assert.equal(extra.closed.code,4012,'pending capacity retries instead of permanently stopping the game');
+ const other=await open(pending,{ip:'192.0.2.2'});assert(other.me,'another source can authenticate');
+ for(const c of [...idle,other])c.ws.close();
  report.limits='ok';
 }
 stop();
