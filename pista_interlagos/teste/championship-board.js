@@ -1,5 +1,6 @@
 import {CIRCUITS} from './circuits.js';
-import {CHAMPIONSHIP_CALENDARS,CHAMPIONSHIP_POINTS,pointsText} from './championship.js';
+import {CHAMPIONSHIP_CALENDARS,CHAMPIONSHIP_POINTS,calendarsFor,pointsText} from './championship.js';
+import {MODEL_NAMES} from './race-roster.js';
 
 // The championship on screen: the panel of the track screen (calendar tabs, rounds, status, top
 // five) and the full standings dialog, opened from there and from the result sheet.
@@ -15,8 +16,8 @@ const placeText=r=>r.dsq?'DSQ':r.dnf?'AB':ordinal(r.position);
 
 export function renderChampionshipPanel(root,championship){
  const $=id=>root.querySelector('#'+id),state=championship.state,round=championship.round,info=championship.info;
- // One tab per calendar (championship.js CHAMPIONSHIP_CALENDARS); main.js switches them.
- const tabs=$('championshipTabs');tabs.replaceChildren(...Object.values(CHAMPIONSHIP_CALENDARS).map(c=>{
+ // One tab per calendar the mode offers (championship.js calendarsFor); main.js switches them.
+ const tabs=$('championshipTabs');tabs.replaceChildren(...calendarsFor(championship.mode).map(id=>CHAMPIONSHIP_CALENDARS[id]).map(c=>{
   const on=c.id===championship.calendar,tab=el('button',{type:'button',role:'tab',id:`championshipTab-${c.id}`,textContent:c.name,tabIndex:on?0:-1});
   tab.dataset.championshipCalendar=c.id;tab.setAttribute('aria-selected',String(on));tab.setAttribute('aria-controls','championshipCalendar');return tab;}));
  $('championshipTitle').textContent=info.title;
@@ -33,12 +34,14 @@ export function renderChampionshipPanel(root,championship){
  $('championshipKicker').textContent=`CAMPEONATO · ${MODE_NAME[championship.mode]??MODE_NAME.corrida}`;
  const status=$('championshipStatus'),start=$('championshipStart'),reset=$('championshipReset'),table=$('championshipTableButton'),mini=$('championshipMini');
  mini.replaceChildren();start.disabled=!championship.available;
+ // "11 etapas de Fusca": a calendar raced in another car says so (championship.js kind).
+ const rounds=[`${schedule.length} etapas`,info.kind].filter(Boolean).join(' ');
  if(!state&&!championship.available){
   const soon=schedule.find(r=>!Object.hasOwn(CIRCUITS,r.circuit));
-  status.textContent=`${schedule.length} etapas nas datas da temporada. ${roundName(soon).split(' - ')[0]} ainda está sendo construída: o campeonato abre assim que a pista ficar pronta.`;
+  status.textContent=`${rounds} nas datas da temporada. ${roundName(soon).split(' - ')[0]} ainda está sendo construída: o campeonato abre assim que a pista ficar pronta.`;
   start.textContent=`Em breve: ${roundName(soon).split(' - ')[0]}`;
  }else if(!state){
-  status.textContent=`${schedule.length} etapas, ${schedule.some(r=>r.date)?'nas datas da temporada (sujeitas a alterações)':'uma corrida em cada pista'}. Pontos para os 15: ${CHAMPIONSHIP_POINTS.slice(0,3).join(', ')}… até 1.`;
+  status.textContent=`${rounds}, ${schedule.some(r=>r.date)?'nas datas da temporada (sujeitas a alterações)':'uma corrida em cada pista'}. Pontos para os 15: ${CHAMPIONSHIP_POINTS.slice(0,3).join(', ')}… até 1.`;
   start.textContent='Começar campeonato →';
  }else{
   status.textContent=championship.finished
@@ -66,7 +69,7 @@ export class ChampionshipDialog {
   const player=standings.find(d=>d.player);
   $('championshipDialogMode').textContent=`${championship.calendar==='todas'?'CAMPEONATO OLD STOCK':championship.info.label} · ${MODE_NAME[championship.mode]??MODE_NAME.corrida}`;
   $('championshipBanner').textContent=championship.finished
-   ?(player.position===1?`CAMPEÃO! ${player.shortName} e o Opala ${player.number} levam o título com ${pointsText(player.points)}.`:`Campeão: #${standings[0].number} ${standings[0].name} (${standings[0].points} pts). Você fechou em ${ordinal(player.position)}.`)
+   ?(player.position===1?`CAMPEÃO! ${player.shortName} e o ${MODEL_NAMES[championship.info.model]??'Opala'} ${player.number} levam o título com ${pointsText(player.points)}.`:`Campeão: #${standings[0].number} ${standings[0].name} (${standings[0].points} pts). Você fechou em ${ordinal(player.position)}.`)
    :`Depois de ${championship.round} de ${championship.total} etapas · próxima: ${CIRCUITS[championship.nextCircuit]?.name??'—'}`;
   $('championshipBanner').classList.toggle('champion',championship.finished&&player.position===1);
   const head=this.dialog.querySelector('thead');head.replaceChildren(el('tr',{},el('th',{textContent:'POS'}),el('th',{textContent:'Nº'}),el('th',{textContent:'PILOTO / DUPLA'}),

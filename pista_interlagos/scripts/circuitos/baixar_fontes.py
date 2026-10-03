@@ -12,11 +12,15 @@
 - Geoportal do DF (IDE/DF, SEDUH), onde o circuito pede (Brasilia): o MDT de 1 m pelo servico de
   perfis, edificacoes do cadastro territorial com altura, arvores isoladas e massas arboreas;
   `--idedf` baixa so essa parte.
+- Mapa Facil da Prefeitura de Goiania (SIGGO), onde o circuito pede: curvas de nivel de 5 m (com o
+  ANADEM, viram o modelo do terreno mdt_goiania.tif), equipamentos do autodromo, vegetacao, pavimentos
+  do cadastro e os edificios em altura da cidade; `--goiania` baixa so essa parte.
 - --referencia: mosaico de imagem aerea Esri World Imagery, so para conferencia visual
   local (nao entra no jogo nem no pacote publico).
 
 Os rasters sao lidos por janela (COG com requisicoes parciais), sem baixar os
-arquivos inteiros. Requer numpy, rasterio, requests, pillow (ver README da pasta).
+arquivos inteiros. Requer numpy, requests, pillow e rasterio, ou tifffile quando o rasterio nao
+carrega (geo_io.py).
 """
 import json
 import math
@@ -26,19 +30,15 @@ from datetime import date, timedelta
 from io import BytesIO
 
 import numpy as np
-import rasterio
 import requests
 from PIL import Image
-from rasterio.windows import from_bounds
-from rasterio.warp import transform_bounds
 
+import geo_io
 from config import CIRCUITOS, pasta_fontes
 
 AGENTE = {'User-Agent': 'autopobre-circuitos/1.0 (jogo Auto-Pobre Racing)'}
 OVERPASS = ['https://overpass.kumi.systems/api/interpreter', 'https://overpass-api.de/api/interpreter',
             'https://overpass.private.coffee/api/interpreter']
-GDAL = dict(GDAL_DISABLE_READDIR_ON_OPEN='EMPTY_DIR', GDAL_HTTP_TIMEOUT='120', GDAL_HTTP_MAX_RETRY='4',
-            GDAL_HTTP_RETRY_DELAY='3', CPL_VSIL_CURL_ALLOWED_EXTENSIONS='.tif,.TIF')
 
 
 def caixa(c, margem_m=0.0):
@@ -80,19 +80,10 @@ def overpass(c, destino):
 
 def recorte(url, destino, bounds_ll, descricao):
     """Recorta a janela lon/lat de um COG remoto e grava em GeoTIFF local."""
-    with rasterio.Env(**GDAL), rasterio.open('/vsicurl/' + url) as src:
-        b = transform_bounds('EPSG:4326', src.crs, *bounds_ll) if src.crs.to_epsg() != 4326 else bounds_ll
-        win = from_bounds(*b, transform=src.transform).round_offsets().round_lengths()
-        dados = src.read(window=win)
-        perfil = src.profile.copy()
-        perfil.update(width=dados.shape[2], height=dados.shape[1], transform=src.window_transform(win),
-                      compress='deflate', tiled=False, driver='GTiff')
-        for k in ('blockxsize', 'blockysize'):
-            perfil.pop(k, None)
-    with rasterio.open(destino, 'w', **perfil) as dst:
-        dst.write(dados)
-    print(f'{descricao}: {dados.shape[2]}x{dados.shape[1]} px -> {destino.name}')
-    return dados
+    g = geo_io.recortar(url, bounds_ll)
+    geo_io.gravar(destino, g.a, g.transform, g.epsg, g.nodata)
+    print(f'{descricao}: {g.a.shape[2]}x{g.a.shape[1]} px -> {destino.name}')
+    return g.a
 
 
 def sentinel2(c, pasta):
@@ -110,10 +101,7 @@ def sentinel2(c, pasta):
     for cena in cenas:
         scl_url = cena['assets']['scl']['href']
         try:
-            with rasterio.Env(**GDAL), rasterio.open('/vsicurl/' + scl_url) as src:
-                b = transform_bounds('EPSG:4326', src.crs, w, s, e, n)
-                win = from_bounds(*b, transform=src.transform).round_offsets().round_lengths()
-                scl = src.read(1, window=win, boundless=True, fill_value=0)
+            scl = geo_io.recortar(scl_url, (w, s, e, n), preencher=0).banda(1)
         except Exception as err:          # noqa: BLE001 - cena indisponivel, tenta a proxima
             print(f'  {cena["id"]}: SCL indisponivel ({err})')
             continue
@@ -141,27 +129,46 @@ def quadkey(lat, lon, z=9):
     return ''.join(str(((x >> (i - 1)) & 1) + 2 * ((y >> (i - 1)) & 1)) for i in range(z, 0, -1))
 
 
-def edificios_microsoft(c, pasta):
-    """Pegadas de edificacoes da Microsoft no recorte do circuito (GeoJSON)."""
+def microsoft_linhas(c, pasta, quadkeys=None):
+    """Feicoes (uma por linha do arquivo) dos quadkeys (o do circuito, por padrao) no Microsoft Building
+    Footprints. Os arquivos brutos ficam em fontes/<c>/microsoft/ para uma segunda leitura (o horizonte
+    de Goiania)."""
     import csv
     import gzip
+    cache = pasta / 'microsoft'
+    cache.mkdir(exist_ok=True)
+    indice = None
+    for q in quadkeys or [quadkey(*c['centro'])]:
+        lista = cache / f'{q}.json'
+        if lista.exists():
+            urls = json.loads(lista.read_text(encoding='utf-8'))
+        else:
+            indice = indice or requests.get('https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv',
+                                            headers=AGENTE, timeout=180).text.splitlines()
+            urls = [r['Url'] for r in csv.DictReader(indice) if r['Location'] == 'Brazil' and r['QuadKey'] == q]
+            lista.write_text(json.dumps(urls), encoding='utf-8')
+        for k, url in enumerate(urls):
+            arq = cache / f'{q}_{k}.csv.gz'
+            if not arq.exists():
+                arq.write_bytes(requests.get(url, headers=AGENTE, timeout=600).content)
+            for linha in gzip.decompress(arq.read_bytes()).decode('utf-8').splitlines():
+                yield json.loads(linha)
+
+
+def edificios_microsoft(c, pasta):
+    """Pegadas de edificacoes da Microsoft no recorte do circuito (GeoJSON)."""
     q = quadkey(*c['centro'])
-    indice = requests.get('https://minedbuildings.z5.web.core.windows.net/global-buildings/dataset-links.csv',
-                          headers=AGENTE, timeout=180).text.splitlines()
-    urls = [r['Url'] for r in csv.DictReader(indice) if r['Location'] == 'Brazil' and r['QuadKey'] == q]
     w, s, e, n = caixa(c)
     feicoes = []
-    for url in urls:
-        bruto = requests.get(url, headers=AGENTE, timeout=600).content
-        for linha in gzip.decompress(bruto).decode('utf-8').splitlines():
-            f = json.loads(linha)
-            anel = f['geometry']['coordinates'][0]
-            lon = sum(p[0] for p in anel) / len(anel)
-            lat = sum(p[1] for p in anel) / len(anel)
-            if w <= lon <= e and s <= lat <= n:
-                feicoes.append(f)
+    for f in microsoft_linhas(c, pasta):
+        anel = f['geometry']['coordinates'][0]
+        lon = sum(p[0] for p in anel) / len(anel)
+        lat = sum(p[1] for p in anel) / len(anel)
+        if w <= lon <= e and s <= lat <= n:
+            feicoes.append(f)
     destino = pasta / 'edificios_microsoft.geojson'
     destino.write_text(json.dumps({'type': 'FeatureCollection', 'features': feicoes}), encoding='utf-8')
+    urls = json.loads((pasta / 'microsoft' / f'{q}.json').read_text(encoding='utf-8'))
     print(f'Microsoft Building Footprints: {len(feicoes)} edificacoes (quadkey {q})')
     return {'quadkey': q, 'urls': urls, 'edificacoes': len(feicoes)}
 
@@ -172,16 +179,26 @@ IDEDF = 'https://www.geoservicos.ide.df.gov.br/arcgis/rest/services'
 def idedf_camada(camada, caixa_utm, destino, descricao, campos='*', onde='1=1'):
     """Feicoes de uma camada do Geoportal do DF (ArcGIS REST da IDE/DF) dentro de uma caixa em
     SIRGAS 2000 / UTM 23S, em GeoJSON nas mesmas coordenadas, paginando de 1000 em 1000."""
+    return arcgis_camada(f'{IDEDF}/{camada}', 31983, caixa_utm, destino, f'IDE/DF {descricao}', campos, onde)
+
+
+def arcgis_camada(url_camada, epsg, caixa_utm, destino, descricao, campos='*', onde='1=1', ordem=None):
+    """Feicoes de uma camada ArcGIS REST (MapServer/FeatureServer) dentro de uma caixa no CRS `epsg`,
+    em GeoJSON nas mesmas coordenadas, paginando de 1000 em 1000. Algumas camadas so paginam com uma
+    ordem explicita (`ordem`, o lote do cadastro de Goiania: OBJECTID)."""
     feicoes, inicio = [], 0
     while True:
         params = {'geometry': ','.join(f'{v:.1f}' for v in caixa_utm), 'geometryType': 'esriGeometryEnvelope',
-                  'inSR': 31983, 'outSR': 31983, 'spatialRel': 'esriSpatialRelIntersects', 'outFields': campos, 'where': onde,
-                  'returnGeometry': 'true', 'resultOffset': inicio, 'resultRecordCount': 1000, 'f': 'geojson'}
+                  'inSR': epsg, 'outSR': epsg, 'spatialRel': 'esriSpatialRelIntersects', 'outFields': campos, 'where': onde,
+                  'returnGeometry': 'true', 'resultOffset': inicio, 'resultRecordCount': 1000, 'f': 'geojson',
+                  **({'orderByFields': ordem} if ordem else {})}
         for tentativa in range(4):
             try:
-                r = requests.get(f'{IDEDF}/{camada}/query', params=params, headers=AGENTE, timeout=300)
+                r = requests.get(f'{url_camada}/query', params=params, headers=AGENTE, timeout=300)
                 r.raise_for_status()
-                lote = r.json()
+                lote = json.loads(r.content)          # bytes: UTF-8 (r.json() supunha Latin-1 em Goiania)
+                if 'error' in lote:
+                    raise ValueError(f'{url_camada}: {lote["error"]}')
                 break
             except (requests.RequestException, ValueError):
                 if tentativa == 3:
@@ -191,9 +208,9 @@ def idedf_camada(camada, caixa_utm, destino, descricao, campos='*', onde='1=1'):
         if not lote.get('exceededTransferLimit') and len(lote.get('features', [])) < 1000:
             break
         inicio += len(lote['features'])
-    destino.write_text(json.dumps({'type': 'FeatureCollection', 'crs': 'EPSG:31983', 'features': feicoes},
+    destino.write_text(json.dumps({'type': 'FeatureCollection', 'crs': f'EPSG:{epsg}', 'features': feicoes},
                                   ensure_ascii=False), encoding='utf-8')
-    print(f'IDE/DF {descricao}: {len(feicoes)} feicoes -> {destino.name}')
+    print(f'{descricao}: {len(feicoes)} feicoes -> {destino.name}')
     return len(feicoes)
 
 
@@ -202,7 +219,7 @@ def mdt_perfis(centro_utm, meia, destino, passo=2.0, lote=24):
     IDE/DF devolve as cotas ao longo de linhas; cada linha da grade e um perfil leste-oeste. As
     curvas de nivel de 1 m (2016) vem inteiras do servidor (linhas de quilometros) e nao cabem
     numa consulta."""
-    from rasterio.transform import from_origin
+    from affine import Affine
     url = f'{IDEDF}/Geoprocessing/Profile1m/GPServer/Profile/execute'
     cx, cy = centro_utm
     x0, x1 = cx - meia, cx + meia
@@ -238,10 +255,7 @@ def mdt_perfis(centro_utm, meia, destino, passo=2.0, lote=24):
     if vazio.any():
         from rasterio.fill import fillnodata
         z = fillnodata(np.where(vazio, 0, z).astype(np.float32), mask=(~vazio).astype('uint8'), max_search_distance=20)
-    perfil = {'driver': 'GTiff', 'width': nx, 'height': len(ys), 'count': 1, 'dtype': 'float32', 'crs': 'EPSG:31983',
-              'transform': from_origin(x0 - passo / 2, ys[0] + passo / 2, passo, passo), 'compress': 'deflate'}
-    with rasterio.open(destino, 'w', **perfil) as dst:
-        dst.write(z.astype(np.float32), 1)
+    geo_io.gravar(destino, z.astype(np.float32), Affine(passo, 0, x0 - passo / 2, 0, -passo, ys[0] + passo / 2), 31983)
     print(f'MDT 1 m do DF (Profile1m) em grade de {passo:.0f} m: {nx}x{len(ys)}, {vazio.mean():.2%} preenchido, '
           f'cotas {np.nanmin(z):.1f} a {np.nanmax(z):.1f} m -> {destino.name}')
     return {'servico': url, 'passo_m': passo, 'celulas': [nx, len(ys)], 'preenchido': float(vazio.mean()),
@@ -278,6 +292,203 @@ def fontes_idedf(c, pasta):
                                    'ed_alt_aprox >= 9 OR ed_area >= 1500')
     (pasta / 'idedf.json').write_text(json.dumps(info, indent=1, ensure_ascii=False), encoding='utf-8')
     return info
+
+
+GYN = 'https://portalmapa.goiania.go.gov.br/servicogyn/rest/services/MapaServer'
+
+
+def fontes_goiania(c, pasta):
+    """Dados locais do Mapa Facil da Prefeitura de Goiania (SIGGO, ArcGIS REST, SIRGAS 2000 / UTM 22S):
+    curvas de nivel de 5 m (levantamento da Topocart), os equipamentos do autodromo (pista, boxes,
+    garagens, arquibancada, cronometragem), vegetacao e hidrografia, o numero de pavimentos dos lotes
+    do cadastro imobiliario e os edificios em altura da cidade com o numero de pavimentos (o horizonte),
+    com as pegadas da Microsoft que os contem."""
+    from projecao import Transformer
+    T = Transformer.from_crs(4326, 31982, always_xy=True)
+
+    def caixa_utm(margem):
+        w, s, e, n = caixa(c, margem)
+        xs, ys = T.transform(np.array([w, e, w, e]), np.array([s, s, n, n]))
+        return float(min(xs)), float(min(ys)), float(max(xs)), float(max(ys))
+    perto, grande = caixa_utm(0), caixa_utm(400)
+    info = {'servico': GYN, 'baixado_em': date.today().isoformat()}
+    info['curvas_5m'] = arcgis_camada(f'{GYN}/Mapa_MeioAmbiente/MapServer/7', 31982, grande, pasta / 'goiania_curvas_5m.geojson',
+                                      'Prefeitura: curvas de nivel de 5 m', 'NM_CNV')
+    info['equipamentos'] = arcgis_camada(f'{GYN}/Mapa_PontosNotaveis/MapServer/2', 31982, perto, pasta / 'goiania_equipamentos.geojson',
+                                         'Prefeitura: grandes equipamentos (autodromo)', 'nm_gre')
+    info['vegetacao'] = arcgis_camada(f'{GYN}/Mapa_MeioAmbiente/MapServer/9', 31982, perto, pasta / 'goiania_vegetacao.geojson',
+                                      'Prefeitura: vegetacao', 'tp_veg,nm_veg')
+    info['hidrografia'] = arcgis_camada(f'{GYN}/Mapa_MeioAmbiente/MapServer/8', 31982, perto, pasta / 'goiania_hidrografia.geojson',
+                                        'Prefeitura: hidrografia', 'tp_hid,nm_hid')
+    # Do cadastro so o que vira altura: pavimentos, area construida e uso (nada do proprietario).
+    info['lotes'] = arcgis_camada(f'{GYN}/Feature_Base/MapServer/3', 31982, perto, pasta / 'goiania_lotes.geojson',
+                                  'Prefeitura: lotes do cadastro (pavimentos)', 'nrpaviment,areaedif,uso,tpedif1', ordem='OBJECTID')
+    # Edificios em altura (4 pavimentos ou mais) ate ~9 km: Jardim Goias, Marista, Bueno, Centro.
+    raio = c.get('horizonte_m', 9000)
+    longe = caixa_utm(raio - c['raio_m'])
+    torres = []
+    for camada in (2, 3, 4, 5):
+        destino = pasta / f'goiania_torres_{camada}.geojson'
+        arcgis_camada(f'{GYN}/Mapa_Edificios/MapServer/{camada}', 31982, longe, destino,
+                      f'Prefeitura: edificios em altura (camada {camada})', 'NM_EDI,NR_PAV,TL_APT')
+        torres += json.loads(destino.read_text(encoding='utf-8'))['features']
+        destino.unlink()
+    (pasta / 'goiania_torres.geojson').write_text(json.dumps({'type': 'FeatureCollection', 'crs': 'EPSG:31982', 'features': torres},
+                                                             ensure_ascii=False), encoding='utf-8')
+    info['torres'] = len(torres)
+    info['torres_microsoft'] = pegadas_das_torres(c, pasta, torres)
+    info['mdt'] = mdt_de_curvas(c, pasta)
+    (pasta / 'goiania.json').write_text(json.dumps(info, indent=1, ensure_ascii=False), encoding='utf-8')
+    return info
+
+
+def pegadas_das_torres(c, pasta, torres):
+    """Pegadas da Microsoft que contem um edificio em altura do cadastro de Goiania (o horizonte), e as
+    demais ate `horizonte_casas_m` do centro (os bairros em volta do autodromo, alem da grade)."""
+    from shapely.geometry import Point, shape
+    from projecao import Transformer
+    T = Transformer.from_crs(31982, 4326, always_xy=True)
+    xy = np.array([f['geometry']['coordinates'][:2] for f in torres])
+    lon, lat = T.transform(xy[:, 0], xy[:, 1])
+    celula = {}
+    for k, (u, v) in enumerate(zip(lon, lat)):
+        celula.setdefault((int(u * 500), int(v * 500)), []).append(k)
+    # Quadkeys de nivel 9 que cobrem os pontos (o limite entre dois passa entre o autodromo e o centro).
+    quads = sorted({quadkey(v, u) for u, v in zip(lon, lat)} | {quadkey(*c['centro'])})
+    clat, clon = c['centro']
+    r_casas = c.get('horizonte_casas_m', 2200)
+    dlat, dlon = r_casas / 111320.0, r_casas / (111320.0 * math.cos(math.radians(clat)))
+    achadas, usadas, casas = [], set(), []
+    for f in microsoft_linhas(c, pasta, quads):
+        anel = np.array(f['geometry']['coordinates'][0])
+        x0, y0, x1, y1 = anel[:, 0].min(), anel[:, 1].min(), anel[:, 0].max(), anel[:, 1].max()
+        if abs((x0 + x1) / 2 - clon) < dlon and abs((y0 + y1) / 2 - clat) < dlat:
+            casas.append(f)
+        perto = [k for i in range(int(x0 * 500), int(x1 * 500) + 1) for j in range(int(y0 * 500), int(y1 * 500) + 1)
+                 for k in celula.get((i, j), [])]
+        if not perto:
+            continue
+        p = shape(f['geometry'])
+        dentro = [k for k in perto if p.contains(Point(lon[k], lat[k]))]
+        if dentro:
+            f['properties'] = {'torres': dentro}
+            achadas.append(f)
+            usadas.update(dentro)
+    (pasta / 'goiania_torres_microsoft.geojson').write_text(json.dumps({'type': 'FeatureCollection', 'features': achadas}),
+                                                             encoding='utf-8')
+    (pasta / 'goiania_casas_microsoft.geojson').write_text(json.dumps({'type': 'FeatureCollection', 'features': casas}),
+                                                            encoding='utf-8')
+    print(f'Microsoft: {len(achadas)} pegadas contem {len(usadas)} dos {len(torres)} edificios em altura (quadkeys {quads}); '
+          f'{len(casas)} pegadas ate {r_casas} m do centro')
+    return {'quadkeys': quads, 'pegadas': len(achadas), 'torres_com_pegada': len(usadas), 'casas_horizonte': len(casas)}
+
+
+def mdt_de_curvas(c, pasta, passo=2.0):
+    """Modelo do terreno de Goiania numa grade de `passo` m a partir das curvas de nivel de 5 m da
+    Prefeitura: o ANADEM (30 m) da a forma entre as curvas e a diferenca para cada curva e interpolada
+    como superficie harmonica (multigrade), de modo que o modelo passa exatamente pelas curvas."""
+    from affine import Affine
+    from compat_scipy import map_coordinates
+    from projecao import Transformer
+    from shapely.geometry import shape
+    T = Transformer.from_crs(4326, 31982, always_xy=True)
+    cx, cy = T.transform(c['centro'][1], c['centro'][0])
+    meia = c.get('mdt_meia_m', 1100)
+    n = int(round(2 * meia / passo)) + 1
+    x0, y0 = cx - meia, cy + meia                       # centro do pixel do canto noroeste
+    XX, YY = np.meshgrid(x0 + np.arange(n) * passo, y0 - np.arange(n) * passo)
+    an = geo_io.ler(pasta / 'anadem.tif')
+    lon, lat = Transformer.from_crs(31982, an.epsg, always_xy=True).transform(XX, YY)
+    col, lin = ~an.transform * (lon, lat)
+    fundo = map_coordinates(an.banda(1).astype(float), [lin - .5, col - .5], order=3)
+    # Curvas rasterizadas: cada vertice adensado a meio passo marca a celula com a cota.
+    soma, cont = np.zeros((n, n)), np.zeros((n, n))
+    for f in json.loads((pasta / 'goiania_curvas_5m.geojson').read_text(encoding='utf-8'))['features']:
+        g, cota = shape(f['geometry']), float(f['properties']['NM_CNV'])
+        for linha in (g.geoms if g.geom_type.startswith('Multi') else [g]):
+            pts = np.array([linha.interpolate(d).coords[0] for d in np.arange(0, linha.length, passo / 2)] + [linha.coords[-1]])
+            j = np.round((pts[:, 0] - x0) / passo).astype(int)
+            i = np.round((y0 - pts[:, 1]) / passo).astype(int)
+            ok = (i >= 0) & (i < n) & (j >= 0) & (j < n)
+            np.add.at(soma, (i[ok], j[ok]), cota)
+            np.add.at(cont, (i[ok], j[ok]), 1)
+    fixo = cont > 0
+    resid = np.where(fixo, soma / np.maximum(cont, 1) - fundo, 0.0)
+    corr = harmonica(resid, fixo)
+    z = (fundo + corr).astype(np.float32)
+    geo_io.gravar(pasta / 'mdt_goiania.tif', z, Affine(passo, 0, x0 - passo / 2, 0, -passo, y0 + passo / 2), 31982)
+    print(f'MDT das curvas de 5 m em grade de {passo:.0f} m: {n}x{n}, {fixo.mean():.1%} das celulas sobre curvas; '
+          f'curva - ANADEM: mediana {np.median(resid[fixo]):+.2f} m, p95 {np.percentile(np.abs(resid[fixo]), 95):.2f} m; '
+          f'cotas {z.min():.1f} a {z.max():.1f} m')
+    return {'passo_m': passo, 'celulas': [n, n], 'sobre_curvas': float(fixo.mean()),
+            'curva_menos_anadem_mediana_m': float(np.median(resid[fixo])),
+            'curva_menos_anadem_p95_abs_m': float(np.percentile(np.abs(resid[fixo]), 95))}
+
+
+def harmonica(valor, fixo, voltas=(600, 300, 160, 100, 80, 60, 60)):
+    """Solucao de Laplace com valor nas celulas fixas (e derivada nula nas bordas): da grade grossa
+    para a fina, cada nivel parte do anterior e relaxa por SOR vermelho-preto."""
+    niveis = [(valor, fixo)]
+    while min(niveis[-1][0].shape) > 48:
+        v, f = niveis[-1]
+        h, w = (v.shape[0] + 1) // 2, (v.shape[1] + 1) // 2
+        vp = np.zeros((2 * h, 2 * w))
+        fp = np.zeros((2 * h, 2 * w))
+        vp[:v.shape[0], :v.shape[1]] = np.where(f, v, 0)
+        fp[:v.shape[0], :v.shape[1]] = f
+        soma = vp.reshape(h, 2, w, 2).sum((1, 3))
+        cont = fp.reshape(h, 2, w, 2).sum((1, 3))
+        niveis.append((np.where(cont > 0, soma / np.maximum(cont, 1), 0), cont > 0))
+    u = None
+    for k, (v, f) in enumerate(reversed(niveis)):
+        if u is None:
+            u = np.full(v.shape, v[f].mean() if f.any() else 0.0)
+        else:
+            u = np.repeat(np.repeat(u, 2, 0), 2, 1)[:v.shape[0], :v.shape[1]]
+        u[f] = v[f]
+        ii, jj = np.indices(u.shape)
+        cores = [((ii + jj) % 2 == p) & ~f for p in (0, 1)]
+        for _ in range(voltas[min(k, len(voltas) - 1)]):
+            for livre in cores:
+                p = np.pad(u, 1, mode='edge')
+                media = (p[:-2, 1:-1] + p[2:, 1:-1] + p[1:-1, :-2] + p[1:-1, 2:]) / 4
+                u[livre] += 1.9 * (media[livre] - u[livre])
+    return u
+
+
+def orto_goiania(c, pasta, px=.25, bloco=3000):
+    """Ortofoto de 2016 da Prefeitura de Goiania (Mapa Facil) a `px` m por pixel na caixa da referencia
+    Esri, em blocos do servico de exportacao: a imagem que mede o eixo e os boxes (georreferenciada com
+    as curvas de nivel e os equipamentos da Prefeitura; a Esri de 09/2025 tem 8,5 m de precisao)."""
+    from projecao import Transformer
+    T = Transformer.from_crs(4326, 31982, always_xy=True)
+    w, s, e, n = caixa(c, -c['raio_m'] * .45)
+    xs, ys = T.transform(np.array([w, e, w, e]), np.array([s, s, n, n]))
+    x0, y1 = math.floor(min(xs)), math.ceil(max(ys))
+    nx, ny = int(math.ceil((max(xs) - x0) / px)), int(math.ceil((y1 - min(ys)) / px))
+    img = Image.new('RGB', (nx, ny))
+    sess = requests.Session()
+    sess.headers.update(AGENTE)
+    for j in range(0, ny, bloco):
+        for i in range(0, nx, bloco):
+            w_, h_ = min(bloco, nx - i), min(bloco, ny - j)
+            caixa_b = (x0 + i * px, y1 - (j + h_) * px, x0 + (i + w_) * px, y1 - j * px)
+            for tentativa in range(4):
+                r = sess.get(f'{GYN}/Mapa_Ortofoto2016v8_D/MapServer/export', timeout=300,
+                             params={'bbox': ','.join(f'{v:.2f}' for v in caixa_b), 'bboxSR': 31982, 'imageSR': 31982,
+                                     'size': f'{w_},{h_}', 'format': 'jpg', 'f': 'image'})
+                if r.ok and r.content[:2] == bytes([255, 216]):
+                    break
+                time.sleep(3 + 4 * tentativa)
+            else:
+                raise SystemExit(f'ortofoto 2016: bloco {i},{j} falhou')
+            img.paste(Image.open(BytesIO(r.content)).convert('RGB'), (i, j))
+    img.save(pasta / 'referencia_orto.jpg', quality=92)
+    meta = {'x0': x0, 'y1': y1, 'px': px, 'epsg': 31982, 'fonte': f'{GYN}/Mapa_Ortofoto2016v8_D (Prefeitura de Goiania, 2016)',
+            'aviso': 'Ortofoto da Prefeitura: conferencia e medida locais; nao distribuir.'}
+    (pasta / 'referencia_orto.json').write_text(json.dumps(meta, indent=1), encoding='utf-8')
+    print(f'Ortofoto 2016 da Prefeitura: {nx}x{ny} px a {px} m -> referencia_orto.jpg')
+    return meta
 
 
 def esri_referencia(c, pasta, z=18):
@@ -324,6 +535,12 @@ def main():
     if '--idedf' in sys.argv:
         fontes_idedf(c, pasta)
         return
+    if '--goiania' in sys.argv:
+        # So os dados da Prefeitura de Goiania, gravados tambem na proveniencia ja baixada.
+        prov = json.loads((pasta / 'proveniencia.json').read_text(encoding='utf-8'))
+        prov['goiania'] = fontes_goiania(c, pasta)
+        (pasta / 'proveniencia.json').write_text(json.dumps(prov, indent=1, ensure_ascii=False), encoding='utf-8')
+        return
     if '--so-referencia' not in sys.argv:
         proveniencia = {'circuito': nome, 'baixado_em': date.today().isoformat(), 'caixa_lonlat': caixa(c)}
         proveniencia['osm_base'] = overpass(c, pasta / 'osm.json')
@@ -338,9 +555,13 @@ def main():
         proveniencia['edificios_microsoft'] = edificios_microsoft(c, pasta)
         if c.get('relevo_local') == 'idedf_mdt_1m' or c.get('edificios_locais') == 'idedf':
             proveniencia['idedf'] = fontes_idedf(c, pasta)
+        if c.get('relevo_local') == 'goiania_curvas_5m':
+            proveniencia['goiania'] = fontes_goiania(c, pasta)
         (pasta / 'proveniencia.json').write_text(json.dumps(proveniencia, indent=1, ensure_ascii=False), encoding='utf-8')
     if '--referencia' in sys.argv or '--so-referencia' in sys.argv:
         esri_referencia(c, pasta)
+        if c.get('referencia') == 'orto_goiania':
+            orto_goiania(c, pasta)
 
 
 if __name__ == '__main__':

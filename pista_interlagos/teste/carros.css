@@ -45,11 +45,12 @@ body.cars-open>:not(#view):not(#cars):not(#rotatePhone):not(#mpRoom):not(dialog)
 .car-cards button.taken svg{opacity:.45}
 .car-cards button.taken span{color:#e2fb57}
 .car-note{margin:0;font-size:11px;line-height:1.45;color:#aebdb2}
-#cars .primary{margin:0;padding:14px 16px;border-radius:8px;border:0;background:#f4ce39;color:#171c15;font-size:15px;font-weight:900;text-align:left}
+/* The way on atop the cards, big as the track screen's Corrida única: the label, then a line with the car. */
+#cars .primary{margin:0;padding:14px 16px;border-radius:8px;border:0;background:#f4ce39;color:#171c15;font-size:15px;font-weight:900;text-align:left;white-space:normal}
 #cars .primary:hover{background:#ffe574}
+#cars .primary small{display:block;margin-top:3px;font-size:11px;font-weight:600;opacity:.85}
 /* A multiplayer guest's way on (car-select.js): at the door, greyed; waiting for the host's race,
    lime with a breathing light and how to take it back. */
-#cars .primary small{display:block;margin-top:3px;font-size:11px;font-weight:600;opacity:.72}
 #cars .primary:disabled{cursor:default}
 #cars .primary[aria-pressed=true]{background:#e2fb57}
 #cars .primary[aria-pressed=true]::before{content:'';display:inline-block;width:9px;height:9px;margin:0 9px 1px 0;border-radius:50%;background:#171c15;vertical-align:middle;animation:car-wait 1.3s ease-in-out infinite}

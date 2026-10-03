@@ -16,7 +16,12 @@ export const CIRCUITS=Object.freeze({
  // measured on 2025 aerial imagery, the relief from the DF's 1 m terrain model and the buildings from
  // its cadastre (circuitos-fontes.md). Clockwise, so its boxes are on the cars' right (data.pit.reversed).
  brasilia:{id:'brasilia',name:'Brasília',label:'AUTÓDROMO NELSON PIQUET · BRASÍLIA, DF',length:5384,description:'5.384 m · 16 curvas · horário · Brasília, DF',intro:'A pista mais longa do Brasil, reaberta em 2025: largada em descida até a curva 1, de alta e inclinada a 5°, a reta de 803 m e um miolo de grampos e laço. 17,7 m de desnível.',source:'Traçado OSM (fev/2026) refinado sobre imagem aérea de 2025 · relevo do MDT de 1 m e edificações do Geoportal do DF (SEDUH) · Sentinel-2 de set/2026.',fuel:'Uma volta em Brasília costuma gastar 4–5 L.',altitude:1080,
-  data:'pista_brasilia.json',ground:'./assets/circuitos/brasilia_solo.jpg',track:'BRASÍLIA',boxTitle:'Cuida do Opala, candango!',weather:'Brasília · 16h40 · 27 °C · pista seca',venue:'Autódromo Internacional Nelson Piquet'}
+  data:'pista_brasilia.json',ground:'./assets/circuitos/brasilia_solo.jpg',track:'BRASÍLIA',boxTitle:'Cuida do Opala, candango!',weather:'Brasília · 16h40 · 27 °C · pista seca',venue:'Autódromo Internacional Nelson Piquet'},
+ // Reopened for MotoGP in March 2026: the axis measured on the city's 2016 orthophoto, the relief from its 5 m
+ // contours and the buildings, floors and city towers from Goiânia's Mapa Fácil (circuitos-fontes.md).
+ // Clockwise with the boxes on the cars' right, like Brasília (data.pit.reversed).
+ goiania:{id:'goiania',name:'Goiânia',label:'AUTÓDROMO AYRTON SENNA · GOIÂNIA, GO',length:3835,description:'3.835 m · 14 curvas · horário · Goiânia, GO',intro:'A casa da MotoGP no Brasil, reformada em 2026: a reta de 994 m sobe da curva inclinada até a linha, e da curva 1 à 3 a pista desce 13 m. Depois, dois grampos e o S. 17,8 m de desnível.',source:'Traçado OSM refinado sobre a ortofoto de 2016 · relevo das curvas de nível de 5 m e edificações do Mapa Fácil (Prefeitura de Goiânia) · Sentinel-2 de set/2026.',fuel:'Uma volta em Goiânia costuma gastar 3–4 L.',altitude:670,
+  data:'pista_goiania.json',ground:'./assets/circuitos/goiania_solo.jpg',track:'GOIÂNIA',boxTitle:'Cuida do Opala, uai!',weather:'Goiânia · 16h40 · 31 °C · pista seca',venue:'Autódromo Internacional Ayrton Senna'}
 });
 export const circuitId=value=>typeof value==='string'&&Object.hasOwn(CIRCUITS,value)?value:'interlagos';
 export function selectedCircuit(saved,search=''){

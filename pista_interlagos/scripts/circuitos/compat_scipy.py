@@ -8,7 +8,11 @@ Os substitutos cobrem so o que os scripts chamam, com a mesma assinatura e o mes
 - CubicSpline(x, y, bc_type='periodic'|'natural'), chamada cs(xq) e cs(xq, 1);
 - cKDTree(dados).query(q, k=1, distance_upper_bound=inf) e .query_ball_point(p, r);
 - brentq(f, a, b);
-- savgol_filter(x, janela, ordem, axis=0, mode='interp').
+- savgol_filter(x, janela, ordem, axis=0, mode='interp');
+- do scipy.ndimage (bloqueado desde 03/10/2026, pela DLL do scipy.linalg que ele importa):
+  gaussian_filter1d, gaussian_filter, uniform_filter1d, minimum_filter1d, maximum_filter1d
+  (modos 'reflect', 'nearest', 'wrap', 'mirror', 'constant') e map_coordinates de ordem 0, 1 e 3
+  (a de ordem 3 com o pre-filtro de B-spline espelhado nas bordas).
 """
 import numpy as np
 
@@ -162,3 +166,108 @@ except ImportError:
             ajuste = np.tensordot(Vp, c, axes=(1, 0))
             y[alvo] = ajuste[:meio] if alvo.start == 0 else ajuste[w - meio:]
         return np.moveaxis(y, 0, axis)
+
+try:
+    from scipy.ndimage import (gaussian_filter, gaussian_filter1d, map_coordinates, maximum_filter1d,
+                               minimum_filter1d, uniform_filter1d)
+except ImportError:
+    _MODOS = {'reflect': 'symmetric', 'nearest': 'edge', 'wrap': 'wrap', 'mirror': 'reflect', 'constant': 'constant'}
+
+    def _janela(x, antes, depois, axis, mode, cval=0.0):
+        x = np.moveaxis(np.asarray(x, float), axis, -1)
+        larg = [(0, 0)] * (x.ndim - 1) + [(antes, depois)]
+        extra = {'constant_values': cval} if mode == 'constant' else {}
+        return np.pad(x, larg, mode=_MODOS[mode], **extra)
+
+    def gaussian_filter1d(input, sigma, axis=-1, order=0, output=None, mode='reflect', cval=0.0, truncate=4.0, radius=None):
+        if order != 0:
+            raise NotImplementedError(order)
+        r = int(truncate * float(sigma) + .5) if radius is None else int(radius)
+        k = np.exp(-.5 * (np.arange(-r, r + 1) / float(sigma)) ** 2)
+        k /= k.sum()
+        p = _janela(input, r, r, axis, mode, cval)
+        n = p.shape[-1] - 2 * r
+        y = np.zeros(p.shape[:-1] + (n,))
+        for j, w in enumerate(k):
+            y += w * p[..., j:j + n]
+        return np.moveaxis(y, -1, axis)
+
+    def gaussian_filter(input, sigma, mode='reflect', cval=0.0, truncate=4.0):
+        y = np.asarray(input, float)
+        sig = np.broadcast_to(sigma, (y.ndim,))
+        for ax in range(y.ndim):
+            if sig[ax] > 0:
+                y = gaussian_filter1d(y, sig[ax], axis=ax, mode=mode, cval=cval, truncate=truncate)
+        return y
+
+    def _deslizante(input, size, axis, mode, cval):
+        # A janela de tamanho par fica um a mais para tras, como no scipy (origin 0).
+        p = _janela(input, size // 2, (size - 1) // 2, axis, mode, cval)
+        return np.lib.stride_tricks.sliding_window_view(p, size, axis=-1)
+
+    def uniform_filter1d(input, size, axis=-1, output=None, mode='reflect', cval=0.0, origin=0):
+        p = _janela(input, size // 2, (size - 1) // 2, axis, mode, cval)
+        c = np.concatenate([np.zeros(p.shape[:-1] + (1,)), np.cumsum(p, axis=-1)], axis=-1)
+        n = p.shape[-1] - size + 1
+        return np.moveaxis((c[..., size:size + n] - c[..., :n]) / size, -1, axis)
+
+    def minimum_filter1d(input, size, axis=-1, output=None, mode='reflect', cval=0.0, origin=0):
+        return np.moveaxis(_deslizante(input, size, axis, mode, cval).min(-1), -1, axis)
+
+    def maximum_filter1d(input, size, axis=-1, output=None, mode='reflect', cval=0.0, origin=0):
+        return np.moveaxis(_deslizante(input, size, axis, mode, cval).max(-1), -1, axis)
+
+    _POLO = np.sqrt(3) - 2
+
+    def _prefiltro_bspline3(a, axis):
+        """Coeficientes da B-spline cubica que interpola a (filtro recursivo, borda espelhada)."""
+        c = np.moveaxis(np.array(a, float), axis, 0)
+        n = c.shape[0]
+        if n < 2:
+            return np.moveaxis(c, 0, axis)
+        z = _POLO
+        c *= (1 - z) * (1 - 1 / z)
+        # Valor inicial causal com a borda espelhada (Thevenaz, Blu e Unser, 2000): soma exata.
+        k = np.arange(n)
+        w = z ** k + np.where((k > 0) & (k < n - 1), z ** (2 * n - 2 - k), 0.0)
+        c[0] = np.tensordot(w, c, axes=(0, 0)) / (1 - z ** (2 * n - 2))
+        for i in range(1, n):
+            c[i] += z * c[i - 1]
+        c[n - 1] = z / (z * z - 1) * (c[n - 1] + z * c[n - 2])
+        for i in range(n - 2, -1, -1):
+            c[i] = z * (c[i + 1] - c[i])
+        return np.moveaxis(c, 0, axis)
+
+    def _bspline3(t):
+        t = np.abs(t)
+        return np.where(t < 1, 2 / 3 - t * t + t ** 3 / 2, np.where(t < 2, (2 - t) ** 3 / 6, 0.0))
+
+    def map_coordinates(input, coordinates, output=None, order=3, mode='nearest', cval=0.0, prefilter=True):
+        """Amostra a grade 2D nas coordenadas (linha, coluna); fora dela vale a borda (mode='nearest')."""
+        if mode != 'nearest':
+            raise NotImplementedError(mode)
+        a = np.asarray(input, float)
+        lin, col = (np.asarray(v, float) for v in coordinates)
+        H, W = a.shape
+        lin, col = np.clip(lin, 0, H - 1), np.clip(col, 0, W - 1)
+        if order == 0:
+            return a[np.floor(lin + .5).astype(int).clip(0, H - 1), np.floor(col + .5).astype(int).clip(0, W - 1)]
+        if order == 1:
+            r0, c0 = np.floor(lin).astype(int).clip(0, H - 2), np.floor(col).astype(int).clip(0, W - 2)
+            fr, fc = lin - r0, col - c0
+            return (a[r0, c0] * (1 - fr) * (1 - fc) + a[r0 + 1, c0] * fr * (1 - fc)
+                    + a[r0, c0 + 1] * (1 - fr) * fc + a[r0 + 1, c0 + 1] * fr * fc)
+        if order != 3:
+            raise NotImplementedError(order)
+        cf = _prefiltro_bspline3(_prefiltro_bspline3(a, 0), 1) if prefilter else a
+        def espelho(i, n):
+            m = np.mod(i, 2 * n - 2)
+            return np.where(m >= n, 2 * n - 2 - m, m)
+        r0, c0 = np.floor(lin).astype(int), np.floor(col).astype(int)
+        out = np.zeros(np.broadcast(lin, col).shape)
+        for di in range(-1, 3):
+            ri = espelho(r0 + di, H)
+            wr = _bspline3(lin - (r0 + di))
+            for dj in range(-1, 3):
+                out += cf[ri, espelho(c0 + dj, W)] * wr * _bspline3(col - (c0 + dj))
+        return out

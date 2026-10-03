@@ -22,8 +22,7 @@ import sys
 import numpy as np
 from PIL import Image, ImageDraw
 from projecao import Transformer
-from compat_scipy import CubicSpline, savgol_filter
-from scipy.ndimage import gaussian_filter1d, map_coordinates, uniform_filter1d
+from compat_scipy import CubicSpline, gaussian_filter1d, map_coordinates, savgol_filter, uniform_filter1d
 
 from config import CIRCUITOS, pasta_fontes
 
@@ -83,6 +82,15 @@ def rota(nome, vias):
         nos = vias[32900091]['nodes']
         fim = nos.index(nos[0], 1)
         return nos[1:fim]
+    if nome == 'goiania':
+        # Tracado misto de 3.835 m: a relacao de circuito 15921950 junta duas vias oneway, ja no sentido
+        # horario da corrida. 288004311 sai do meio da reta principal (onde o pit lane volta), faz a
+        # curva 1, o anel de cima e o miolo; 288004307 desce a reta oposta, contorna a curva inclinada de
+        # baixo e sobe a reta principal. Os atalhos dos tracados externo e curto (288004313, 288004320)
+        # ficam de fora.
+        seq = vias[288004311]['nodes'] + vias[288004307]['nodes'][1:]
+        assert seq[0] == seq[-1]
+        return seq[:-1]
     raise KeyError(nome)
 
 
@@ -98,6 +106,10 @@ def rota_boxes(nome, vias):
         entrada, faixa, saida = (vias[w]['nodes'] for w in (1450655789, 1450655791, 32900119))
         assert entrada[-1] == faixa[0] and faixa[-1] == saida[-1]
         return entrada + faixa[1:] + saida[::-1][1:]
+    if nome == 'goiania':
+        # "Pit Lane" (879890871, oneway): sai da reta oposta antes da curva inclinada, corta por dentro
+        # dela e corre ao lado da reta principal diante dos boxes ate voltar no meio dela.
+        return vias[879890871]['nodes']
     return None
 
 
@@ -128,10 +140,10 @@ class ReferenciaSentinel2(Referencia):
     SUB = 5
 
     def __init__(self, pasta, epsg):
-        import rasterio
-        with rasterio.open(pasta / 'sentinel2_rgb.tif') as r:
-            a = np.moveaxis(r.read(), 0, -1).astype(np.float32)
-            self.t, crs = r.transform, r.crs
+        import geo_io
+        g = geo_io.ler(pasta / 'sentinel2_rgb.tif')
+        a = np.moveaxis(g.a, 0, -1).astype(np.float32)
+        self.t, crs = g.transform, g.epsg
         lo, hi = np.percentile(a, 1), np.percentile(a, 99.7)
         a = np.clip((a - lo) / (hi - lo) * 235 + 10, 0, 255)
         k = self.SUB
@@ -144,6 +156,20 @@ class ReferenciaSentinel2(Referencia):
         u, v = self.inv.transform(x, y)
         col, lin = ~self.t * (np.asarray(u), np.asarray(v))
         return np.asarray(col) * self.SUB - .5, np.asarray(lin) * self.SUB - .5
+
+
+class ReferenciaOrto(Referencia):
+    """Ortofoto local numa grade UTM (Goiania: a de 2016 da Prefeitura, 0,25 m por pixel, exportada por
+    baixar_fontes.py), georreferenciada com as curvas de nivel e os equipamentos da Prefeitura."""
+
+    def __init__(self, pasta, epsg):
+        meta = json.loads((pasta / 'referencia_orto.json').read_text())
+        assert meta['epsg'] == epsg
+        self.x0, self.y1, self.passo = meta['x0'], meta['y1'], meta['px']
+        self.img = np.asarray(Image.open(pasta / 'referencia_orto.jpg').convert('RGB')).astype(np.float32)
+
+    def px(self, x, y):
+        return (np.asarray(x) - self.x0) / self.passo - .5, (self.y1 - np.asarray(y)) / self.passo - .5
 
 
 LIMIAR ={'sat': 34.0, 'lum_min': 28.0, 'lum_max': 185.0}
@@ -302,25 +328,58 @@ def refinar(ref, pts, fechado, passadas, w0, proibido=None, concreto=None):
     return P, N, w, L, hist
 
 
-def patio_dos_boxes(ref, Pb, Nb, wb, Lb, lado, hb):
+def patio_dos_boxes(ref, Pb, Nb, wb, Lb, lado, hb, faixa=(.5, 6.0), vao=8.0):
     """Trecho do pit lane diante do patio dos boxes: o concreto claro junto a faixa, nos 6 m do
     lado das garagens, no maior trecho continuo. s ao longo do pit lane. Na imagem de Brasilia
     a poeira vermelha tinge o concreto (saturacao 30 a 70, luminancia 155 a 200); a terra fica
-    abaixo de 145 e muito saturada, o asfalto abaixo de 80."""
+    abaixo de 145 e muito saturada, o asfalto abaixo de 80. Em Goiania (imagem da obra, 09/2025) o
+    patio ainda e terra: vale o telhado branco dos predios dos boxes, de 8 a 24 m da faixa (`faixa`),
+    e o predio novo e o antigo, separados por ~10 m, contam juntos (`vao`)."""
     sb = np.linspace(0, Lb, len(Pb))
-    d = np.arange(.5, 6.01, .5)
+    d = np.arange(faixa[0], faixa[1] + .01, .5)
     off = lado * (wb[:, None] / 2 + d[None, :])
     f = ref.rgb(Pb[:, None, 0] + off * Nb[:, None, 0], Pb[:, None, 1] + off * Nb[:, None, 1])
     lum, sat = f.mean(-1), f.max(-1) - f.min(-1)
     concreto = uniform_filter1d(((lum > 150) & (sat < 85)).mean(1), 5) > .45
     idx = np.flatnonzero(concreto)
-    blocos = np.split(idx, np.flatnonzero(np.diff(idx) > 4) + 1)
+    blocos = np.split(idx, np.flatnonzero(np.diff(idx) > vao / DS) + 1)
     maior = max(blocos, key=len)
     garagens = [float(sb[maior[0]]), float(sb[maior[-1]])]
     hb.append({'patio_boxes_s': garagens, 'patio_boxes_m': garagens[1] - garagens[0]})
     print(f'  patio dos boxes: de {garagens[0]:.0f} a {garagens[1]:.0f} m do pit lane '
           f'({garagens[1] - garagens[0]:.0f} m); trechos claros {[(round(sb[b[0]]), round(sb[b[-1]])) for b in blocos if len(b) > 5]}')
     return garagens
+
+
+def faixa_nas_garagens(ref, Pb, Nb, wb, Lb, lado, garagens, largura, hb):
+    """Diante das garagens a faixa encosta nas portas: a borda do telhado branco (primeiro pixel
+    claro do lado dos boxes, mediana no trecho do predio) fixa a borda da faixa de `largura` m. Em
+    Goiania o desenho OSM corre colado a pista, e na imagem da obra (09/2025) o patio entre os dois e
+    terra; a ortofoto de 2016 da Prefeitura mostra o pit lane do muro ate as portas. Transicao de
+    60 m nas pontas, ate o desenho medido."""
+    sb = np.linspace(0, Lb, len(Pb))
+    g0, g1 = garagens
+    d = np.arange(3, 34, .5)
+    q = Pb[:, None, :] + lado * d[None, :, None] * Nb[:, None, :]
+    f = ref.rgb(q[..., 0], q[..., 1])
+    claro = (f.mean(-1) > 150) & (f.max(-1) - f.min(-1) < 85)
+    # O telhado: o primeiro trecho claro continuo de 4 m (faixas pintadas e concreto solto ficam de fora).
+    telhado = np.lib.stride_tricks.sliding_window_view(claro, 8, axis=1).all(-1)
+    borda = np.array([d[np.argmax(l)] if l.any() else np.nan for l in telhado])
+    zona = (sb > g0 + 10) & (sb < g1 - 10)
+    R = float(np.nanmedian(borda[zona]))
+    desloc = R - .3 - largura / 2                       # centro da faixa: borda a 0,3 m da fachada
+    peso = np.clip(np.minimum(sb - (g0 - 60), (g1 + 60) - sb) / 60, 0, 1)
+    peso = .5 - .5 * np.cos(np.pi * peso)
+    Pn = Pb + (lado * desloc * peso)[:, None] * Nb
+    wn = wb * (1 - peso) + largura * peso
+    Pn = savgol_filter(Pn, 31, 3, axis=0, mode='interp')
+    cs, L = spline(Pn[::2], False)
+    _, Pn, Nn = estacoes(cs, L, False)
+    wn = np.interp(np.linspace(0, 1, len(Pn)), np.linspace(0, 1, len(wn)), wn)
+    hb.append({'fachada_das_garagens_m': R, 'faixa_deslocada_m': desloc, 'largura_diante_das_garagens_m': largura})
+    print(f'  garagens: fachada a {R:.1f} m do eixo medido da faixa; faixa de {largura:.1f} m deslocada {desloc:.1f} m ate ela')
+    return Pn, Nn, wn, L
 
 
 def desenhar(ref, pasta, linhas):
@@ -342,7 +401,7 @@ def main():
     pasta = pasta_fontes(nome)
     nos, vias = carregar_osm(pasta)
     T = Transformer.from_crs(4326, c['epsg'], always_xy=True)
-    ref = (ReferenciaSentinel2 if c.get('referencia') == 'sentinel2' else Referencia)(pasta, c['epsg'])
+    ref = {'sentinel2': ReferenciaSentinel2, 'orto_goiania': ReferenciaOrto}.get(c.get('referencia'), Referencia)(pasta, c['epsg'])
     seq = rota(nome, vias)
     pts = np.array([T.transform(*nos[n]) for n in seq])
     L_osm = float(np.sum(np.linalg.norm(np.diff(np.vstack([pts, pts[:1]]), axis=0), axis=1)))
@@ -411,7 +470,12 @@ def main():
     if boxes and not c.get('boxes_sob_cobertura'):
         # Garagens ao longo do patio dos boxes (Brasilia: o predio antigo foi demolido na reforma e
         # os 40 boxes novos ficam para 2026; a imagem mostra o patio de concreto claro junto a faixa).
-        garagens = patio_dos_boxes(ref, Pb, Nb, wb, Lb, lado, hb)
+        # Em Goiania a ortofoto (2016) e anterior ao predio novo dos boxes: as garagens saem da imagem Esri
+        # da obra (09/2025), onde os dois predios ja tem telhado.
+        ref_g = Referencia(pasta, c['epsg']) if c.get('garagens_na_esri') else ref
+        garagens = patio_dos_boxes(ref_g, Pb, Nb, wb, Lb, lado, hb, **c.get('patio_boxes', {}))
+    if boxes and c.get('faixa_nas_garagens'):
+        Pb, Nb, wb, Lb = faixa_nas_garagens(ref, Pb, Nb, wb, Lb, lado, garagens, c['faixa_nas_garagens'], hb)
     if boxes and c.get('boxes_sob_cobertura'):
         # Ao lado do predio o pit lane fica sob a borda da cobertura, invisivel do alto:
         # nos transectos medidos, pista de concreto, muro (1,5 m) e faixa de 6 m junto as

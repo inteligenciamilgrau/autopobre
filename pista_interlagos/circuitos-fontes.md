@@ -1,10 +1,11 @@
-# Cascavel, ECPA Piracicaba, Chapecó e Brasília — circuitos da Old Stock Race a partir de dados abertos
+# Cascavel, ECPA Piracicaba, Chapecó, Brasília e Goiânia — circuitos a partir de dados abertos
 
-Os quatro circuitos entram no seletor da abertura ao lado de Interlagos e Curvelo
-(`?circuito=cascavel`, `?circuito=piracicaba`, `?circuito=chapeco`, `?circuito=brasilia`), com os mesmos
-Opalas, 14 adversários, Modo Corrida, Modo História, pit stop no Box 99 e recordes separados por circuito.
-A Old Stock Race correu em Cascavel na 4ª e na 7ª etapas de 2025. Em 21 e 22/03/2026
-abriu a temporada em Brasília, no Autódromo Internacional Nelson Piquet (seção no fim).
+Os cinco circuitos entram no seletor da abertura ao lado de Interlagos e Curvelo
+(`?circuito=cascavel`, `?circuito=piracicaba`, `?circuito=chapeco`, `?circuito=brasilia`, `?circuito=goiania`),
+com os mesmos Opalas, 14 adversários, Modo Corrida, Modo História, pit stop no Box 99 e recordes separados
+por circuito. A Old Stock Race correu em Cascavel na 4ª e na 7ª etapas de 2025. Em 21 e 22/03/2026
+abriu a temporada em Brasília, no Autódromo Internacional Nelson Piquet; no mesmo fim de semana a MotoGP
+voltou ao Brasil em Goiânia, no Autódromo Internacional Ayrton Senna (seções no fim).
 
 ## Fontes (baixadas em 27/09/2026)
 
@@ -209,3 +210,89 @@ de garagens sobre o pátio), posição do Box 99, da lanchonete e da banca, caim
 zebras, muros, a numeração das curvas, os traçados alternativos (os atalhos do OSM não foram
 desenhados), o relevo da pista nova (o MDT é de antes da reforma) e a altura dos prédios do horizonte
 sobre o chão genérico além da grade do terreno.
+
+## Goiânia (Autódromo Internacional Ayrton Senna) — fontes baixadas em 03/10/2026
+
+Inaugurado em 1974, com o nome de Ayrton Senna desde 1989. Entre 2025 e 2026 passou pela maior reforma
+da história (R$ 250 milhões) para receber a MotoGP, que voltou ao Brasil em 20–22/03/2026. Depois da
+corrida, com o asfalto soltando entre as curvas 10 e 12, o Governo de Goiás mandou refazer o pavimento
+inteiro.
+
+**O que foi publicado** (motogp.com, Motorsport, Band, Wikipédia, imprensa de Goiânia, 2025–2026): 3.835 m no
+sentido horário, 14 curvas (9 à direita, 5 à esquerda), a maior reta com 994 m, "precedida de uma curva
+inclinada"; a reta principal passou de 12 para 15 m de largura e as curvas para 14 m; 30 boxes (antes 22),
+num prédio novo ao lado do antigo, no início da reta principal; nova torre de controle e centro médico.
+"A borda externa, da curva 11 à curva 4, só tem curvas à direita" e a curva 5 é a primeira à esquerda
+(Motorsport). Traçado externo de 2.590 m e curto de 1.910 m.
+
+**Fontes:**
+
+| Dado | Fonte | Uso |
+|---|---|---|
+| Traçado misto (relação de circuito 15921950: vias 288004311 e 288004307, oneway) e pit lane (via 879890871) | OpenStreetMap (Overpass) | eixo e pit lane iniciais |
+| Ortofoto de 2016, 0,25 m por pixel (serviço `Mapa_Ortofoto2016v8_D`) | Mapa Fácil — Prefeitura de Goiânia | medir eixo, larguras e pit lane; **não é distribuída** |
+| Imagem aérea Esri World Imagery z18 (Vantor GE01, 06/09/2025, precisão de 8,5 m), com a obra da reforma | Esri | medir a extensão das garagens (os dois prédios); **não é distribuída** |
+| Curvas de nível de 5 m (levantamento da Topocart, `Mapa_MeioAmbiente/7`) | Mapa Fácil — Prefeitura de Goiânia | relevo (`mdt_goiania.tif`) |
+| Grandes equipamentos do autódromo (boxes, garagens, administração, cronometragem, arquibancada) | Mapa Fácil (`Mapa_PontosNotaveis/2`) | prédios do autódromo e a arquibancada |
+| Lotes do cadastro imobiliário: só o número de pavimentos, a área construída e o uso | Mapa Fácil (`Feature_Base/3`) | altura das casas e prédios em volta |
+| Edifícios em altura com número de pavimentos (2.148 até ~9 km) | Mapa Fácil (`Mapa_Edificios/2` a `5`) | o horizonte da cidade |
+| Vegetação (cerrado, mata, reflorestamento) | Mapa Fácil (`Mapa_MeioAmbiente/9`) | matas do cenário |
+| Pegadas de edificações (quadkeys 210133001 e 210133010) | Microsoft Global ML Building Footprints | casas e galpões; pegadas dos edifícios em altura |
+| ANADEM 22K, Copernicus S17W050, WorldCover S18W051, Sentinel-2 S2A_22KFG_20260930 | como nos outros | relevo de fundo, conferir o relevo, cobertura, cor do chão |
+
+**Como reconstruir:** `baixar_fontes.py goiania --referencia` (inclui a Prefeitura e a ortofoto; `--goiania`
+baixa só os dados da Prefeitura e refaz o modelo do terreno), `refinar_eixo.py goiania`, `gerar_pista.py goiania`,
+`desenhar_planta.py goiania` (a planta sai sobre a ortofoto).
+
+**Método, no que difere dos outros:**
+
+- **Eixo** (`referencia: 'orto_goiania'`): a mesma programação dinâmica sobre a ortofoto de 2016 da Prefeitura,
+  georreferenciada com as curvas de nível e os equipamentos dela; a imagem Esri de 2025 mostra a obra (terra
+  vermelha por toda parte) e tem 8,5 m de precisão. O traçado não mudou na reforma. O eixo mede 3.835,9 m;
+  depois da suavização das retas, a escala de 0,27% fecha os 3.835 m publicados.
+- **Larguras** (`largura_publicada`): 15 m na reta principal e 14 m no resto, as da reforma (a ortofoto é de
+  antes, com 12 m).
+- **Relevo** (`relevo_local: goiania_curvas_5m`): o ANADEM dá a forma do terreno entre as curvas e a diferença
+  para cada curva de 5 m é interpolada como superfície harmônica (multigrade), de modo que o modelo de 2 m passa
+  exatamente pelas curvas (curva − ANADEM: mediana +0,02 m). Ao longo da pista o modelo, o ANADEM e o Copernicus
+  concordam dentro de 1–2 m. A suavização é de 8 m em 2D e 15 m ao longo da volta (`suavizacao_m`): as curvas de
+  5 m não resolvem ondulações menores, e um degrau entre duas curvas virava rampa de 8% na entrada da curva 4.
+  17,8 m de desnível, rampas de −4,9% a +5,8%: a linha de chegada é o ponto mais alto (760 m), a pista desce
+  13 m da curva 1 à 3, sobe no grampo da 4, cai de novo na 5 e na 6, desce devagar a reta oposta e sobe pela
+  curva inclinada e pela reta principal até a linha.
+- **Curvas**: a detecção acha 10 trechos (6 à direita e 4 à esquerda); cinco têm dois ápices separados por um
+  trecho mais aberto e contam como duas curvas: 1 (R 90 m) e 2 (R 125 m) no fim da reta, 6 (R 34 m) e 7 (R 60 m)
+  no grampo do miolo, 11 (R 31 m) e 12 (R 88 m) depois do S, 13 (R 38 m) e 14 (R 95–120 m) na inclinada. Fecha
+  9 + 5 = 14, com a borda externa da 11 à 4 só à direita e a 5 à esquerda, como publicado; da saída da 14 à
+  curva 1 são 995 m, a reta de 994 m. Sem planta numerada publicada, os ápices duplos são interpretação.
+- **Curva inclinada**: 6% de caimento nas curvas 13 e 14 (o ângulo não foi publicado).
+- **Boxes** (`lado_boxes: -1`): por dentro da reta principal, à direita no sentido horário, com o bloco `pit`
+  escrito da saída para a entrada (`reversed`), como em Brasília. O pit lane é o do OSM (686 m: entra antes da
+  curva 13, corta por dentro dela, corre diante das garagens e volta no meio da reta). Na ortofoto de 2016 a faixa
+  vai do muro até as portas das garagens; o desenho do OSM corre colado à pista, então diante dos prédios ela é
+  levada até a borda dos telhados (`faixa_nas_garagens`, 9 m de largura). As garagens ocupam os dois prédios
+  medidos na imagem de 2025 (274 m: o novo, de 2025, 18 m antes do antigo), na fileira padrão do jogo (21 boxes
+  de 13 m; são 30 na realidade). A plataforma de 4,6 m leva o muro da banca do Box 99; o poste do pórtico do lado
+  dos boxes vai sobre o muro, como em Chapecó e Brasília.
+- **Cenário** (`edificios_locais: goiania`): os prédios do autódromo vêm do levantamento da Prefeitura (alturas de
+  modelagem); as pegadas do OSM e da Microsoft ganham a altura do lote do cadastro que as contém (2.755 pegadas;
+  3,1 m por pavimento) ou do edifício em altura que cai dentro delas. As matas mapeadas pela Prefeitura entram
+  na cobertura.
+- **Arquibancadas**: 3 blocos do lado de fora da reta, de 170 a 254 m depois da linha, onde fica a arquibancada
+  coberta do levantamento (76 m, a 45 m do asfalto, além da via de serviço); as do jogo ficam a 20 m, e a coberta
+  sai do cenário.
+- **Horizonte**: no lugar dos telhados genéricos, 1.344 edifícios em altura do cadastro da Prefeitura além do
+  terreno (Jardim Goiás, Marista, Bueno, Centro), com a pegada da Microsoft que os contém (ou um bloco do tamanho
+  do andar tipo) e 3 m por pavimento, e 6.107 casas e galpões da Microsoft até 2,2 km (Alphaville Flamboyant,
+  Jardim Novo Mundo e vizinhos).
+
+**Aproximações declaradas:** a numeração das curvas (ápices duplos), o caimento da curva inclinada, a posição do
+pit lane diante do prédio novo e o número de garagens, a posição do Box 99, da lanchonete e da banca, a
+distância da arquibancada, as alturas dos prédios do autódromo, caimentos fora da curva inclinada, zebras, muros,
+o pavimento refeito depois da MotoGP (sem imagem nova) e a altura do horizonte sobre o chão genérico além da grade.
+
+**Nesta máquina (03/10/2026):** o controle de aplicativos do Windows passou a bloquear também as DLLs do
+rasterio e do `scipy.ndimage`. `geo_io.py` lê e grava GeoTIFF e recorta COGs remotos por requisições parciais com
+o tifffile (Python puro) e numpy, `projecao.py` faz as conversões UTM/geográficas pelas séries de Krüger (iguais
+às do serviço de geometria da Prefeitura abaixo de 1 µm) e `compat_scipy.py` traz os filtros e a interpolação do
+`scipy.ndimage` em numpy. Com o rasterio e o scipy carregando, os scripts continuam usando os dois.

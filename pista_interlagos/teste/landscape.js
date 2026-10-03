@@ -972,17 +972,21 @@ function createHorizon(data,field,rand,{mobile,urban,rural=false,cityAngle=Math.
  const skyline=data.scenery?.skyline;
  if(skyline){
   // A real city around the circuit (Brasília: the DF cadastre's tall or large buildings out to 3.5 km,
-  // superquadras, the Setor Noroeste, the Eixo Monumental) instead of generic rooftops and towers.
-  const cols=Object.fromEntries(skyline.columns.map((k,i)=>[k,i])),blocks=[],drums=[];
+  // superquadras, the Setor Noroeste, the Eixo Monumental; Goiânia: the city's registered towers and the
+  // houses of the neighbourhoods around the circuit) instead of generic rooftops and towers.
+  const cols=Object.fromEntries(skyline.columns.map((k,i)=>[k,i])),blocks=[],drums=[],homes=[];
   for(const b of skyline.items){
-   const x=b[cols.x],y=b[cols.y],kind=b[cols.kind],g=.5+rand()*.12;
-   const item={x,y,z:groundAt(x,y)-2.5,w:b[cols.w],d:b[cols.d],h:b[cols.h]+2.5,turn:b[cols.heading],color:kind==='predio'?[g+.08,g+.06,g+.02]:[g,g+.01,g+.02]};
+   const x=b[cols.x],y=b[cols.y],kind=b[cols.kind];
+   // Real house footprints get tiled roofs like the generic rooftops; a phone keeps half of them.
+   if(kind==='casa'){if(mobile&&rand()<.5)continue;homes.push({x,y,z:groundAt(x,y)-1.2,w:b[cols.w],d:b[cols.d],h:b[cols.h],turn:b[cols.heading],color:[.42+rand()*.14,.12+rand()*.05,.05]});continue;}
+   const g=.5+rand()*.12,item={x,y,z:groundAt(x,y)-2.5,w:b[cols.w],d:b[cols.d],h:b[cols.h]+2.5,turn:b[cols.heading],color:kind==='predio'?[g+.08,g+.06,g+.02]:[g,g+.01,g+.02]};
    (kind==='redondo'?drums:blocks).push(item);
   }
   const material=sceneryMaterial('house'),compose=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);};
   root.add(chunked('Horizonte_cidade',houseGeometry(true),material,blocks,compose,{size:1500,shadows:false}));
   if(drums.length)root.add(chunked('Horizonte_redondos',houseGeometry('round'),material,drums,compose,{size:3000,shadows:false}));
-  buildings=blocks.length+drums.length;
+  if(homes.length)root.add(chunked('Horizonte_casas',houseGeometry(false),material,homes,compose,{size:1100,shadows:false}));
+  buildings=blocks.length+drums.length+homes.length;
   for(const mark of data.scenery.landmarks??[])if(mark.kind==='torre_tv'){const tower=tvTower(mark.h);tower.position.set(mark.x,groundAt(mark.x,mark.y)-.5,-mark.y);tower.name=mark.name;root.add(tower);buildings++;}
  }else if(urban){
   // Neighbourhood rooftops and, farther out, taller towers toward the city centre (north at Interlagos).

@@ -1,6 +1,6 @@
 # Auto-Pobre Racing com Stevan Gaipo
 
-Jogo de corrida para navegador com Opala 99 em **Interlagos, no Oval de Curvelo e em quatro autódromos da Old Stock Race** (Cascavel, ECPA Piracicaba, Chapecó e Brasília, reconstruídos com dados abertos: veja [as fontes](pista_interlagos/circuitos-fontes.md)), duas pinturas e dois modos escolhidos na abertura: **Modo Corrida** e **Modo História** (a versão imersiva). A abertura ilustrada aparece nos dois.
+Jogo de corrida para navegador com Opala 99 em **Interlagos, no Oval de Curvelo e em quatro autódromos da Old Stock Race e em Goiânia** (Cascavel, ECPA Piracicaba, Chapecó, Brasília e o Autódromo Ayrton Senna da MotoGP, reconstruídos com dados abertos: veja [as fontes](pista_interlagos/circuitos-fontes.md)), duas pinturas e dois modos escolhidos na abertura: **Modo Corrida** e **Modo História** (a versão imersiva). A abertura ilustrada aparece nos dois.
 
 Escolha o circuito na abertura. Curvelo tem 1.250 metros, duas curvas e inclinação transversal de até 16% na curva mais aberta, com traçado baseado no projeto publicado pela CBA. Largura, transições e cenário são aproximações: veja [fontes e limites da reconstrução](pista_interlagos/curvelo-fontes.md). A seleção é lembrada, o minimapa acompanha a pista e os recordes são separados por circuito e modalidade. Ao terminar, **Voltar ao menu principal** permite escolher outra pista ou outro modo. As duas pistas têm três voltas na corrida normal e uma na imersiva, com 15 carros no grid.
 

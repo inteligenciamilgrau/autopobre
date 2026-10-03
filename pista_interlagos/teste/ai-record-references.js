@@ -1175,5 +1175,201 @@ export const AI_REFERENCE_TIMES=[
   "number": "42",
   "bestLap": 148.183,
   "bestRace": 454.058
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "73",
+  "bestLap": 106.592,
+  "bestRace": 330.725
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "00",
+  "bestLap": 107.825,
+  "bestRace": 329.758
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "7",
+  "bestLap": 108.092,
+  "bestRace": 331.017
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "64",
+  "bestLap": 109.433,
+  "bestRace": 343.833
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "2",
+  "bestLap": 102.942,
+  "bestRace": 324.075
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "19",
+  "bestLap": 108.058,
+  "bestRace": 331.542
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "51",
+  "bestLap": 108.342,
+  "bestRace": 336.05
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "93",
+  "bestLap": 107.242,
+  "bestRace": 330.142
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "312",
+  "bestLap": 109.592,
+  "bestRace": 345.767
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "70",
+  "bestLap": 106.775,
+  "bestRace": 336.483
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "9",
+  "bestLap": 110.442,
+  "bestRace": 347.417
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "74",
+  "bestLap": 109.433,
+  "bestRace": 344.375
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "88",
+  "bestLap": 109.425,
+  "bestRace": 343.225
+ },
+ {
+  "circuit": "goiania",
+  "mode": "normal",
+  "number": "42",
+  "bestLap": 109.358,
+  "bestRace": 341.533
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "73",
+  "bestLap": 106.592,
+  "bestRace": 330.725
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "00",
+  "bestLap": 107.825,
+  "bestRace": 329.758
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "7",
+  "bestLap": 108.092,
+  "bestRace": 331.017
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "64",
+  "bestLap": 109.433,
+  "bestRace": 343.833
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "2",
+  "bestLap": 102.942,
+  "bestRace": 324.075
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "19",
+  "bestLap": 108.058,
+  "bestRace": 331.542
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "51",
+  "bestLap": 108.342,
+  "bestRace": 336.05
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "93",
+  "bestLap": 107.242,
+  "bestRace": 330.142
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "312",
+  "bestLap": 109.592,
+  "bestRace": 345.767
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "70",
+  "bestLap": 106.775,
+  "bestRace": 336.483
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "9",
+  "bestLap": 110.442,
+  "bestRace": 347.417
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "74",
+  "bestLap": 109.433,
+  "bestRace": 344.375
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "88",
+  "bestLap": 109.425,
+  "bestRace": 343.225
+ },
+ {
+  "circuit": "goiania",
+  "mode": "immersive",
+  "number": "42",
+  "bestLap": 109.358,
+  "bestRace": 341.533
  }
 ];

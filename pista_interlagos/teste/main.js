@@ -7,7 +7,7 @@ import {createCurveloData} from './curvelo-data.js';
 import {createCurveloScene} from './curvelo-scene.js';
 import {createOpenCircuit} from './open-circuit.js';
 import {RaceResults,resultRows} from './race-results.js';
-import {Championship,CHAMPIONSHIP_CALENDARS,championshipCalendar} from './championship.js';
+import {Championship,calendarsFor,championshipCalendar} from './championship.js';
 import {renderChampionshipPanel,ChampionshipDialog} from './championship-board.js';
 import {LapRecords,AutomaticRecords,trackRecords} from './lap-records.js';
 import {AutomaticAIRecords} from './ai-records.js';
@@ -364,6 +364,9 @@ function withCleanModel(clone){
 const gridPreview=()=>immersive?.active&&immersive.state.phase==='grid';
 let wasGridPreview=false;
 const keys=new Set(),clock=new THREE.Clock(),matrix=new THREE.Matrix4(),forward=new THREE.Vector3(),up=new THREE.Vector3(),right=new THREE.Vector3(),desired=new THREE.Vector3(),look=new THREE.Vector3();
+// Number keys (a test) set the wheel and leave it there: 3 straight ahead, 2 / 1 a little / a lot to
+// the left, 4 / 5 to the right. A, D or the arrows centre it again and steer as before.
+const WHEEL_KEYS={Digit1:-1,Digit2:-.4,Digit3:0,Digit4:.4,Digit5:1,Numpad1:-1,Numpad2:-.4,Numpad3:0,Numpad4:.4,Numpad5:1};let wheelSet=0;
 const wheelForward=new THREE.Vector3(),wheelUp=new THREE.Vector3(0,1,0),wheelAxle=new THREE.Vector3(),wheelMatrix=new THREE.Matrix4(),wheelTurn=new THREE.Quaternion(),wheelSpin=new THREE.Quaternion(),axleAxis=new THREE.Vector3(0,0,1);
 function status(text){$('status').textContent=text;$('status').classList.toggle('hidden',!text);}
 function flattenStatic(root){
@@ -434,9 +437,11 @@ function ensureFusca(){
  if(fuscaTemplate)return Promise.resolve(fuscaTemplate);
  return fuscaLoading??=loader.loadAsync(FUSCA_URL).then(gltf=>fuscaTemplate=prepareFusca(gltf.scene)).catch(err=>{console.error(err);return null;}).finally(()=>{fuscaLoading=null;});
 }
+// The model a race asks for: its championship's (the Copa Fusca races Fuscas) or the car screen's tab.
+const wantedModel=()=>championshipRace?.championship.info.model??preferences.values.carModel;
 // A race in the Fusca loads it with the circuit, and the ghost of the best lap gets its shell (ghost-car.js).
 async function fuscaWanted(){
- if(preferences.values.carModel!=='fusca'||roomWanted)return;
+ if(wantedModel()!=='fusca'||roomWanted)return;
  if(await ensureFusca()&&!ghostCar.has('fusca'))ghostCar.build(fuscaTemplate,null,'fusca');
 }
 // The player's car as a Fusca in entry's colours (the 99's: black, the yellow stripe; null: back to the Opala). Meanwhile the Opala's body,
@@ -463,7 +468,7 @@ async function cycleLivery(){
 // hand shuts as the car moves off.
 function updateOpenings(dt){if(Math.hypot(car.vx,car.vy)>1.5)openings.release('manual');openings.update(dt);}
 // nearest (R key): only the player's car goes back on track; rivals, laps and fuel carry on.
-function reset(nearest=false){mobile?.setHandbrake(false);openings.closeAll(true);if(nearest)car.recover();else{ghostRecorder.reset();car.resetGrid(playerGridSlot(immersive?.lineup?.length));if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
+function reset(nearest=false){mobile?.setHandbrake(false);wheelSet=0;openings.closeAll(true);if(nearest)car.recover();else{ghostRecorder.reset();car.resetGrid(playerGridSlot(immersive?.lineup?.length));if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
 function location(s){const sections=data.meta.sections||names;let name=sections[0][1];for(const [d,n] of sections)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
@@ -734,7 +739,7 @@ function updateCamera(dt){
 const pressed=code=>keys.has(code)||mobile?.pressed.has(code)||code!=='Space'&&gamepad.holds(code);
 // Keyboard, touch pads and the controller's triggers and stick (analog) all drive at once. On foot
 // the controller's left stick also walks, pushed up or down; in the car it never accelerates.
-function input(){const walk=pitstop?.coffee||immersive?.onFoot()?gamepad.walk:0;return {ignition:pressed('KeyI')?1:0,throttle:Math.max(pressed('KeyW')||pressed('ArrowUp')?1:0,mobile?.throttle??0,gamepad.throttle,walk),brake:Math.max(pressed('KeyS')||pressed('ArrowDown')?1:0,mobile?.brake??0,gamepad.brake,-walk),left:Math.max(pressed('KeyA')||pressed('ArrowLeft')?1:0,-(mobile?.steering??0),-gamepad.steering),right:Math.max(pressed('KeyD')||pressed('ArrowRight')?1:0,mobile?.steering??0,gamepad.steering),reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};}
+function input(){const afoot=pitstop?.coffee||immersive?.onFoot(),walk=afoot?gamepad.walk:0,set=afoot?0:wheelSet;return {ignition:pressed('KeyI')?1:0,throttle:Math.max(pressed('KeyW')||pressed('ArrowUp')?1:0,mobile?.throttle??0,gamepad.throttle,walk),brake:Math.max(pressed('KeyS')||pressed('ArrowDown')?1:0,mobile?.brake??0,gamepad.brake,-walk),left:Math.max(pressed('KeyA')||pressed('ArrowLeft')?1:0,-(mobile?.steering??0),-gamepad.steering,-set),right:Math.max(pressed('KeyD')||pressed('ArrowRight')?1:0,mobile?.steering??0,gamepad.steering,set),reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};}
 // The recon lap races the Opala 99 with the rivals' racecraft (RaceField.heroInput). Each physics
 // step asks for a new command; the sound and the driver's hands reuse the last one.
 let heroCommand=null;
@@ -956,10 +961,10 @@ function hold(on){
  if(!ready||on===held||on&&paused||on&&roomWanted)return;
  held=on;paused=on;carAudio.setPaused(on);if(!on)carAudio.unlock();
  if(on&&document.pointerLockElement===$('view'))document.exitPointerLock();
- keys.clear();mobile?.clear();cameraReturn.reset(performance.now());$('pauseBadge').hidden=!on;
+ keys.clear();wheelSet=0;mobile?.clear();cameraReturn.reset(performance.now());$('pauseBadge').hidden=!on;
 }
 $('pauseBadge').onclick=()=>hold(false);
-function menu(show){held=false;$('pauseBadge').hidden=true;if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());updateScreens();keys.clear();mobile?.clear();status('');}
+function menu(show){held=false;$('pauseBadge').hidden=true;if(!show&&!immersive?.active&&immersive?.freeResultReady)show=true;paused=show;updateMenuLabels();carAudio.setPaused(show);if(!show)carAudio.unlock();if(show&&document.pointerLockElement===$('view'))document.exitPointerLock();cameraReturn.reset(performance.now());updateScreens();keys.clear();wheelSet=0;mobile?.clear();status('');}
 function updateScreens(){
  const free=paused&&!sessionStarted,tracks=free&&screen==='tracks',cars=free&&screen==='cars';
  $('menu').classList.toggle('hidden',!paused||tracks||cars);$('tracks').classList.toggle('hidden',!tracks);$('cars').classList.toggle('hidden',!cars);
@@ -1008,14 +1013,15 @@ window.interlagosGraficos={
   compiling:!!graphicsCompiling,mirror:cockpit?[cockpit.mirrorTarget.width,cockpit.mirrorTarget.height]:null,cinematic:cinematic?(({look,...rest})=>rest)(cinematic.info()):null,scenery:sceneryBuilt,water:landscape?.waterInfo().realistic??null,debug:debugOverlay.info()}),
  set:value=>{preferences.update({graphics:value});applyGraphics();return window.interlagosGraficos.info();}
 };
-// Championship (championship.js): one per mode and calendar (Todas as pistas, Old Stock 2026), the
-// panel's tab picks the calendar (remembered). championshipRace is the round on track; storyRound, a
+// Championship (championship.js): one per mode and calendar (Todas as pistas, Old Stock 2026 and, in
+// Modo Corrida, the Copa Fusca 2026), the panel's tab picks the calendar (remembered; Modo História
+// shows Todas as pistas for a calendar it does not offer). championshipRace is the round on track; storyRound, a
 // Modo História round already scored that the judge can still disqualify and whose next vaquinha is
 // the next round.
 const CHAMPIONSHIP_VIEW_KEY='opala99-championship-calendar-v1';
 let championshipView=(()=>{try{return championshipCalendar(pilotStorage()?.getItem(CHAMPIONSHIP_VIEW_KEY));}catch{return 'todas';}})();
-const championships=Object.fromEntries(['corrida','historia'].map(mode=>[mode,Object.fromEntries(Object.keys(CHAMPIONSHIP_CALENDARS).map(id=>[id,new Championship(pilotStorage(),mode,id)]))])),championshipDialog=new ChampionshipDialog();
-const championshipFor=(mode=menuMode,calendar=championshipView)=>championships[mode][calendar];
+const championships=Object.fromEntries(['corrida','historia'].map(mode=>[mode,Object.fromEntries(calendarsFor(mode).map(id=>[id,new Championship(pilotStorage(),mode,id)]))])),championshipDialog=new ChampionshipDialog();
+const championshipFor=(mode=menuMode,calendar=championshipView)=>championships[mode][championshipCalendar(calendar,mode)];
 let championshipRace=null,storyRound=null,scoredChampionship=null,pendingMode=null;
 // Modo Corrida's single races: 'grid' (the whole field), 'solo' (practice alone) or 'duel' (the 1x1).
 let raceKind='grid';
@@ -1057,6 +1063,9 @@ document.addEventListener('keydown',e=>{
  if(['INPUT','SELECT'].includes(e.target.tagName)&&!['Escape','KeyP'].includes(e.code))return;
  if(['ArrowUp','ArrowDown','ArrowLeft','ArrowRight','Space'].includes(e.code))e.preventDefault();if(e.code!=='Space')keys.add(e.code);if(e.repeat||!ready)return;
  if(!paused&&immersive?.handleKey(e.code)){e.preventDefault();return;}
+ // The controller's D-pad sends 1 2 3 too (synthetic): only the keyboard's numbers turn the wheel.
+ if(e.code in WHEEL_KEYS&&e.isTrusted&&!paused&&!immersive?.onFoot())wheelSet=WHEEL_KEYS[e.code];
+ if(['KeyA','KeyD','ArrowLeft','ArrowRight'].includes(e.code))wheelSet=0;
  // Space pulls the handbrake and leaves it pulled until the next press, like the touch button.
  if(e.code==='Space'&&!paused)mobile.setHandbrake(!mobile.handbrake);
  if(e.code==='KeyC')setCameraMode(nextCameraMode(),true);
@@ -1069,8 +1078,8 @@ document.addEventListener('keydown',e=>{
  // P pauses on the track (from the menu it resumes, as before); Escape opens the menu.
  if(e.code==='KeyP'){if(held||!paused)hold(!held);else menu(false);}
  if(e.code==='Escape')menu(true);
- if(automatic&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code))takeWheel();
-});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(automatic);keys.clear();mobile?.clear();if(!automatic)hold(true);});
+ if(automatic&&(['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)||e.code in WHEEL_KEYS&&e.isTrusted))takeWheel();
+});document.addEventListener('keyup',e=>keys.delete(e.code));window.addEventListener('focus',()=>carAudio.setFocused(!document.hidden));window.addEventListener('blur',()=>{carAudio.setFocused(automatic);keys.clear();wheelSet=0;mobile?.clear();if(!automatic)hold(true);});
 document.addEventListener('visibilitychange',()=>{carAudio.setFocused(!document.hidden&&(automatic||document.hasFocus()));if(document.hidden&&!automatic)hold(true);});
 window.addEventListener('resize',()=>{camera.aspect=innerWidth/innerHeight;camera.updateProjectionMatrix();renderer?.setSize(innerWidth,innerHeight,false);mobile?.clear();if(touchDevice&&innerHeight>innerWidth&&ready)menu(true);});
 $('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orbit',true);};
@@ -1095,8 +1104,8 @@ async function beginRace(restart=false,tour=false,story=preferences.values.immer
  immersive.laps=championshipRace?championshipRace.championship.laps:preferences.values.laps;
  // The car: Modo Corrida's choice, or the room's (multiplayer.js); the story and the recon lap race the 99.
  raceCar=preferences.values.immersive||tour?'99':multiplayer?.car()??preferences.values.car;reconLap=tour;
- // In a Fusca (the car screen's tab) when it loaded; the story and the recon lap race the Opala 99.
- raceModel=!preferences.values.immersive&&!tour&&!roomWanted&&preferences.values.carModel==='fusca'&&fuscaTemplate?'fusca':'opala';ghostCar.use(raceModel);
+ // In a Fusca (the car screen's tab, or the Copa Fusca's rounds) when it loaded; the story and the recon lap race the Opala 99.
+ raceModel=!preferences.values.immersive&&!tour&&!roomWanted&&wantedModel()==='fusca'&&fuscaTemplate?'fusca':'opala';ghostCar.use(raceModel);
  immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[duelRivalFor(raceCar,preferences.values.duelRival)];
  seatCar();
  document.querySelector('.session').childNodes[1].textContent=championshipRace?` ${championshipRace.championship.info.label} · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total} `:immersive.lineup?.length===0?' TREINO SOLO ':immersive.lineup?` 1x1 · #${immersive.lineup[0]} `:' PISTA LIVRE ';
@@ -1189,7 +1198,7 @@ function showChampionshipCalendar(id,focus=false){
 }
 $('championshipTabs').onclick=e=>{const tab=e.target.closest('[data-championship-calendar]');if(tab)showChampionshipCalendar(tab.dataset.championshipCalendar);};
 $('championshipTabs').onkeydown=e=>{
- const ids=Object.keys(CHAMPIONSHIP_CALENDARS),i=ids.indexOf(championshipView),go={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:ids.length-1}[e.key];
+ const ids=calendarsFor(menuMode),i=ids.indexOf(championshipFor().calendar),go={ArrowRight:i+1,ArrowLeft:i-1,Home:0,End:ids.length-1}[e.key];
  if(go===undefined)return;e.preventDefault();e.stopPropagation();showChampionshipCalendar(ids[(go+ids.length)%ids.length],true);
 };
 // Erasing a championship under way takes a second click.
@@ -1284,7 +1293,7 @@ async function loadCircuit(){
  treeField=new TreeField(landscape.trunks(),{mobile:scenery.mobile});scene.add(treeField.points);car.posts=treeField;
  restBodyPose();
  carLivery.clear();
- immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
+ immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();wheelSet=0;mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
  // The ghost's shell is the same for every paint and car colour: built once, from the first model (at
  // rest, as the rivals were just cloned), with the distant rivals' profile beyond 45 m.
@@ -1298,7 +1307,7 @@ async function loadCircuit(){
  const disableStory=immersive.disable.bind(immersive);immersive.disable=()=>{intro.stop();disableStory();};
  multiplayer?.attach(immersive);
  // Box 99: Curvelo's service lane, or the surveyed garage at Interlagos.
- if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,openings,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
+ if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,openings,onOpen:()=>{automatic=false;keys.clear();wheelSet=0;mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();wheelSet=0;mobile?.clear();followInitialized=false;},onSettings:openSettings});
  pitstop?.setDamage(preferences.values.damage);
  landscape.setRealisticWater(graphics.values.water==='realista');
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');

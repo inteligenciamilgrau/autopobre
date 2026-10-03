@@ -27,17 +27,27 @@ def main():
     meta = d['meta']
     ox, oy, _ = meta['origin_utm']
     k = meta['horizontal_scale_to_nominal']
-    ref = json.loads((pasta / 'referencia_esri.json').read_text())
-    img = Image.open(pasta / 'referencia_esri.jpg').convert('RGB')
-    inv = Transformer.from_crs(meta['epsg'], 4326, always_xy=True)
-    z = ref['z']
+    if c.get('referencia') == 'orto_goiania':
+        # A imagem que mediu o eixo: a ortofoto de 2016 da Prefeitura, numa grade UTM (metade da resolucao).
+        orto = json.loads((pasta / 'referencia_orto.json').read_text())
+        img = Image.open(pasta / 'referencia_orto.jpg').convert('RGB')
+        img = img.resize((img.size[0] // 2, img.size[1] // 2), Image.LANCZOS)
 
-    def px(x, y):
-        lon, lat = inv.transform(np.asarray(x) / k + ox, np.asarray(y) / k + oy)
-        n = 2 ** z
-        col = (np.asarray(lon) + 180) / 360 * n
-        row = (1 - np.arcsinh(np.tan(np.radians(lat))) / np.pi) / 2 * n
-        return (col - ref['tx0']) * 256, (row - ref['ty0']) * 256
+        def px(x, y):
+            return ((np.asarray(x) / k + ox - orto['x0']) / (2 * orto['px']),
+                    (orto['y1'] - (np.asarray(y) / k + oy)) / (2 * orto['px']))
+    else:
+        ref = json.loads((pasta / 'referencia_esri.json').read_text())
+        img = Image.open(pasta / 'referencia_esri.jpg').convert('RGB')
+        inv = Transformer.from_crs(meta['epsg'], 4326, always_xy=True)
+        z = ref['z']
+
+        def px(x, y):
+            lon, lat = inv.transform(np.asarray(x) / k + ox, np.asarray(y) / k + oy)
+            n = 2 ** z
+            col = (np.asarray(lon) + 180) / 360 * n
+            row = (1 - np.arcsinh(np.tan(np.radians(lat))) / np.pi) / 2 * n
+            return (col - ref['tx0']) * 256, (row - ref['ty0']) * 256
 
     dr = ImageDraw.Draw(img)
     a = np.array(d['samples'])

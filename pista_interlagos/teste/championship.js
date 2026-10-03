@@ -3,7 +3,7 @@ import {RIVAL_ROSTER,PLAYER_ENTRY,carEntry} from './race-roster.js';
 
 // Campeonato Old Stock do jogo: todas as pistas, uma corrida em cada, pontos pela posição de
 // chegada e uma classificação geral com os 15 carros do grid. Each game mode (Modo Corrida,
-// Modo História) keeps its own championship, for each calendar. The points table is the game's
+// Modo História) keeps its own championship, for each calendar it offers. The points table is the game's
 // own, not an official regulation. Progress lives in this browser.
 // Todas as pistas: every circuit in circuits.js, the oval closing the season, so a new track joins
 // by itself. A championship under way gets it as an extra round at the end (one saved before
@@ -16,13 +16,23 @@ export const OLD_STOCK_2026=Object.freeze([
  ['brasilia','Brasília - DF','21 e 22 MAR'],['interlagos','Interlagos - SP','18 e 19 ABR'],['interlagos','Interlagos - SP','30 e 31 MAI'],
  ['cascavel','Cascavel - PR','11 e 12 JUL'],['interlagos','Interlagos - SP','01 e 02 AGO'],['cascavel','Cascavel - PR','19 e 20 SET'],
  ['chapeco','Chapecó - SC','31 OUT e 01 NOV'],['interlagos','Interlagos - SP','19 e 20 DEZ']].map(([circuit,place,date])=>Object.freeze({circuit,place,date})));
+// The Copa Fusca GT-Oil 2026 calendar as announced (subject to change): eleven rounds, six at
+// Interlagos. Raced in Fuscas (model), in Modo Corrida only: the story's Opala 99 does not race it.
+export const COPA_FUSCA_2026=Object.freeze([
+ ['interlagos','Interlagos - SP','21 e 22 FEV'],['brasilia','Brasília - DF','21 e 22 MAR'],['interlagos','Interlagos - SP','18 e 19 ABR'],
+ ['interlagos','Interlagos - SP','16 e 17 MAI'],['interlagos','Interlagos - SP','06 e 07 JUN'],['cascavel','Cascavel - PR','11 e 12 JUL'],
+ ['interlagos','Interlagos - SP','01 e 02 AGO'],['goiania','Goiânia - GO','19 e 20 SET'],['cascavel','Cascavel - PR','17 e 18 OUT'],
+ ['chapeco','Chapecó - SC','21 e 22 NOV'],['interlagos','Interlagos - SP','19 e 20 DEZ']].map(([circuit,place,date])=>Object.freeze({circuit,place,date})));
+export const CHAMPIONSHIP_MODES=Object.freeze(['corrida','historia']);
 export const CHAMPIONSHIP_CALENDARS=Object.freeze({
- todas:Object.freeze({id:'todas',name:'Todas as pistas',title:'Todas as pistas, somando pontos',label:'CAMPEONATO',rounds:Object.freeze(CHAMPIONSHIP_ROUNDS.map(circuit=>Object.freeze({circuit})))}),
- oldstock2026:Object.freeze({id:'oldstock2026',name:'Old Stock 2026',title:'Temporada 2026, nas datas da Old Stock',label:'OLD STOCK 2026',rounds:OLD_STOCK_2026})});
-export const championshipCalendar=id=>Object.hasOwn(CHAMPIONSHIP_CALENDARS,id)?id:'todas';
+ todas:Object.freeze({id:'todas',name:'Todas as pistas',title:'Todas as pistas, somando pontos',label:'CAMPEONATO',modes:CHAMPIONSHIP_MODES,rounds:Object.freeze(CHAMPIONSHIP_ROUNDS.map(circuit=>Object.freeze({circuit})))}),
+ oldstock2026:Object.freeze({id:'oldstock2026',name:'Old Stock 2026',title:'Temporada 2026, nas datas da Old Stock',label:'OLD STOCK 2026',modes:CHAMPIONSHIP_MODES,rounds:OLD_STOCK_2026}),
+ copafusca2026:Object.freeze({id:'copafusca2026',name:'Copa Fusca 2026',title:'Temporada 2026, nas datas da Copa Fusca GT-Oil',label:'COPA FUSCA 2026',modes:Object.freeze(['corrida']),model:'fusca',kind:'de Fusca',rounds:COPA_FUSCA_2026})});
+// The calendars a mode offers (its tabs, in order); one it does not offer falls back to Todas as pistas.
+export const calendarsFor=mode=>Object.keys(CHAMPIONSHIP_CALENDARS).filter(id=>CHAMPIONSHIP_CALENDARS[id].modes.includes(mode));
+export const championshipCalendar=(id,mode)=>Object.hasOwn(CHAMPIONSHIP_CALENDARS,id)&&(!mode||CHAMPIONSHIP_CALENDARS[id].modes.includes(mode))?id:'todas';
 // Every finishing position scores, so a comeback from the back still counts.
 export const CHAMPIONSHIP_POINTS=Object.freeze([25,20,16,13,11,10,9,8,7,6,5,4,3,2,1]);
-export const CHAMPIONSHIP_MODES=Object.freeze(['corrida','historia']);
 export const CHAMPIONSHIP_KEY='opala99-championship-v1';
 // One save per mode and calendar; Todas as pistas keeps the keys it always had.
 export const championshipKey=(mode,calendar='todas')=>`opala99-championship${mode==='historia'?'-historia':''}${calendar==='todas'?'':'-'+calendar}-v1`;
@@ -64,7 +74,7 @@ export function championshipStandings(state){
 }
 
 export class Championship {
- constructor(storage=null,mode='corrida',calendar='todas'){this.storage=storage;this.mode=CHAMPIONSHIP_MODES.includes(mode)?mode:'corrida';this.calendar=championshipCalendar(calendar);this.key=championshipKey(this.mode,this.calendar);this.state=this.load();}
+ constructor(storage=null,mode='corrida',calendar='todas'){this.storage=storage;this.mode=CHAMPIONSHIP_MODES.includes(mode)?mode:'corrida';this.calendar=championshipCalendar(calendar,this.mode);this.key=championshipKey(this.mode,this.calendar);this.state=this.load();}
  load(){
   let s;try{s=JSON.parse(this.storage?.getItem(this.key)||'null');}catch{return null;}
   if(!validState(s,this.mode,this.calendar))return null;

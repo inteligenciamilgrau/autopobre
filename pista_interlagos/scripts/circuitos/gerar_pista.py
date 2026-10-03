@@ -23,17 +23,18 @@ import math
 import sys
 
 import numpy as np
-import rasterio
 from PIL import Image
 from projecao import Transformer
-from rasterio.warp import reproject, Resampling
-from scipy.ndimage import gaussian_filter1d, map_coordinates, minimum_filter1d, uniform_filter1d
-from compat_scipy import brentq, cKDTree
+from compat_scipy import (brentq, cKDTree, gaussian_filter, gaussian_filter1d, map_coordinates, maximum_filter1d,
+                          minimum_filter1d, uniform_filter1d)
 
+import geo_io
 from config import ASSETS, CIRCUITOS, DADOS, pasta_fontes
 from muro_barraca import FOLGA_PISTA_M, LARGURA_M, largura_muro, trecho_cheio
 
 PASSO = 4.0          # grade do terreno (m), como Interlagos
+# Modelos locais do terreno, numa grade de 2 m (config 'relevo_local' -> arquivo em fontes/<c>/).
+MDT_LOCAL = {'idedf_mdt_1m': 'mdt_idedf.tif', 'goiania_curvas_5m': 'mdt_goiania.tif'}
 MARGEM = 460.0       # terreno alem da caixa da pista e do pit (m)
 DS = 2.0
 
@@ -122,6 +123,35 @@ EXTRA = {
                      'largada, 14 m no resto); perfil do MDT de 1 m do DF (IDE/DF, SEDUH) suavizado; caimento, '
                      'zebras e muros são escolhas de modelagem; a inclinação de 5° da curva 1 é a publicada.'),
     },
+    'goiania': {
+        # 14 curvas publicadas (MotoGP 2026), 9 a direita e 5 a esquerda, sem planta numerada: "a borda externa,
+        # da curva 11 a curva 4, so tem curvas a direita" e a 5 e a primeira a esquerda (Motorsport); o asfalto
+        # soltou entre as curvas 10 e 12 e ondulou na 4. A deteccao acha 10 trechos; cinco tem dois apices
+        # separados por um trecho mais aberto e contam como duas curvas: a 1 (R 90 m) e a 2 (R 125 m) no fim da
+        # reta principal, a 6 (R 34 m) e a 7 (R 60 m) no grampo do miolo, a 11 (R 31 m) e a 12 (R 88 m) depois do
+        # S, a 13 (R 38 m) e a 14 (R 95-120 m) na curva inclinada antes da reta. Da saida da 14 a curva 1 sao
+        # 995 m: a reta de 994 m publicada.
+        'trechos': {762: 'Curvas 1 e 2', 1315: 'Curva 3', 1541: 'Curva 4 · grampo', 1873: 'Curva 5',
+                    2107: 'Curvas 6 e 7 · grampo', 2311: 'Curva 8', 2611: 'Curva 9', 2717: 'Curva 10',
+                    2799: 'Curvas 11 e 12', 3368: 'Curvas 13 e 14 · inclinada'},
+        'depois': {762: 'Reta de cima · descida', 2799: 'Reta oposta', 3368: 'Reta principal · subida'},
+        'reta': 'Reta principal',
+        # "A reta principal [...] precedida de uma curva inclinada" (Band, 2026): sem o angulo publicado, 6%.
+        'caimento_extra': {'Curvas 13 e 14 · inclinada': .06},
+        # Arquibancada coberta do levantamento da Prefeitura: do lado de fora da reta (esquerda), de 174 a 250 m
+        # depois da linha, a 45 m do asfalto, alem da via de servico. As do jogo ficam no mesmo trecho a 20 m.
+        'arquibancadas': [{'antes_da_chegada': -170, 'blocos': 3, 'lado': 1, 'recuo': 20}],
+        'linha_chegada': 'meio_boxes',
+        'zebras': ['#c8201e', '#f1efe8'],
+        'fonte_boxes': ('Pit lane: OSM (via 879890871) refinado sobre a ortofoto de 2016 da Prefeitura de Goiânia, com a '
+                        'faixa diante das portas das garagens; garagens ao longo dos dois prédios dos boxes medidos na '
+                        'imagem aérea de 09/2025 (o novo, de 2025, e o antigo; 30 boxes).'),
+        'eixo_fonte': ('OSM (relação de circuito 15921950, vias 288004311 e 288004307) refinado sobre a ortofoto de 2016 '
+                       'da Prefeitura de Goiânia (0,25 m) (scripts/circuitos/refinar_eixo.py)'),
+        'ressalva': ('Reconstrução para jogo. Eixo medido sobre a ortofoto de 2016 da Prefeitura; larguras publicadas da '
+                     'reforma de 2025-26 (15 m na reta principal, 14 m no resto); perfil do modelo das curvas de nível de '
+                     '5 m da Prefeitura ajustado ao ANADEM, suavizado; caimento, zebras e muros são escolhas de modelagem.'),
+    },
 }
 
 
@@ -135,12 +165,11 @@ class Raster:
     """Amostra um GeoTIFF (qualquer CRS) em pontos UTM do circuito."""
 
     def __init__(self, caminho, epsg, banda=1):
-        with rasterio.open(caminho) as r:
-            self.a = r.read(banda).astype(np.float64)
-            self.t = r.transform
-            self.nodata = r.nodata
-            crs = r.crs
-        self.inv = Transformer.from_crs(epsg, crs, always_xy=True)
+        g = geo_io.ler(caminho)
+        self.a = g.banda(banda).astype(np.float64)
+        self.t = g.transform
+        self.nodata = g.nodata
+        self.inv = Transformer.from_crs(epsg, g.epsg, always_xy=True)
 
     def __call__(self, x, y, ordem=3):
         u, v = self.inv.transform(np.asarray(x, float), np.asarray(y, float))
@@ -258,15 +287,19 @@ def main():
     epsg = c['epsg']
     anadem = Raster(pasta / 'anadem.tif', epsg)
     # Relevo: o ANADEM (30 m) ou, em Brasilia, o MDT de 1 m do DF numa grade de 2 m (baixar_fontes.py
-    # --idedf), que entao serve a pista e ao terreno; o ANADEM fica so para comparar.
-    local = c.get('relevo_local') == 'idedf_mdt_1m'
-    relevo = Raster(pasta / 'mdt_idedf.tif', epsg) if local else anadem
+    # --idedf), e em Goiania o modelo das curvas de nivel de 5 m da Prefeitura (--goiania), que entao
+    # serve a pista e ao terreno; o ANADEM fica so para comparar.
+    mdt = MDT_LOCAL.get(c.get('relevo_local'))
+    local = mdt is not None
+    relevo = Raster(pasta / mdt, epsg) if local else anadem
     # Superficie das vias: o relevo suavizado em 2D (~18 m no ANADEM, 4 m no MDT local). Trechos
     # vizinhos da volta leem a mesma superficie e ficam coerentes entre si; o terreno longe das
     # vias usa o original.
-    from scipy.ndimage import gaussian_filter
-    vias_dem = Raster(pasta / ('mdt_idedf.tif' if local else 'anadem.tif'), epsg)
-    vias_dem.a = gaussian_filter(vias_dem.a, 2.0 if local else .6, mode='nearest')
+    vias_dem = Raster(pasta / (mdt if local else 'anadem.tif'), epsg)
+    # Goiania (suavizacao_m: 2D e ao longo da volta): as curvas de 5 m nao resolvem ondulacoes de menos de
+    # ~30 m, e um degrau entre curvas vizinhas virava rampa de 8% na entrada da curva 4.
+    suave_2d, suave_volta = c.get('suavizacao_m', (4.0, 6.0) if local else (None, 12.0))
+    vias_dem.a = gaussian_filter(vias_dem.a, suave_2d / 2.0 if local else .6, mode='nearest')
     cop = Raster(pasta / 'copernicus_dsm.tif', epsg)
 
     # O eixo medido ondula (nos do OSM, ruido da deteccao): suaviza o rumo, forte nas retas.
@@ -331,8 +364,9 @@ def main():
     z_anadem = anadem(P[:, 0], P[:, 1])
     z_relevo = relevo(P[:, 0], P[:, 1], ordem=1) if local else z_anadem
     z_cop = cop(P[:, 0], P[:, 1])
-    # Ao longo da volta: 12 m no ANADEM; 6 m no MDT de 1 m, que resolve as ondulacoes da pista.
-    z_abs = gaussian_filter1d(vias_dem(P[:, 0], P[:, 1]), (6 if local else 12) / DS, mode='wrap')
+    # Ao longo da volta: 12 m no ANADEM; 6 m no MDT de 1 m, que resolve as ondulacoes da pista; 15 m nas
+    # curvas de 5 m de Goiania.
+    z_abs = gaussian_filter1d(vias_dem(P[:, 0], P[:, 1]), suave_volta / DS, mode='wrap')
     desnivel_terreno = float(np.ptp(z_abs))
     if c.get('desnivel_m'):
         # Pista mais nova que os modelos de terreno (ANADEM e Copernicus sao de antes da obra): a
@@ -770,7 +804,6 @@ def montar_pit(pxy, pw, xy, z, E, T, bank, largura, s, L, superficie, vias_dem, 
         # Plataforma do muro diante das garagens, como no ECPA e em Chapeco: a banca da equipe do Box 99
         # pede o muro de 3,4 m a 0,6 m de cada via. Onde a faixa medida corre mais perto da pista ela se
         # afasta o que falta (Brasilia: ~0,3 m), com transicao suave.
-        from scipy.ndimage import maximum_filter1d
         g0_, g1_ = (v * escala for v in garagens_s)
         falta = np.where((ps > g0_ - 40) & (ps < g1_ + 40), np.maximum(0, folga_min - gap), 0)
         falta = gaussian_filter1d(maximum_filter1d(falta, 41, mode='nearest'), 8, mode='nearest')
@@ -955,6 +988,14 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
                 g = geom(w)
                 if g is not None and len(g) >= 4:
                     pinta(Polygon(g), ch)
+    if CIRCUITOS[nome].get('edificios_locais') == 'goiania':
+        # Matas e cerrado mapeados pela Prefeitura de Goiania (tipos 1 a 3: "Cerrado, Mata, Reflorestamento").
+        from shapely.geometry import shape
+        for f in json.loads((pasta / 'goiania_vegetacao.geojson').read_text(encoding='utf-8'))['features']:
+            if f.get('geometry') and f['properties'].get('tp_veg') in (1, 2, 3):
+                g = shape(f['geometry'])
+                for parte in (g.geoms if g.geom_type == 'MultiPolygon' else [g]):
+                    pinta(Polygon((np.array(parte.exterior.coords)[:, :2] - origem[:2]) * escala), '1')
     larg_via = {'motorway': 11, 'trunk': 10, 'primary': 9, 'secondary': 8, 'tertiary': 7, 'motorway_link': 6,
                 'primary_link': 6, 'trunk_link': 6, 'secondary_link': 6, 'tertiary_link': 6, 'unclassified': 6,
                 'residential': 6, 'service': 4}
@@ -993,13 +1034,19 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
         if len(idx) > 1:
             meio = cfg['lado'] * (largura[idx] / 2 + cfg['recuo'] + 9)
             bandas.append((LineString(xy[idx] + E[idx] * meio[:, None]), 13))
-    edificios, polys_osm = [], []
+    edificios, polys_osm, cidade = [], [], []
     if c.get('edificios_locais') == 'idedf':
         for loc_, alt_, fonte_, redondo_, nome_ in edificios_idedf(pasta, origem, escala, foto, xy):
             edificios.append((loc_, alt_, 'idedf-redondo' if redondo_ else 'idedf'))
         vias_edif = []
     else:
         vias_edif = vias
+        if c.get('edificios_locais') == 'goiania':
+            # Os predios do autodromo levantados pela Prefeitura vem antes do OSM e da Microsoft.
+            cidade = equipamentos_goiania(pasta, origem, escala)
+            edificios += cidade
+            polys_osm += [p for p, _, _ in cidade]
+    idx_cidade = [prepared.prep(p) for p, _, _ in cidade]
     for w in vias_edif:
         t = w.get('tags', {})
         if 'building' in t and w['nodes'][0] == w['nodes'][-1]:
@@ -1007,7 +1054,7 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
             if g is None or len(g) < 4:
                 continue
             p = Polygon(g).buffer(0)
-            if p.area < 12:
+            if p.area < 12 or any(q.contains(p.centroid) for q in idx_cidade):
                 continue
             polys_osm.append(p)
             alt = None
@@ -1031,11 +1078,13 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
                 continue
             h = f['properties'].get('height', -1)
             edificios.append((p, h if h and h > 0 else None, 'microsoft'))
+    if c.get('edificios_locais') == 'goiania':
+        edificios = alturas_goiania(pasta, origem, escala, edificios)
     lista = []
     xmin, xmax, ymin, ymax = gx[0] + 10, gx[-1] - 10, gy[0] + 10, gy[-1] - 10
     for p, alt, fonte in edificios:
         cx, cy = p.centroid.x, p.centroid.y
-        if not (xmin < cx < xmax and ymin < cy < ymax) or not livre(p):
+        if not (xmin < cx < xmax and ymin < cy < ymax) or not livre(p) or (fonte == 'goiania' and alt is None):
             continue
         r = p.minimum_rotated_rectangle
         q = np.array(r.exterior.coords)[:4]
@@ -1052,7 +1101,8 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
             # Estadio Mane Garrincha, ginasios: um tambor com o diametro do contorno.
             fonte, tipo = 'idedf', 'redondo'
             la = lb = 2 * math.sqrt(Polygon(p.exterior.coords).area / math.pi)
-        elif fonte == 'idedf' and alt >= 12 and area >= 250:
+        elif (fonte == 'idedf' or '+' in fonte) and alt >= 12 and area >= 250:
+            # Altura de cadastro (DF; Goiania: pavimentos do lote ou edificio em altura): bloco de apartamentos.
             tipo = 'predio'
         lista.append([round(cx, 2), round(cy, 2), round(la, 2), round(lb, 2), round(rumo, 4), round(alt, 2), tipo, fonte])
         # Pinta o chao sob a edificacao como construido.
@@ -1063,8 +1113,9 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
         arq.append({'first_s': cfg['antes_da_chegada'], 'blocks': cfg['blocos'], 'side': cfg['lado'], 'gap': cfg['recuo']})
     contagem = {ch: int((cover == ch).sum()) for ch in '01234567'}
     arvores = arvores_idedf(pasta, origem, escala, gx, gy, bandas, foto) if c.get('edificios_locais') == 'idedf' else []
-    print(f'cenario: {len(lista)} edificacoes ({sum(1 for e in lista if e[7] == "osm")} OSM, '
-          f'{sum(1 for e in lista if e[7] == "idedf")} IDE/DF), {len(arvores)} arvores isoladas, cobertura {contagem}')
+    print(f'cenario: {len(lista)} edificacoes ({sum(1 for e in lista if e[7].startswith("osm"))} OSM, '
+          f'{sum(1 for e in lista if e[7] == "idedf")} IDE/DF, {sum(1 for e in lista if e[7] == "goiania")} da Prefeitura de Goiania, '
+          f'{sum(1 for e in lista if "+" in e[7])} com pavimentos do cadastro), {len(arvores)} arvores isoladas, cobertura {contagem}')
     return {'cover': {'x0': float(gx[0]), 'y0': float(gy[0]), 'step': PASSO, 'nx': len(gx), 'ny': len(gy),
                       'classes': ''.join(cover.ravel()),
                       'legend': {'0': 'campo', '1': 'mata', '2': 'arbusto', '3': 'lavoura', '4': 'construido',
@@ -1072,7 +1123,111 @@ def cenario(nome, pasta, epsg, origem, escala, gx, gy, xy, largura, pit, s, L, T
             'buildings': {'columns': ['x', 'y', 'w', 'd', 'heading', 'h', 'kind', 'source'], 'items': lista},
             'stands': arq,
             **({'trees': {'columns': ['x', 'y'], 'items': arvores}} if arvores else {}),
-            **(skyline_idedf(pasta, epsg, origem, escala, gx, gy, c) if c.get('edificios_locais') == 'idedf' else {})}
+            **(skyline_idedf(pasta, epsg, origem, escala, gx, gy, c) if c.get('edificios_locais') == 'idedf' else {}),
+            **(skyline_goiania(pasta, origem, escala, gx, gy) if c.get('edificios_locais') == 'goiania' else {})}
+
+
+# Predios do autodromo de Goiania no levantamento da Prefeitura (Grande Equipamento) e a altura de
+# modelagem de cada um; pistas, patios e o heliponto nao sao edificacoes. A arquibancada coberta (None)
+# so tira do cenario o que o OSM e a Microsoft tem ali: o jogo monta as proprias arquibancadas.
+ALTURA_EQUIPAMENTO = {'Boxes': 7.0, 'Garagens': 6.0, 'Administração': 8.0, 'Cronometragem': 13.0, 'Portão de Entrada': 5.0,
+                      'Arquibancada': None, 'Hangar Aeromodelos RC': 6.0}
+
+
+def equipamentos_goiania(pasta, origem, escala):
+    from shapely.geometry import Polygon, shape
+    saida = []
+    for f in json.loads((pasta / 'goiania_equipamentos.geojson').read_text(encoding='utf-8'))['features']:
+        nome = f['properties'].get('nm_gre')
+        if nome not in ALTURA_EQUIPAMENTO or not f.get('geometry'):
+            continue
+        alt = ALTURA_EQUIPAMENTO[nome]
+        g = shape(f['geometry'])
+        for parte in (g.geoms if g.geom_type == 'MultiPolygon' else [g]):
+            saida.append((Polygon((np.array(parte.exterior.coords)[:, :2] - origem[:2]) * escala).buffer(0), alt, 'goiania'))
+    return saida
+
+
+def alturas_goiania(pasta, origem, escala, edificios):
+    """Altura das pegadas OSM e Microsoft pelos dados da Prefeitura de Goiania: um edificio em altura
+    dentro da pegada (numero de pavimentos do cadastro de edificios em altura) ou, senao, o numero de
+    pavimentos do lote do cadastro imobiliario que contem o centro dela."""
+    from shapely import STRtree
+    from shapely.geometry import Point, Polygon, shape
+    lotes, pav = [], []
+    for f in json.loads((pasta / 'goiania_lotes.geojson').read_text(encoding='utf-8'))['features']:
+        n = f['properties'].get('nrpaviment') or 0
+        if n > 0 and f.get('geometry'):
+            g = shape(f['geometry'])
+            for parte in (g.geoms if g.geom_type == 'MultiPolygon' else [g]):
+                lotes.append(Polygon((np.array(parte.exterior.coords)[:, :2] - origem[:2]) * escala).buffer(0))
+                pav.append(n)
+    arvore = STRtree(lotes) if lotes else None
+    torres = [(Point((np.array(f['geometry']['coordinates'][:2]) - origem[:2]) * escala), f['properties'].get('NR_PAV') or 0)
+              for f in json.loads((pasta / 'goiania_torres.geojson').read_text(encoding='utf-8'))['features']]
+    saida, n_torre, n_lote = [], 0, 0
+    for p, alt, fonte in edificios:
+        if alt is None and fonte in ('osm', 'microsoft'):
+            dentro = [n for q, n in torres if n and p.contains(q)]
+            if dentro:
+                alt, fonte, n_torre = 3.0 * max(dentro) + 3.0, fonte + '+torre', n_torre + 1
+            elif arvore is not None:
+                for k in arvore.query(p.centroid, predicate='within'):
+                    alt, fonte, n_lote = 3.1 * pav[k] + .8, fonte + '+cadastro', n_lote + 1
+                    break
+        saida.append((p, alt, fonte))
+    print(f'Prefeitura de Goiania: altura de {n_torre} pegadas pelos edificios em altura e de {n_lote} pelos lotes do cadastro')
+    return saida
+
+
+def skyline_goiania(pasta, origem, escala, gx, gy):
+    """O horizonte de Goiania alem da grade do terreno (landscape.js createHorizon): os edificios em altura
+    do cadastro da Prefeitura (numero de pavimentos) com as pegadas da Microsoft que os contem, ou um bloco
+    do tamanho dos apartamentos onde nao ha pegada (Jardim Goias, Marista, Bueno, Centro), e as casas e
+    galpoes da Microsoft ate 2,2 km do centro (os bairros em volta do autodromo)."""
+    from shapely.geometry import Point, Polygon
+    from projecao import Transformer
+    T = Transformer.from_crs(4326, 31982, always_xy=True)
+    fora = lambda x, y: not (gx[0] - 20 < x < gx[-1] + 20 and gy[0] - 20 < y < gy[-1] + 20)
+    torres = json.loads((pasta / 'goiania_torres.geojson').read_text(encoding='utf-8'))['features']
+
+    def retangulo(anel_lonlat):
+        a = np.array(anel_lonlat)
+        u, v = T.transform(a[:, 0], a[:, 1])
+        p = Polygon((np.column_stack([u, v]) - origem[:2]) * escala).buffer(0)
+        q = np.array(p.minimum_rotated_rectangle.exterior.coords)[:4]
+        e1, e2 = q[1] - q[0], q[2] - q[1]
+        return p, float(np.linalg.norm(e1)), float(np.linalg.norm(e2)), math.atan2(e1[1], e1[0])
+    itens, com_pegada = [], set()
+    for f in json.loads((pasta / 'goiania_torres_microsoft.geojson').read_text(encoding='utf-8'))['features']:
+        p, la, lb, rumo = retangulo(f['geometry']['coordinates'][0])
+        com_pegada.update(f['properties']['torres'])
+        pav = max(torres[k]['properties'].get('NR_PAV') or 4 for k in f['properties']['torres'])
+        if fora(p.centroid.x, p.centroid.y):
+            itens.append([round(p.centroid.x, 1), round(p.centroid.y, 1), round(la, 1), round(lb, 1), round(rumo, 3), round(3.0 * pav + 3, 1), 'predio'])
+    for k, f in enumerate(torres):
+        if k in com_pegada:
+            continue
+        x, y = (np.array(f['geometry']['coordinates'][:2]) - origem[:2]) * escala
+        a = f['properties']
+        pav = a.get('NR_PAV') or 4
+        # Sem pegada: um bloco com a area do andar tipo (apartamentos do andar x 90 m2 mais a circulacao).
+        lado = math.sqrt(float(np.clip((a.get('TL_APT') or 4 * pav) / pav * 90 + 120, 250, 1200)))
+        if fora(x, y):
+            itens.append([round(float(x), 1), round(float(y), 1), round(lado, 1), round(lado, 1), 0.0, round(3.0 * pav + 3, 1), 'predio'])
+    n_torres = len(itens)
+    for f in json.loads((pasta / 'goiania_casas_microsoft.geojson').read_text(encoding='utf-8'))['features']:
+        p, la, lb, rumo = retangulo(f['geometry']['coordinates'][0])
+        area = p.area
+        if area < 40 or not fora(p.centroid.x, p.centroid.y):
+            continue
+        alt = 3.4 if area < 90 else 5.8 if area < 250 else 7.5 if area < 1200 else 9.5
+        itens.append([round(p.centroid.x, 1), round(p.centroid.y, 1), round(la, 1), round(lb, 1), round(rumo, 3), alt,
+                      'galpao' if area >= 600 else 'casa'])
+    print(f'horizonte: {n_torres} edificios em altura da Prefeitura de Goiania e {len(itens) - n_torres} casas e galpoes da Microsoft alem do terreno')
+    return {'skyline': {'columns': ['x', 'y', 'w', 'd', 'heading', 'h', 'kind'], 'items': itens,
+                        'source': 'Prefeitura de Goiânia, edifícios em altura (nº de pavimentos), com pegadas do Microsoft Building Footprints; '
+                                  'casas e galpões até 2,2 km pelas pegadas da Microsoft'}}
 
 
 def skyline_idedf(pasta, epsg, origem, escala, gx, gy, c):
@@ -1197,18 +1352,28 @@ def arvores_idedf(pasta, origem, escala, gx, gy, bandas, foto):
 
 def solo(nome, pasta, epsg, origem, escala, gx, gy):
     """Cor do chao: Sentinel-2 (10 m) reprojetado na caixa do terreno, 2 m por pixel."""
-    with rasterio.open(pasta / 'sentinel2_rgb.tif') as src:
-        rgb = src.read()
-        px = 2.0
-        w = int((gx[-1] - gx[0]) / px)
-        h = int((gy[-1] - gy[0]) / px)
+    px = 2.0
+    w = int((gx[-1] - gx[0]) / px)
+    h = int((gy[-1] - gy[0]) / px)
+    # Grade local (sem escala) em coordenadas UTM do circuito.
+    x0, y1, passo = origem[0] + gx[0] / escala, origem[1] + gy[-1] / escala, px / escala
+    out = np.zeros((3, h, w), np.uint8)
+    if geo_io.rasterio is not None:
         from rasterio.transform import from_origin
-        # Grade local (sem escala) em coordenadas UTM do circuito.
-        dst_t = from_origin(origem[0] + gx[0] / escala, origem[1] + gy[-1] / escala, px / escala, px / escala)
-        out = np.zeros((3, h, w), np.uint8)
+        from rasterio.warp import reproject, Resampling
+        with geo_io.rasterio.open(pasta / 'sentinel2_rgb.tif') as src:
+            rgb = src.read()
+            for b in range(3):
+                reproject(rgb[b], out[b], src_transform=src.transform, src_crs=src.crs, dst_transform=from_origin(x0, y1, passo, passo),
+                          dst_crs=f'EPSG:{epsg}', resampling=Resampling.cubic)
+    else:
+        # Sem o GDAL: o centro de cada pixel levado ao CRS da cena e amostrado em B-spline cubica.
+        g = geo_io.ler(pasta / 'sentinel2_rgb.tif')
+        XX, YY = np.meshgrid(x0 + (np.arange(w) + .5) * passo, y1 - (np.arange(h) + .5) * passo)
+        u, v = Transformer.from_crs(epsg, g.epsg, always_xy=True).transform(XX, YY)
+        col, lin = ~g.transform * (u, v)
         for b in range(3):
-            reproject(rgb[b], out[b], src_transform=src.transform, src_crs=src.crs, dst_transform=dst_t,
-                      dst_crs=f'EPSG:{epsg}', resampling=Resampling.cubic)
+            out[b] = np.clip(np.round(map_coordinates(g.a[b].astype(float), [lin - .5, col - .5], order=3)), 0, 255)
     img = Image.fromarray(np.moveaxis(out, 0, -1))
     ASSETS.mkdir(parents=True, exist_ok=True)
     lado = 1024

@@ -110,6 +110,48 @@ CIRCUITOS = {
         # Marco no horizonte: a Torre de TV (Lucio Costa, 224 m, mirante a 75 m), OSM way 41648342.
         'marcos': [{'nome': 'Torre de TV', 'tipo': 'torre_tv', 'lat': -15.79062, 'lon': -47.89298, 'altura_m': 224}],
     },
+    'goiania': {
+        'nome': 'Autódromo Internacional Ayrton Senna',
+        'cidade': 'Goiânia, GO',
+        # Centro do tracado misto no OSM (relacao de circuito 15921950: vias 288004311 e 288004307),
+        # na saida leste da cidade, ao lado do Residencial Alphaville Flamboyant.
+        'centro': (-16.71825, -49.19284),
+        'raio_m': 1500,
+        'epsg': 31982,                 # SIRGAS 2000 / UTM 22S (o mesmo do Mapa Facil da Prefeitura)
+        'anadem': '22K',
+        'copernicus': 'Copernicus_DSM_COG_10_S17_00_W050_00_DEM',
+        'worldcover': 'S18W051',
+        # Reaberto em marco de 2026 depois da reforma para a MotoGP (motogp.com, Motorsport, Band):
+        # 3.835 m, sentido horario, 14 curvas (9 a direita, 5 a esquerda), reta principal de 994 m
+        # "precedida de uma curva inclinada"; a reta principal passou de 12 para 15 m de largura e as
+        # curvas para 14 m.
+        'extensao_m': 3835,
+        'centro_cidade': (-16.6799, -49.2556),   # Praca Civica, centro de Goiania
+        'largura_m': 14,
+        'sentido': 'horario',
+        'largura_faixa_m': (11, 17),
+        # Larguras publicadas (resto, reta principal) depois da reforma; a imagem aerea (09/2025) e da obra.
+        'largura_publicada': (14, 15),
+        # Boxes por dentro da reta principal (nordeste): a direita no sentido horario da corrida.
+        'lado_boxes': -1,
+        # Plataforma do muro dos boxes diante das garagens (a banca do Box 99 pede 3,4 m de muro).
+        'folga_minima_boxes_m': 4.6,
+        # Eixo, larguras e pit lane medidos na ortofoto de 2016 da Prefeitura (0,25 m, georreferenciada com as
+        # curvas e os equipamentos dela); a imagem Esri (09/2025, precisao de 8,5 m) mostra a obra da reforma.
+        'referencia': 'orto_goiania',
+        # Garagens pelos telhados brancos dos predios dos boxes na imagem Esri, onde ja aparece o predio novo
+        # (30 boxes, antes 22), 18 m antes do antigo; o patio entre a faixa e eles ainda e terra.
+        'garagens_na_esri': True,
+        'patio_boxes': {'faixa': (0.5, 20.0), 'vao': 24.0},
+        # A faixa (9 m, como nos outros circuitos) encosta nas portas das garagens, como na ortofoto de 2016.
+        'faixa_nas_garagens': 9.0,
+        # Relevo e edificacoes do Mapa Facil da Prefeitura (SIGGO): as curvas de nivel de 5 m ajustam o
+        # ANADEM; equipamentos do autodromo, pavimentos do cadastro e os edificios em altura da cidade.
+        'relevo_local': 'goiania_curvas_5m',
+        # Suavizacao do relevo das vias (m): 2D e ao longo da volta (o MDT do DF usa 4 e 6).
+        'suavizacao_m': (8.0, 15.0),
+        'edificios_locais': 'goiania',
+    },
 }
 
 

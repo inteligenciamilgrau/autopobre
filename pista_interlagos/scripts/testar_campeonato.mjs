@@ -1,8 +1,8 @@
 // Championship (teste/championship.js): points, round order, persistence, standings, one
-// championship per mode and calendar (Todas as pistas from circuits.js, Old Stock 2026), new
+// championship per mode and calendar (Todas as pistas from circuits.js, Old Stock 2026, Copa Fusca 2026), new
 // circuits joining a championship under way, and the story's retirements and disqualifications.
 import assert from 'node:assert/strict';
-import {Championship,CHAMPIONSHIP_ROUNDS,CHAMPIONSHIP_CALENDARS,OLD_STOCK_2026,CHAMPIONSHIP_POINTS,CHAMPIONSHIP_KEY,championshipKey,pointsFor,championshipStandings} from '../teste/championship.js';
+import {Championship,CHAMPIONSHIP_ROUNDS,CHAMPIONSHIP_CALENDARS,OLD_STOCK_2026,COPA_FUSCA_2026,calendarsFor,championshipCalendar,CHAMPIONSHIP_POINTS,CHAMPIONSHIP_KEY,championshipKey,pointsFor,championshipStandings} from '../teste/championship.js';
 import {CIRCUITS} from '../teste/circuits.js';
 import {RIVAL_ROSTER} from '../teste/race-roster.js';
 
@@ -86,6 +86,33 @@ assert.equal(championshipKey('corrida','oldstock2026'),'opala99-championship-old
  // A Todas as pistas save is not a season save.
  s.setItem(championshipKey('corrida','oldstock2026'),JSON.stringify({version:1,mode:'corrida',pilot:'Ana',laps:3,rounds:[...CHAMPIONSHIP_ROUNDS],results:[]}));
  assert.equal(new Championship(s,'corrida','oldstock2026').state,null);}
+// Copa Fusca 2026: eleven dated rounds raced in Fuscas, six at Interlagos, Goiânia in September;
+// Modo Corrida only (Modo História falls back to Todas as pistas).
+assert.deepEqual(COPA_FUSCA_2026.map(r=>r.circuit),['interlagos','brasilia','interlagos','interlagos','interlagos','cascavel','interlagos','goiania','cascavel','chapeco','interlagos']);
+assert.deepEqual(COPA_FUSCA_2026.map(r=>r.date),['21 e 22 FEV','21 e 22 MAR','18 e 19 ABR','16 e 17 MAI','06 e 07 JUN','11 e 12 JUL','01 e 02 AGO','19 e 20 SET','17 e 18 OUT','21 e 22 NOV','19 e 20 DEZ']);
+assert.equal(COPA_FUSCA_2026[7].place,'Goiânia - GO');
+{const cup=CHAMPIONSHIP_CALENDARS.copafusca2026;assert(cup.rounds===COPA_FUSCA_2026&&cup.model==='fusca'&&cup.label==='COPA FUSCA 2026'&&cup.name==='Copa Fusca 2026');
+ assert(!CHAMPIONSHIP_CALENDARS.todas.model&&!CHAMPIONSHIP_CALENDARS.oldstock2026.model,"the other calendars race the car screen's model");}
+assert.deepEqual(calendarsFor('corrida'),['todas','oldstock2026','copafusca2026']);assert.deepEqual(calendarsFor('historia'),['todas','oldstock2026']);
+assert.equal(championshipCalendar('copafusca2026','corrida'),'copafusca2026');assert.equal(championshipCalendar('copafusca2026','historia'),'todas');
+assert.equal(championshipCalendar('copafusca2026'),'copafusca2026','the remembered tab');assert.equal(championshipCalendar('nada'),'todas');
+assert.equal(championshipKey('corrida','copafusca2026'),'opala99-championship-copafusca2026-v1');
+{const s=memory(),cup=new Championship(s,'corrida','copafusca2026');
+ assert.equal(new Championship(s,'historia','copafusca2026').calendar,'todas','no Copa Fusca in Modo História');
+ assert(!cup.started&&cup.total===11&&cup.schedule[0].date==='21 e 22 FEV'&&cup.schedule[7].place==='Goiânia - GO'&&cup.info.model==='fusca');
+ if(!Object.hasOwn(CIRCUITS,'goiania')){
+  // Goiânia still being built: the cup waits for it.
+  assert(!cup.available);assert.equal(cup.start('Ana',3),null);assert(!cup.started&&s.getItem(championshipKey('corrida','copafusca2026'))===null);
+ }else{
+  assert(cup.available);cup.start('Ana',3);assert.equal(cup.nextCircuit,'interlagos');
+  const r1=cup.record(0,'interlagos',order(1),'Ana');assert(r1.label==='COPA FUSCA 2026'&&r1.date==='21 e 22 FEV'&&r1.next==='brasilia');
+  for(let k=1;k<11;k++)cup.record(k,cup.nextCircuit,order(2),'Ana');assert(cup.finished);
+  assert.deepEqual(cup.state.results.map(r=>r.circuit),COPA_FUSCA_2026.map(r=>r.circuit));
+  assert.equal(cup.standings().find(d=>d.player).points,25+20*10);assert(!new Championship(s,'corrida','oldstock2026').started,'the Old Stock save is untouched');
+ }
+ // An Old Stock save is not a Copa Fusca save.
+ s.setItem(championshipKey('corrida','copafusca2026'),JSON.stringify({version:1,mode:'corrida',calendar:'oldstock2026',pilot:'Ana',laps:3,rounds:OLD_STOCK_2026.map(r=>r.circuit),results:[]}));
+ assert.equal(new Championship(s,'corrida','copafusca2026').state,null);}
 // Ties: equal points (30 each) go to the driver with more wins.
 const tie=championshipStandings({pilot:'X',results:[
  {circuit:'interlagos',rows:[{number:'73',name:'A',position:1,points:25},{number:'00',name:'B',position:2,points:20}]},
@@ -110,4 +137,4 @@ assert.equal(dsq.points,0);assert.equal(dsq.wins,0);assert.equal(dsq.podiums,0);
 assert.equal(story.round,2,'a disqualification keeps the calendar going');
 story.reset();assert(new Championship(storage).finished,'resetting one mode keeps the other');
 again.reset();assert(!again.started);assert.equal(storage.getItem(CHAMPIONSHIP_KEY),null);
-console.log(JSON.stringify({passed:true,rounds:CHAMPIONSHIP_ROUNDS,oldStock2026:OLD_STOCK_2026.map(r=>r.circuit),brasilia:Object.hasOwn(CIRCUITS,'brasilia'),points:CHAMPIONSHIP_POINTS,champion:last.champion.number,championPoints:last.player.points}));
+console.log(JSON.stringify({passed:true,rounds:CHAMPIONSHIP_ROUNDS,oldStock2026:OLD_STOCK_2026.map(r=>r.circuit),copaFusca2026:COPA_FUSCA_2026.map(r=>r.circuit),brasilia:Object.hasOwn(CIRCUITS,'brasilia'),goiania:Object.hasOwn(CIRCUITS,'goiania'),points:CHAMPIONSHIP_POINTS,champion:last.champion.number,championPoints:last.player.points}));

@@ -173,13 +173,15 @@ export class CarSelect {
   // In a room the note says how the cars are shared, and what became of the last choice.
   if(this.room)this.room.textContent=this.notice||(this.asked?`Pedindo o #${this.asked} ao anfitrião… Vale a partir da próxima largada.`:
    `${this.guest?'Escolha o carro e clique em Aguardar início da corrida: o anfitrião escolhe a pista e dá a largada. ':''}Na sala, cada piloto corre com o carro que escolher, se ninguém estiver com ele; os outros carros correm com a IA. O anfitrião larga em último.`);
-  // The way on: the tracks; for a guest, the host's race (once let in: waiting for it, or not).
+  // The way on, big atop the cards as the track screen's Corrida única: the tracks, with the car taken;
+  // for a guest, the host's race (once let in: waiting for it, or not).
   const next=$('carsNext'),g=this.guest;
-  if(this.room){
-   next.disabled=!!g&&!g.admitted;if(g)next.setAttribute('aria-pressed',String(g.admitted&&g.waiting));else next.removeAttribute('aria-pressed');
-   const label=!g?'Escolher a pista →':!g.admitted?'Esperando o anfitrião aceitar você…':g.waiting?'Aguardando o início da corrida':'Aguardar início da corrida →';
-   const hint=g?.admitted&&g.waiting?'O anfitrião escolhe a pista e dá a largada · clique para cancelar':'';
-   if(next.dataset.label!==label+hint){next.dataset.label=label+hint;const small=document.createElement('small');small.textContent=hint;next.replaceChildren(label,...hint?[small]:[]);}
+  if(this.room){next.disabled=!!g&&!g.admitted;if(g)next.setAttribute('aria-pressed',String(g.admitted&&g.waiting));else next.removeAttribute('aria-pressed');}
+  const label=!g?'Escolher a pista →':!g.admitted?'Esperando o anfitrião aceitar você…':g.waiting?'Aguardando o início da corrida':'Aguardar início da corrida →';
+  const hint=!g?`Com o ${name} #${entry.number} · corrida única, treino, 1x1 ou campeonato`:!g.admitted?'':g.waiting?'O anfitrião escolhe a pista e dá a largada · clique para cancelar':`Com o ${name} #${entry.number} · o anfitrião escolhe a pista e dá a largada`;
+  if(next.dataset.label!==label+hint){
+   next.dataset.label=label+hint;const span=document.createElement('span'),small=document.createElement('small');span.className='mode-label';span.textContent=label;small.id='carsNextDetail';small.textContent=hint;
+   next.replaceChildren(span,...hint?[small]:[]);
   }
   const loaded=this.studio.ready(this.model);this.status.hidden=loaded;if(!loaded&&this.failure!==this.model)this.status.textContent=`Carregando o ${name}…`;
  }

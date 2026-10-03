@@ -1,6 +1,6 @@
-// Cascavel, ECPA Piracicaba, Chapecó and Brasília, rebuilt from open data (scripts/circuitos/):
+// Cascavel, ECPA Piracicaba, Chapecó, Brasília and Goiânia, rebuilt from open data (scripts/circuitos/):
 // geometry, relief, pit lane, scenery clearances and a full AI race on each.
-//   node scripts/testar_circuitos_abertos.mjs [cascavel|piracicaba|chapeco|brasilia]
+//   node scripts/testar_circuitos_abertos.mjs [cascavel|piracicaba|chapeco|brasilia|goiania]
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 import {CIRCUITS} from '../teste/circuits.js';
@@ -12,7 +12,7 @@ import {billboardSpots,BOARD_CLEARANCE} from '../teste/track-surface.js';
 
 const only=process.argv[2];
 const report={};
-for(const id of ['cascavel','piracicaba','chapeco','brasilia']){
+for(const id of ['cascavel','piracicaba','chapeco','brasilia','goiania']){
  if(only&&only!==id)continue;
  const circuit=CIRCUITS[id],data=JSON.parse(readFileSync(new URL(`../dados/pista_${id}.json`,import.meta.url)));
  data.meta.id=id;data.meta.name=circuit.name;
@@ -31,7 +31,7 @@ for(const id of ['cascavel','piracicaba','chapeco','brasilia']){
  assert.equal(Math.sign(turn),data.meta.direction==='horario'?-1:1,`${id}: sense of travel`);
  if(id==='piracicaba')assert(Math.abs(L-circuit.length)<15,'ECPA shows its measured length');
  else assert(Math.abs(data.meta.reconstructed_3d_m-circuit.length)<.5,`${id} matches the published length`);
- assert.equal(circuit.length,{cascavel:3058,piracicaba:1930,chapeco:4004,brasilia:5384}[id]);
+ assert.equal(circuit.length,{cascavel:3058,piracicaba:1930,chapeco:4004,brasilia:5384,goiania:3835}[id]);
  // Chapecó (opened 08/2026): the earthworks profile is calibrated to the published 18.5 m, and the
  // sections carry the official numbering (12 curves, curve 7 the long constant-radius sweep).
  if(id==='chapeco'){
@@ -52,6 +52,22 @@ for(const id of ['cascavel','piracicaba','chapeco','brasilia']){
   assert(Math.abs(Math.max(...turn1)-Math.tan(5*Math.PI/180))<.002,'Brasília: curve 1 banked at 5°');
   assert(data.meta.elevation_check.mdt_local_menos_anadem_p95_abs_m<3,'Brasília: the DF terrain model agrees with ANADEM');
   assert.equal(data.meta.direction,'horario');
+ }
+ // Goiânia (MotoGP 2026): 14 curves (9 right, 5 left), the widths of the 2025-26 renovation (15 m on the
+ // main straight, 14 m elsewhere), the banked 13-14 before the 994 m straight, relief from the city's 5 m
+ // contours, and the city's towers and the neighbourhoods' houses on the horizon.
+ if(id==='goiania'){
+  const numbers=new Set(data.meta.sections.flatMap(([,name])=>[...name.split(' · ')[0].matchAll(/\d+/g)].map(m=>+m[0])));
+  for(let k=1;k<=14;k++)assert(numbers.has(k),`Goiânia: curve ${k} named`);
+  assert(!data.meta.sections.some(([,name])=>name==='Curva'),'Goiânia: every detected curve has its number');
+  const widths=a.map(p=>p[4]);assert(Math.min(...widths)>=13.9&&Math.max(...widths)<=15.01,'Goiânia: published widths');
+  assert(Math.abs(a[0][4]-15)<.01,'Goiânia: 15 m at the timing line');
+  const c13=data.meta.sections.find(([,name])=>name.startsWith('Curvas 13 e 14'))[0],banked=a.filter(p=>p[0]>c13+20&&p[0]<c13+120).map(p=>Math.abs(p[5]));
+  assert(Math.max(...banked)>.055,'Goiânia: curves 13-14 banked');
+  assert(data.meta.elevation_check.mdt_local_menos_anadem_p95_abs_m<3,'Goiânia: the contour model agrees with ANADEM');
+  const kinds=data.scenery.skyline.items.reduce((m,it)=>(m[it[6]]=(m[it[6]]??0)+1,m),{});
+  assert(kinds.predio>1000&&kinds.casa>3000,`Goiânia: city towers and houses on the horizon (${JSON.stringify(kinds)})`);
+  assert(data.pit.reversed,'Goiânia: boxes on the right');
  }
  // --- Relief: real circuits, not a flat plate; grades a car can climb.
  const grades=a.map(p=>p[6]);out.grade=[Math.min(...grades),Math.max(...grades)].map(g=>+(g*100).toFixed(1));
@@ -117,8 +133,8 @@ for(const id of ['cascavel','piracicaba','chapeco','brasilia']){
   car.index=car.nearest(post.x,post.y,true).i;const onTrack=car.sample(post.x,post.y),lane=locatePit(geo,post.x,post.y);
   assert(Math.abs(onTrack.d)>onTrack.width/2+POST_CLEARANCE,`${id}: gantry post ${post.side} off the track`);
   assert(!lane||lane.d<lane.lo-POST_CLEARANCE||lane.d>lane.hi+POST_CLEARANCE,`${id}: gantry post ${post.side} on the pit lane (d ${lane?.d.toFixed(1)})`);
-  // Clear of the pit walls, or (Chapecó, Brasília: the line facing the garages) mounted on the pit wall's platform.
-  if(post.onWall)assert(wallUnderPost(geo,post.x,post.y)&&['chapeco','brasilia'].includes(id),`${id}: gantry post ${post.side} on the pit wall top`);
+  // Clear of the pit walls, or (Chapecó, Brasília, Goiânia: the line facing the garages) mounted on the pit wall's platform.
+  if(post.onWall)assert(wallUnderPost(geo,post.x,post.y)&&['chapeco','brasilia','goiania'].includes(id),`${id}: gantry post ${post.side} on the pit wall top`);
   else assert.equal(wallsNear(geo,post.x,post.y,POST_CLEARANCE).length,0,`${id}: gantry post ${post.side} against a pit wall`);
  }
  out.gantry=posts.map(p=>+p.d.toFixed(1));
