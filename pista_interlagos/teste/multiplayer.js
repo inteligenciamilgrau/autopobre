@@ -25,7 +25,8 @@
 // bot: it rolls on as if its driver had fainted, a stop on the road brings the tow truck to pull it
 // onto the grass, and while it is on the road everyone gets the yellow flag (the card, the marshal's
 // flag before it, the rivals easing off). Back in time, the pilot takes the car from where it stands;
-// a car that reached the flag with nobody at the wheel is AB, its race over.
+// a car that reached the flag with nobody at the wheel is AB, its race over. The host out of reach
+// (its line down, its window gone) stands the race still in every window until it is back.
 import * as THREE from 'three';
 import {Room,roomParams} from './net-room.js';
 import {ServerLink,ROOM_SERVER,LOCAL_SERVER} from './net-link.js';
@@ -35,13 +36,16 @@ import {TOW_ARRIVE,faintedInput,inTheWay} from './race-field.js';
 import {strapPath} from './immersive-state.js';
 import {marshalSpots} from './trackside.js';
 // Car messages a second; after crossing the line, how long the results wait for the others (s); a
-// car not heard from for QUIET seconds is reported on the room card, and mid-race the host leaves it
-// without a driver after STRANDED (checkSilence).
+// car not heard from for QUIET seconds is reported on the room card (the host's: the race stands
+// still, updatePause), and mid-race the host leaves a guest's without a driver after STRANDED
+// (checkSilence).
 const SEND=1/30,RESULTS_WAIT=60,QUIET=2,STRANDED=5;
 // The tow truck (immersive-visuals.js truckModel) stands this far ahead of the car's centre on the strap
-// (hooks 2.22 m and 2.45 m from the centres, 5 m of strap); it drives in from TRUCK_FROM further on, and
-// off again for TRUCK_GONE seconds.
-const TRUCK_AHEAD=9.4,TRUCK_FROM=25,TRUCK_GONE=5;
+// (hooks 2.22 m and 2.45 m from the centres, 5 m of strap). It comes in along the side of the track,
+// TRUCK_SIDE metres past the edge, from TRUCK_BACK metres behind the car, in TRUCK_DRIVE seconds (the
+// rest of RaceField's TOW_ARRIVE it hooks up), turning onto the tow's way only past the car's nose
+// (TRUCK_CUT metres on); done, it drives off for TRUCK_GONE seconds.
+const TRUCK_AHEAD=9.4,TRUCK_BACK=24,TRUCK_SIDE=2.6,TRUCK_CUT=3,TRUCK_DRIVE=TOW_ARRIVE-1.5,TRUCK_GONE=6;
 // The breakdown a car left without its pilot is AB for at the flag (RaceField strand).
 const NO_DRIVER='conexão caiu';
 const NO_STOPS=Object.freeze([]);
@@ -56,6 +60,10 @@ const along=(from,s,L)=>((s-from)%L+L)%L;
 const KEY_STORE='autopobre-chave-grupo';
 const readKey=()=>{try{return localStorage.getItem(KEY_STORE)??'';}catch{return '';}};
 const saveKey=key=>{try{localStorage.setItem(KEY_STORE,key);}catch{}};
+// Why the race stands still (pause): this window's own line, as host; the host gone from the room for a
+// moment (the server's word), or silent.
+const PAUSES={linha:()=>'Sua conexão caiu · corrida pausada para todos até ela voltar…',saiu:()=>'O anfitrião caiu · corrida pausada até ele voltar…',
+ silencio:secs=>`Sem sinal do anfitrião há ${secs} s · corrida pausada até ele voltar…`};
 // What the card says when the server closed the door (net-link.js CLOSED) or the line dropped.
 const PROBLEMS={conectando:'Conectando ao servidor da sala…',reconectando:'Conexão caiu · tentando de novo…',chave:'Digite a chave do grupo para entrar na sala.',
  cheia:'Sala cheia.',recusado:'O anfitrião recusou sua entrada.',expulso:'Você foi removido da sala.',excesso:'Conexão encerrada: mensagens demais.',
@@ -75,6 +83,8 @@ export class Multiplayer {
   // Cars waiting for their pilots (every window: number -> {stage, since}), their trucks and the
   // marshals' flags; cut: this guest's own line is down (or the host has it out of its seat).
   this.stopped=new Map();this.trucks=new Map();this.flags=new Map();this.cut=null;
+  // The race standing still for its host (pause: why, since when).
+  this.pause=null;
   // The cars humans raced once the lights went out (their names stay on them).
   this.raced=new Set();
   // A new race from the host, while this guest waits for one: load its track and start (false: busy
@@ -158,7 +168,7 @@ export class Multiplayer {
  // race is the full grid (seat = roster index): Treino solo, 1x1, the recon lap and the story stay
  // this window's own.
  plan(immersive){
-  this.phase='lobby';this.holding=false;this.finishedAt=null;this.autopilotOn=false;this.cut=null;this.lost=false;this.raced=new Set();this.clearStops();
+  this.phase='lobby';this.holding=false;this.finishedAt=null;this.autopilotOn=false;this.cut=null;this.lost=false;this.pause=null;this.raced=new Set();this.clearStops();
   const room=this.room,field=immersive.field;
   this.race=room.role==='host'?this.game.fullGrid()?room.planRace({circuit:this.game.session().circuit,laps:immersive.laps,ace:!!field.ace,level:field.level,retirements:field.retirements!==false,ghosts:this.params.ghosts}):null
    :this.hostRace();
@@ -218,9 +228,12 @@ export class Multiplayer {
  }
  // The pilot at the wheel: a car left standing for them waits no more (the tow, the AB it would get at
  // the flag), and their states say the rest from now on. A car that reached the flag without them
- // stays AB, and theirs no more (their window knows it from the host's word, checkCut).
+ // stays AB, and theirs no more (their window knows it from the host's word, checkCut), unless their
+ // states say they finished it themselves: the line crossed at the wheel before this window heard it
+ // (states held up, or the line dropped just after), as their window never finishes a car nobody
+ // drives (stepFree).
  handOver(r,remote){
-  if(!this.immersive.field.reclaim(r))return;remote.waiting=null;
+  if(!this.immersive.field.reclaim(r,!!remote.state?.finished))return;remote.waiting=null;
   r.puppet=(rival,dt)=>{
    const input=remote.drive(rival.car,dt),s=remote.state;rival.progress=s.progress;rival.lastS=rival.car.surface.s;
    if(s.finished&&!rival.finished){rival.finished=true;rival.finishTime=s.finishTime;}
@@ -232,11 +245,11 @@ export class Multiplayer {
  }
  // Host: a guest gone before the start (or never ready) leaves a bot in its seat, from where the car
  // is (during the race a car is left without a driver instead: left). The human's best lap goes with them:
- // only the bot's own full laps may reach the AI records (ai-records.js). The seat's breakdown dice
- // were drawn for a driver who never raced it: the bot keeps the car going.
+ // only the bot's own full laps may reach the AI records (ai-records.js). The seat's breakdown, from
+ // the race's dice, is the bot's: it races that car from the start (the race's one to four retirements).
  release(r){
   const field=this.immersive.field,i=field.rivals.indexOf(r),obj=this.immersive.visual.rivals[i];
-  this.remotes.delete(r.seat);r.puppet=null;r.seat=null;r.car.remote=r.car.ghost=false;r.car.best=null;r.lastS=r.car.surface.s;r.entry=field.roster[i];r.breakdown=null;
+  this.remotes.delete(r.seat);r.puppet=null;r.seat=null;r.car.remote=r.car.ghost=false;r.car.best=null;r.lastS=r.car.surface.s;r.entry=field.roster[i];
   obj.userData.entry=r.entry;this.label(obj,null);
  }
  // Name tags: a human's name in lime over the car; null puts the driver's own tag back.
@@ -283,56 +296,67 @@ export class Multiplayer {
  slot(number){return this.immersive?.field.rivals.find(r=>(r.seat??r.entry.number)===number)??null;}
  // The car of a seat waiting for its pilot when it is in the race's way, under the yellow flag (as
  // the rivals see it, RaceField inTheWay); null when it is not.
- inTheWay(number,stop){const c=this.slot(number)?.car;return c&&inTheWay(stop,c)?c:null;}
+ carInTheWay(number,stop){const c=this.slot(number)?.car;return c&&inTheWay(stop,c)?c:null;}
  // The cars waiting for their pilots in this race: the host's own field, or the host's word. back:
  // whether that pilot may still take the car back (its line dropped, or went quiet), not one that
- // left the race by the menu or was sent out, nor a car that reached the flag without them.
+ // left the race by the menu or was sent out, nor a car that reached the flag without them. side: the
+ // side of the track the tow truck takes it to (RaceField towPath), once it is on its way.
  stopList(){
   const room=this.room,field=this.immersive?.field;
   if(room.role==='host'){
    if(!field?.rivals.some(r=>r.stop))return NO_STOPS;
    const back=new Set([...room.race?.seats??[],...room.away.values()].map(s=>s.number));
-   return field.rivals.filter(r=>r.stop).map(r=>({number:r.seat,stage:r.stop.stage,back:!r.stop.flagged&&back.has(r.seat)}));
+   return field.rivals.filter(r=>r.stop).map(r=>({number:r.seat,stage:r.stop.stage,back:!r.stop.flagged&&back.has(r.seat),...(r.stop.side?{side:r.stop.side}:{})}));
   }
   const lobby=room.lobby;return lobby?.race&&lobby.race.id===this.race?.id?lobby.stops??NO_STOPS:NO_STOPS;
  }
  // Every frame of a race: the stages of the cars waiting for their pilots (the host tells the room),
  // the AB a guest's window gives one at its flag, the tow trucks and the marshals' flags. A guest's own
- // car in the list is driven here all the same (the host only stopped hearing it, checkSilence).
+ // car in the list is driven here all the same (the host only stopped hearing it, checkSilence). The
+ // race's own clock times them (RaceField time): a race standing still for its host (pause) stops them.
  syncStops(){
   const room=this.room,list=this.phase==='racing'||this.phase==='finished'?this.stopList():NO_STOPS,me=this.myNumber();
   if(room.role==='host')room.setStops(list);
   // (nothing waiting, and nothing left on the scene from a car that did)
   if(!list.length&&!this.stopped.size&&!this.trucks.size&&!this.flags.size)return;
-  const now=clock(),seen=new Set();
-  for(const {number,stage,back=true} of list){if(number===me)continue;seen.add(number);const stop=this.stopped.get(number);if(stop?.stage!==stage)this.stopped.set(number,{stage,since:now,back});else stop.back=back;}
+  const now=this.immersive?.field.time??0,seen=new Set();
+  for(const {number,stage,back=true,side} of list){if(number===me)continue;seen.add(number);const stop=this.stopped.get(number);if(stop?.stage!==stage)this.stopped.set(number,{stage,since:now,back,side});else Object.assign(stop,{back,side});}
   for(const number of [...this.stopped.keys()])if(!seen.has(number))this.stopped.delete(number);
   if(room.role!=='host')for(const r of this.immersive?.field.rivals??[]){const waiting=this.stopped.has(r.seat);if(waiting&&!r.broken)r.broken={kind:NO_DRIVER,smokeLeft:0};else if(!waiting&&r.broken?.kind===NO_DRIVER)r.broken=null;}
   this.drawStops(now);
  }
- // The tow truck at a car on the strap (it drives in, pulls, and drives off once the car is clear or
- // its pilot is back), and the marshal at the post before a car still on the road waving the yellow
- // flag. They stand in the scene itself (the visuals hide anything else among the cars each frame).
+ // The tow truck at a car the tow takes (players' wish: it turns up by the track right by the car,
+ // drives past it and hooks it, and takes it to the grass): in along the side of the track from behind,
+ // past the car, onto the tow's way in front of it, hooked, then ahead of the car as it pulls it along
+ // that way (RaceField towPath: the host's field has it, any other window works it out from the car as
+ // it shows it, on the side the host says); done, or its pilot back, it drives on along it and away.
+ // The marshal at the post before a car still on the road waves the yellow flag. They stand in the
+ // scene itself (the visuals hide anything else among the cars each frame). now: the race's clock.
  drawStops(now){
   const immersive=this.immersive;if(!immersive)return;
   const visual=immersive.visual,scene=visual.root.parent??visual.root,data=immersive.data,L=data.meta.reconstructed_xy_m;
-  for(const [number,stop] of this.stopped)if(stop.stage==='reboque'&&!this.trucks.has(number))this.trucks.set(number,this.truck(scene));
+  for(const [number,stop] of this.stopped){const r=this.slot(number);if(stop.stage==='reboque'&&r&&!this.trucks.has(number))this.trucks.set(number,{...this.truck(scene),path:r.stop?.path??immersive.field.towPath(r.car,stop.side),since:stop.since});}
   for(const [number,t] of this.trucks){
-   const stop=this.stopped.get(number),c=this.slot(number)?.car;
+   const stop=this.stopped.get(number),r=this.slot(number),c=r?.car;
    if(stop?.stage!=='reboque'&&t.left===undefined)t.left=now;
    const gone=t.left===undefined?0:now-t.left;
    if(!c||gone>TRUCK_GONE){this.dropTruck(number);continue;}
-   // (the road's height from the towed car's stretch of track: the player's may be far away)
-   const ground=(x,y)=>c.sample(x,y).z;
-   const arriving=t.left===undefined?Math.max(0,1-(now-stop.since)/TOW_ARRIVE):0,ahead=TRUCK_AHEAD+TRUCK_FROM*arriving*arriving+1.5*gone*gone;
-   const h=c.heading,fx=Math.cos(h),fy=Math.sin(h),x=c.x+fx*ahead,y=c.y+fy*ahead,z=ground(x,y);
-   visual.setPose(t.root,{x,y:z,z:-y,heading:h,grade:0,bank:0});visual.flashBeacon(t.root,now);
-   t.strap.visible=t.left===undefined&&!arriving;
-   if(t.strap.visible){const hx=c.x+fx*2.22,hy=c.y+fy*2.22,tx=x-fx*2.45,ty=y-fy*2.45;visual.layStrap(t.strap,strapPath([hx,ground(hx,hy)+.3,-hy],[tx,z+.78,-ty],5),ground);}
+   // Where the car is on the way (the host's own field lays it out again once the car is at rest:
+   // that one), and the truck's own way in: TRUCK_SIDE past the edge until past the car's nose.
+   const P=r.stop?.path??t.path,driving=now-t.since,car=Math.max(0,Math.min(P.end,((c.surface.s-P.s0)%L+L*1.5)%L-L/2));
+   const lane=u=>{const w=Math.max(0,Math.min(1,(u-TRUCK_CUT)/(TRUCK_AHEAD-TRUCK_CUT))),edge=P.side*(P.station(u).half+TRUCK_SIDE);return P.lane(u,edge+(P.dAt(u)-edge)*w*w*(3-2*w));};
+   if(t.left===undefined)t.u=driving<TRUCK_DRIVE?-TRUCK_BACK+(TRUCK_BACK+TRUCK_AHEAD)*(1-(1-driving/TRUCK_DRIVE)**2):car+TRUCK_AHEAD;
+   const u=t.u+2*gone*gone,p=lane(u),q=lane(u+.5),h=Math.atan2(q.y-p.y,q.x-p.x),fx=Math.cos(h),fy=Math.sin(h);
+   // (the ground's height from the towed car's stretch of track: the player's may be far away)
+   const ground=(x,y)=>c.sample(x,y).z,z=ground(p.x,p.y);
+   visual.setPose(t.root,{x:p.x,y:z,z:-p.y,heading:h,grade:0,bank:0});visual.flashBeacon(t.root,now);
+   // The strap from the truck's hook to the car's end that faces it.
+   t.strap.visible=t.left===undefined&&driving>=TRUCK_DRIVE+.6;
+   if(t.strap.visible){const tx=p.x-fx*2.45,ty=p.y-fy*2.45,n=Math.hypot(tx-c.x,ty-c.y)||1,hx=c.x+(tx-c.x)/n*2.22,hy=c.y+(ty-c.y)/n*2.22;visual.layStrap(t.strap,strapPath([hx,ground(hx,hy)+.3,-hy],[tx,z+.78,-ty],5),ground);}
   }
   const waving=new Set();
   for(const [number,stop] of this.stopped){
-   const c=this.inTheWay(number,stop);if(!c)continue;
+   const c=this.carInTheWay(number,stop);if(!c)continue;
    // The marshals' posts (the trackside's own, trackside.js), each with the track station it stands
    // by (its ground below): once a circuit, the first time a car is in the way.
    if(this.marshalData!==data){
@@ -403,20 +427,46 @@ export class Multiplayer {
   car.index=car.nearest(s.x,s.y,true).i;car.settle();
   immersive.freePlayerProgress=s.progress;immersive.freeLastS=car.surface.s;Object.assign(field.playerRun,{progress:s.progress,lastS:null});
  }
- // Host: a guest's car whose states stopped coming mid-race (a line dead without a word, a window
- // hidden or frozen, the server stalled) is left without a driver after STRANDED seconds, as for a
- // pilot gone (left): it rolls on, the tow, the yellow flag, instead of standing frozen on the racing
+ // The race's host: a guest's car whose states stopped coming mid-race (a line dead without a word, a
+ // window hidden or frozen, the server stalled) is left without a driver after STRANDED seconds, as for
+ // a pilot gone (left): it rolls on, the tow, the yellow flag, instead of standing frozen on the racing
  // line at the speed it last had. Its next state hands it back where its pilot has it (heardCar).
- // Not while the host's own line is down, nor for STRANDED seconds after it is back: that silence
- // is the host's, and its guests' states take a moment to come again.
+ // Humans' seats only, and only in the race this window hosts: a window the room made its host during
+ // someone else's race shows every car from that host's word, bots and all, and none is its guest's.
+ // Not while this window's own line is down (closed, or no echo: Room lineQuiet; the race stands still
+ // then, pause), nor for STRANDED seconds after it is back: that silence is the host's, and its
+ // guests' states take a moment to come again.
  checkSilence(){
-  const now=clock();if(this.room.problem!==null){this.lineDown=now;return;}
-  if(now-(this.lineDown??-Infinity)<STRANDED)return;
+  const now=clock(),room=this.room;if(room.lineQuiet(now)){this.lineDown=now;return;}
+  if(this.myNumber()!==this.race.car||now-(this.lineDown??-Infinity)<STRANDED)return;
+  const humans=new Set(this.race.seats.map(s=>s.number));
   for(const r of this.immersive.field.rivals){
-   const remote=r.puppet?this.remotes.get(r.seat):null;
-   if(remote&&remote.seq>=0&&remote.age>STRANDED){remote.waiting=r;this.immersive.field.strand(r,NO_DRIVER);this.room.note('sem estados de #'+r.seat);}
+   const remote=r.puppet&&humans.has(r.seat)?this.remotes.get(r.seat):null;
+   if(remote&&remote.seq>=0&&remote.age>STRANDED){remote.waiting=r;this.immersive.field.strand(r,NO_DRIVER);room.note('sem estados de #'+r.seat);}
   }
  }
+ // The race stands still in every window while its host is out of reach (players' wish: a race on the
+ // host's machine, a championship's round, must neither go on without it nor be lost to a dropped
+ // line): the host's own line down (Room lineQuiet; only with other pilots in its race), and for a
+ // guest the host gone from the room for a moment (the server's word) or silent for QUIET seconds,
+ // unless the guest's own line closed (its car goes on without a driver instead: checkCut). (A late
+ // echo of its own says nothing to a guest here: a stalled server makes every echo late, the host's
+ // too, and a guest that drove on then raced alone among standing cars.) Nothing
+ // moves meanwhile and the clocks stop (main.js frozen: no steps); the race goes on from there once the
+ // host is heard again, the results' wait put off by as long. (The room server keeps a host's place
+ // through its race a long while; one that never comes back has taken its race with it: lost.)
+ updatePause(){
+  const room=this.room,race=this.race,now=clock();let why=null;
+  if(this.phase==='racing'&&race&&this.immersive&&!this.lost){
+   if(this.myNumber()===race.car){if(room.lineQuiet(now)&&(race.seats.length>1||room.away?.size))why='linha';}
+   else if(room.role==='guest'&&!this.cut&&(room.hostAway||now-room.hostSeen>QUIET))why=room.hostAway?'saiu':'silencio';
+  }
+  if(why&&!this.pause){this.pause={why,since:now};room.note('corrida pausada: '+why);}
+  else if(why)this.pause.why=why;
+  else if(this.pause){const held=now-this.pause.since;if(this.finishedAt!==null)this.finishedAt+=held;room.note(`corrida retomada (${held.toFixed(1)} s)`);this.pause=null;}
+ }
+ // main.js: whether the race stands still for its host this frame (no physics step, no engine sound).
+ frozen(){return !!this.pause;}
  heardCar(id,m){
   if(this.phase==='lobby'||m.race!==this.race?.id)return;
   const seat=this.race.seats.find(s=>s.id===id),state=seat&&readCar(m.car),remote=state&&this.remotes.get(seat.number);
@@ -437,6 +487,7 @@ export class Multiplayer {
   // Out of the race (the way out of the menu, another track, Modo História): the room hears it.
   if(this.phase!=='lobby'&&(!s.started||immersive?.active)){this.phase='lobby';this.holding=false;this.cut=null;if(room.role==='host')room.closeRace();}
   if(this.phase==='racing'&&immersive&&this.race)this.checkCut();
+  this.updatePause();
   if((this.phase==='racing'||this.phase==='finished')&&immersive&&room.role==='host')this.checkSilence();
   if((this.phase==='racing'||this.phase==='finished')&&immersive)this.syncStops();else if(this.stopped.size||this.trucks.size||this.flags.size)this.clearStops();
   // A window waiting outside any race (a guest's rerun before the host starts one) sends nothing.
@@ -452,7 +503,7 @@ export class Multiplayer {
   if((this.panelClock-=dt)<=0){this.panelClock=.25;this.render();}
  }
  send(paused){
-  const immersive=this.immersive,car=immersive.car,room=this.room,command=this.game.command()??{},L=immersive.data.meta.reconstructed_xy_m,still=paused||this.holding;
+  const immersive=this.immersive,car=immersive.car,room=this.room,command=this.game.command()??{},L=immersive.data.meta.reconstructed_xy_m,still=paused||this.holding||!!this.pause;
   const progress=Math.min(immersive.freePlayerProgress,car.laps*L+car.surface.s+immersive.field.gridLeadIn);
   const mine=packCar(car,{progress,finished:immersive.freeFinished,finishTime:immersive.finishTime,brake:command.brake??0,throttle:command.throttle??0,still});this.seq++;
   if(room.role==='guest'){if(!this.cut&&!this.lost)room.sendState(mine,this.seq);return;}
@@ -464,18 +515,26 @@ export class Multiplayer {
   }
   room.sendSnapshot(cars,this.seq);
  }
- // main.js asks before showing the result: not while other humans still race (up to RESULTS_WAIT).
+ // main.js asks before showing the result: not while other humans still race (up to RESULTS_WAIT), nor
+ // while the race stands still for its host.
  holdResults(){
   const immersive=this.immersive;if(this.phase!=='racing'||!immersive?.freeFinished||immersive.finishing)return false;
   const now=clock();this.finishedAt??=now;
-  if(this.stillRacing()&&now-this.finishedAt<RESULTS_WAIT)return true;
+  if(this.pause||this.stillRacing()&&now-this.finishedAt<RESULTS_WAIT)return true;
   // Everyone is in, or the wait ran out: the order as it stands now (estimated times for whoever still races).
   this.phase='finished';
   immersive.freeOrder=immersive.field.classification(immersive.freeTotalLaps,immersive.finishTime);
   this.render();return false;
  }
- // (a car the host has AB, left without its pilot, is not waited for)
- stillRacing(){const me=this.myNumber();return this.race?.seats.filter(s=>s.number!==me&&!this.remotes.get(s.number)?.state?.finished&&!this.slot(s.number)?.retired).length??0;}
+ // The other humans the result waits for: seated in the race, or out of it for a moment with their car
+ // waiting for them (back: their line dropped or went quiet); not one past the flag, nor one whose car
+ // is AB for good or who left the race (back false). (A car left without its pilot is retired at once,
+ // and its pilot may yet come back and finish: retired says nothing here.)
+ stillRacing(){
+  const me=this.myNumber(),stops=new Map(this.stopList().map(x=>[x.number,x]));
+  const numbers=new Set([...(this.race?.seats??[]).map(s=>s.number),...[...stops.values()].filter(x=>x.back!==false).map(x=>x.number)]);numbers.delete(me);
+  return [...numbers].filter(n=>!this.remotes.get(n)?.state?.finished&&!this.slot(n)?.finished&&stops.get(n)?.back!==false).length;
+ }
  buildPanel(){
   // The release's version (preparar_publicacao.py tags this module's address) keeps a cached old sheet out.
   const link=document.createElement('link');link.rel='stylesheet';link.href='./multiplayer.css'+new URL(import.meta.url).search;document.head.append(link);
@@ -499,11 +558,15 @@ export class Multiplayer {
   // The box gives the focus back at once: typed driving keys are ignored while an input has it.
   box.onchange=()=>{this.autopilot=box.checked;if(!box.checked&&this.autopilotOn){this.game.autopilot(false);this.autopilotOn=false;}box.blur();};
   this.panel.auto=box;this.panel.net=add('small','mp-net');
-  document.body.append(root);
+  // The race standing still for its host: a plate in the middle of the screen says so, and why.
+  const pause=this.panel.pause=document.createElement('div');pause.id='mpPause';pause.hidden=true;pause.setAttribute('role','status');
+  add('b','',pause).textContent='CORRIDA PAUSADA';this.panel.pauseWhy=add('span','',pause);
+  document.body.append(root,pause);
  }
  statusText(s){
   const room=this.room,me=room.number;
-  // Racing with the line down: what becomes of the car meanwhile.
+  // The race standing still for its host; racing with this guest's line down: what becomes of the car.
+  if(this.pause)return PAUSES[this.pause.why](Math.floor(clock()-room.hostSeen));
   if(this.cut&&['reconectando','fora'].includes(room.problem))return 'Conexão caiu · seu carro segue sem piloto até você voltar…';
   if(room.problem&&PROBLEMS[room.problem])return PROBLEMS[room.problem];
   if(!room.role)return 'Procurando a sala…';
@@ -544,14 +607,15 @@ export class Multiplayer {
   return race?.state==='racing'&&!race.seats.some(x=>x.id===room.id)?'Corrida em andamento: você entra na próxima largada.':'Pronto · esperando o anfitrião escolher a pista e largar…';
  }
  // During the race: this guest back on line, its car not handed back yet (or never again: it reached
- // the flag without its pilot); the yellow flag; a line gone quiet (the host for a guest, guests for
- // the host: not a car already left without its driver, nor one past its flag); cars waiting on the
- // grass for pilots who may still come back; null when all is well.
+ // the flag without its pilot); the yellow flag; a line gone quiet (this guest's own, its echo late: a
+ // silent host stands the race still instead, pause; guests for the host: not a car already left
+ // without its driver, nor one past its flag); cars waiting on the grass for pilots who may still
+ // come back; null when all is well.
  trouble(){
   const room=this.room,me=this.myNumber(),secs=r=>Math.floor(r.age),quiet=r=>r&&r.seq>=0&&r.age>=QUIET;
   if(this.cut)return this.cut.over?'Seu carro passou a bandeirada sem piloto: abandono (AB) · você corre a próxima.':'Conexão de volta · retomando seu carro onde ele está…';
   const yellow=this.yellowText();if(yellow)return yellow;
-  if(room.role==='guest'){const host=this.remotes.get(this.race.car);if(quiet(host))return `Sem sinal do anfitrião há ${secs(host)} s · os carros param até ele voltar`;}
+  if(room.role==='guest'){if(room.lineQuiet())return 'Sem sinal da sala · conferindo sua conexão…';}
   else{
    const silent=this.race.seats.map(s=>[s,this.remotes.get(s.number)]).filter(([s,r])=>s.number!==me&&quiet(r)&&!r.waiting&&!r.state.finished).map(([s,r])=>`${s.name} (${secs(r)} s)`);
    if(silent.length)return `Sem sinal de ${silent.join(', ')}`;
@@ -561,11 +625,11 @@ export class Multiplayer {
  }
  // The yellow flag: a car with nobody at the wheel in the race's way (inTheWay). The card names the
  // nearest one ahead and how far it is (or how far back, just passed).
- yellow(){return this.phase==='racing'&&[...this.stopped].some(([number,stop])=>this.inTheWay(number,stop));}
+ yellow(){return this.phase==='racing'&&[...this.stopped].some(([number,stop])=>this.carInTheWay(number,stop));}
  yellowText(){
   const immersive=this.immersive,car=immersive?.car;if(!car||!this.yellow())return null;
   const L=immersive.data.meta.reconstructed_xy_m;let near=null;
-  for(const [number,stop] of this.stopped){if(!this.inTheWay(number,stop))continue;const r=this.slot(number),ahead=along(car.surface.s,r.car.surface.s,L);if(!near||ahead<near.ahead)near={number,stop,r,ahead};}
+  for(const [number,stop] of this.stopped){if(!this.carInTheWay(number,stop))continue;const r=this.slot(number),ahead=along(car.surface.s,r.car.surface.s,L);if(!near||ahead<near.ahead)near={number,stop,r,ahead};}
   if(!near)return null;
   const metres=v=>Math.max(10,Math.round(v/10)*10),behind=L-near.ahead,where=behind<400?`${metres(behind)} m atrás`:`a ${metres(near.ahead)} m`;
   return `BANDEIRA AMARELA · #${near.number} ${near.r.entry.shortName??''} ${near.stop.stage==='reboque'?'no guincho':'sem piloto'} ${where}`.replace(/  +/g,' ');
@@ -596,7 +660,7 @@ export class Multiplayer {
   // Out of the way of the result sheet; under the circuits on the track screen; one line on track.
   const results=document.getElementById('raceResults');p.root.hidden=!!results&&!results.hidden;
   const shown=id=>!document.getElementById(id)?.classList.contains('hidden');
-  p.root.classList.toggle('mp-racing',s.started&&!s.paused);p.root.classList.toggle('mp-yellow',this.yellow());p.root.classList.toggle('mp-tracks',shown('tracks')||shown('cars'));
+  p.root.classList.toggle('mp-racing',s.started&&!s.paused);p.root.classList.toggle('mp-yellow',this.yellow()&&!this.pause);p.root.classList.toggle('mp-paused',!!this.pause);p.root.classList.toggle('mp-tracks',shown('tracks')||shown('cars'));
   // The car screen (main.js roomCars): the cars other pilots have, this window's car once the host
   // has answered its last choice, the car still being asked for, and for a guest its way on: the
   // host's answer at the door, then "Aguardar início da corrida".
@@ -606,6 +670,7 @@ export class Multiplayer {
   p.room.textContent=room.room;
   p.role.textContent=room.role==='host'?`anfitrião · #${me}`:room.pending?'na porta':room.role==='guest'?(me?`convidado · #${me}`:'assistindo'):'…';
   p.status.textContent=this.statusText(s);
+  p.pause.hidden=!this.pause||!s.started||s.paused;if(!p.pause.hidden)p.pauseWhy.textContent=p.status.textContent;
   // The key form when the server asks for it; knocks and kicks for an online host. Names only ever
   // reach the page as text. The door is open until the start: on the car screen, the track screen
   // and on the grid (a knock there lets the host's mouse go, main.js freeMouse); from the start it
@@ -627,7 +692,7 @@ export class Multiplayer {
  info(){
   const immersive=this.immersive,car=immersive?.car;
   return {...this.room.info(),phase:this.phase,holding:this.holding,autopilot:this.autopilot,raceId:this.race?.id??null,
-   stopped:[...this.stopped].map(([number,x])=>({number,stage:x.stage})),cut:!!this.cut,lost:!!this.lost,trucks:[...this.trucks.keys()],flags:[...this.flags.keys()],yellow:this.yellow(),
+   stopped:[...this.stopped].map(([number,x])=>({number,stage:x.stage})),cut:!!this.cut,lost:!!this.lost,paused:this.pause?.why??null,trucks:[...this.trucks.keys()],truckPoses:[...this.trucks].map(([number,t])=>({number,x:t.root.position.x,y:-t.root.position.z,strap:t.strap.visible,leaving:t.left!==undefined})),flags:[...this.flags.keys()],yellow:this.yellow(),
    remotes:[...this.remotes].map(([number,r])=>({number,seq:r.seq,age:r.age,finished:!!r.state?.finished})),
    me:car?{x:car.x,y:car.y,vx:car.vx,vy:car.vy,ghost:!!car.ghost}:null,
    cars:immersive?immersive.field.rivals.map((r,i)=>{const obj=immersive.visual.rivals[i];return {number:r.seat??r.entry.number,name:r.entry.shortName,x:r.car.x,y:r.car.y,remote:!!r.car.remote,ghost:!!r.car.ghost,

@@ -9,7 +9,7 @@ import {RaceField,TOW_ARRIVE,FAINTED,faintedInput,inTheWay,pitRoute} from '../te
 import {Multiplayer} from '../teste/multiplayer.js';
 import {AutomaticAIRecords,readAIRecords} from '../teste/ai-records.js';
 import {ROOM_SERVER,ServerLink} from '../teste/net-link.js';
-import {TestCar,recognitionInput} from '../teste/physics.js';
+import {TestCar,recognitionInput,wrap} from '../teste/physics.js';
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));
 const wait=(ms=15)=>new Promise(resolve=>setTimeout(resolve,ms));
 const report={};
@@ -259,13 +259,17 @@ const report={};
  D.leave();await settle([A,C]);
  A.setStops([{number:'64',stage:'parado',back:true}]);await settle([A,C]);assert.deepEqual(C.lobby.stops,[{number:'64',stage:'parado',back:true}],'and where her car stands');
  A.setStops([{number:'64',stage:'reboque',back:true}]);await settle([A,C]);assert.deepEqual(C.info().stops,[{number:'64',stage:'reboque',back:true}]);
+ // The side the tow takes it to (each window draws the truck on that way) is news too.
+ A.setStops([{number:'64',stage:'reboque',back:true,side:-1}]);await settle([A,C]);assert.deepEqual(C.info().stops,[{number:'64',stage:'reboque',back:true,side:-1}]);
+ A.setStops([{number:'64',stage:'reboque',back:true}]);await settle([A,C]);assert.equal(A.lineQuiet(),false,'the same-machine room has no line of its own');
  // The same list every frame is no news (no lobby sent for it); whether her pilot may come back is.
  let beacons=0;const beacon=A.beacon.bind(A);A.beacon=(...args)=>{beacons++;return beacon(...args);};
  A.setStops([{number:'64',stage:'reboque',back:true}]);A.setStops([{number:'64',stage:'reboque'}]);assert.equal(beacons,0,'no news');
  A.setStops([{number:'64',stage:'reboque',back:false}]);assert.equal(beacons,1);A.setStops([{number:'64',stage:'reboque',back:true}]);A.beacon=beacon;
  const lobby=stops=>({t:'lobby',from:A.id,name:'x',age:1,players:[],race:null,stops});
  assert.equal(validMessage(lobby([{number:'64',stage:'fora'}])),true,'a host that does not say back');assert.equal(validMessage(lobby([{number:'64',stage:'fora',back:false}])),true);assert.equal(validMessage(lobby(undefined)),true,'a host without stops');
- for(const bad of [[{number:'64',stage:'voando'}],[{number:'666',stage:'fora'}],[{number:'64',stage:'fora',back:'sim'}],'64',[null],Array.from({length:16},()=>({number:'64',stage:'fora'}))])assert.equal(validMessage(lobby(bad)),false);
+ assert.equal(validMessage(lobby([{number:'64',stage:'reboque',side:1}])),true);
+ for(const bad of [[{number:'64',stage:'voando'}],[{number:'666',stage:'fora'}],[{number:'64',stage:'fora',back:'sim'}],[{number:'64',stage:'reboque',side:2}],[{number:'64',stage:'reboque',side:'esquerda'}],'64',[null],Array.from({length:16},()=>({number:'64',stage:'fora'}))])assert.equal(validMessage(lobby(bad)),false);
  // Her line is back (still in that race, waiting for nothing else): the same seat, the same car.
  hear();log.length=0;await settle([A,B,C],4);A.setStops([]);await settle([A,B,C]);assert.deepEqual(C.lobby.stops,[]);
  assert.deepEqual(race.seats.map(s=>[s.id,s.number]),[[A.id,'73'],[C.id,'19'],[id,'64']],'back in her seat');assert(log.includes('seats 73,19,64'),'the host game hears it (multiplayer.js seatHumans)');
@@ -288,6 +292,20 @@ const report={};
  assert(log.includes('leave 64'),'her car is left');assert.deepEqual(race2.seats.map(s=>s.number),['73']);assert.deepEqual(A.info().away,[],'nobody waits for a pilot who left');assert(A.members.some(m=>m.id===id),'she is still in the room');
  A.leave();B2.leave();C.leave();
 }
+// Same machine: in a race under way a guest waits a long while (RACE_HOST_WAIT) for a host gone quiet,
+// the race standing still meanwhile (multiplayer.js pause), instead of electing another host after
+// SILENT and leaving that race behind.
+{
+ let now=0;const clock=()=>now,name='espera-'+Math.random().toString(36).slice(2,8),advance=(rooms,to)=>{while(now<to-1e-9){now=Math.min(to,now+.1);for(const r of rooms)r.tick();}};
+ const settle=async(rooms,n=3)=>{for(let i=0;i<n;i++){await wait();advance(rooms,now+.2);}};
+ const A=new Room({room:name,name:'Ana',want:'73',clock}),B=new Room({room:name,name:'Bia',want:'64',wait:true,clock});B.on('race',()=>true);
+ A.start();advance([A],1);B.start();await settle([A,B],4);
+ const race=A.planRace({circuit:'interlagos',laps:3});A.openRace(race);await settle([A,B]);B.sendReady();await settle([A,B],2);A.lightsOut();await settle([A,B],2);
+ assert.equal(B.race.state,'racing');A.channel.onmessage=null;
+ advance([B],now+60);await wait();assert.equal(B.role,'guest','a minute without its host: still its guest');
+ advance([B],now+600);assert.notEqual(B.role,'guest','ten minutes: the room goes on without it');
+ A.leave();B.leave();
+}
 // Online, the line itself: the tab asks the room server for an echo every second (the server answers
 // it, whatever the host is doing); no echo for a few seconds is a dead connection the browser has not
 // noticed yet: it connects again. A stalled host is no reason, nor is a server without the echo. A
@@ -306,12 +324,14 @@ const report={};
  // The server echoes: the line is alive, even with the host silent (stalled: no pongs, no snapshots).
  for(let t=11;t<=20;t++){tick(t);G.receive({t:'eco'});}
  assert.deepEqual(calls,['open']);
+ // An echo a little late is the line down already (lineQuiet: multiplayer.js stands a host's race still).
+ assert.equal(G.lineQuiet(),false);tick(22);assert.equal(G.lineQuiet(),false,'2 s: not yet');tick(23);assert.equal(G.lineQuiet(),true,'3 s without an echo');
  // No echo: one reconnect after LINK_QUIET (10 s), not one per frame.
  tick(29);assert.deepEqual(calls,['open']);tick(30.6);assert.deepEqual(calls,['open','reconnect']);tick(32);assert.deepEqual(calls,['open','reconnect']);
  // A frozen window (its own long frame) is not the line's silence.
  G.receive({t:'eco'});now+=7;G.tick();assert.deepEqual(calls,['open','reconnect']);
  // The line down: nothing to check until it is open again; then the new connection has LINK_QUIET to echo.
- G.closed('reconectando');tick(now+10);assert.deepEqual(calls,['open','reconnect']);
+ G.closed('reconectando');assert.equal(G.lineQuiet(),true);tick(now+10);assert.deepEqual(calls,['open','reconnect']);
  link.onopen();tick(now+9.5);assert.deepEqual(calls,['open','reconnect']);tick(now+1);assert.deepEqual(calls,['open','reconnect','reconnect']);
  link.onopen();G.receive({t:'eco'});
  // The quick tries ran out ('fora'): the tab is still who it was, and back with the same id it is
@@ -346,12 +366,34 @@ const report={};
  server.reconnect();assert.equal(sockets.length,2,'not while the new one is connecting');
  sockets[1].readyState=1;sockets[1].onopen();sockets[0].onclose({code:4010});assert.deepEqual(reasons,[],'the server closing the old one says nothing');
  for(let i=0;i<6;i++)server.lost();assert.deepEqual(reasons,['reconectando','reconectando','reconectando','reconectando','reconectando','fora']);assert(server.retry,'still trying');
+ // Only a welcome starts the tries over: a server that lets each connection in and closes it at once
+ // (an error, 1011) goes on waiting the longest (before, each open started over at 1 s, for ever).
+ const welcome=ws=>ws.onmessage({data:JSON.stringify({t:'welcome',id:'0000000a',token:'0'.repeat(32),role:'guest',host:'0000000b',pending:false})});
+ reasons.length=0;for(let i=0;i<3;i++){server.open();const s=sockets.at(-1);s.readyState=1;s.onopen();s.onclose({code:1011});}
+ assert.deepEqual(reasons,['fora','fora','fora']);assert.equal(server.tries,9);
  // The server's time for the key ran out (a slow connection: 4012, sala-cloudflare CLOSE.late): a line
  // that dropped, tried again, the first connection as any other; a wrong key (4001): the card asks for it.
- reasons.length=0;server.open();const s1=sockets.at(-1);s1.readyState=1;s1.onopen();s1.onclose({code:4012});assert.deepEqual(reasons,['reconectando']);
- server.open();const s2=sockets.at(-1);s2.readyState=1;s2.onopen();s2.onmessage({data:JSON.stringify({t:'welcome',id:'0000000a',token:'0'.repeat(32),role:'guest',host:'0000000b',pending:false})});
+ reasons.length=0;server.open();const s1=sockets.at(-1);s1.readyState=1;s1.onopen();welcome(s1);assert.equal(server.tries,0,'welcomed: the tries start over');
+ s1.onclose({code:4012});assert.deepEqual(reasons,['reconectando']);
+ server.open();const s2=sockets.at(-1);s2.readyState=1;s2.onopen();welcome(s2);
  s2.onclose({code:4012});assert.deepEqual(reasons,['reconectando','reconectando']);server.open();sockets.at(-1).onclose({code:4001});assert.deepEqual(reasons,['reconectando','reconectando','chave'],'a wrong key is asked for at once');
  server.close();
+ // Which connection the room hears after a reconnect: the old one until the new one's welcome, then the
+ // new one only (before, both fed the room, and a new one that failed left it "reconectando" while the
+ // old one still talked); sent the same way. A new one that fails while the old one still works (a
+ // false alarm) leaves the old one on, without a word.
+ {
+  const heard=[],socks=[],said=[],mk=()=>{const ws={readyState:0,sent:[],send(d){ws.sent.push(JSON.parse(d).t);},close(code){ws.closed=code;}};socks.push(ws);return ws;};
+  const line=new ServerLink({url:'ws://x',room:'linha',key:()=>'k',name:()=>'Gil',storage:null,socket:mk});line.onmessage=m=>heard.push(m.t);line.onclose=r=>said.push(r);
+  const msg=(ws,t)=>t==='welcome'?welcome(ws):ws.onmessage({data:JSON.stringify({t})});
+  line.open();const [old]=socks;old.readyState=1;old.onopen();msg(old,'welcome');msg(old,'lobby');
+  line.reconnect();const neu=socks[1];msg(old,'snap');line.send({t:'eco'});assert.deepEqual(old.sent,['auth','eco'],'sent through the old one meanwhile');
+  neu.readyState=1;neu.onopen();msg(neu,'welcome');msg(old,'snap');msg(neu,'snap');
+  assert.deepEqual(heard,['welcome','lobby','snap','welcome','snap'],'the old one is not heard once the new one is in');
+  line.send({t:'eco'});assert.deepEqual(neu.sent,['auth','eco']);
+  line.reconnect();socks[2].onclose({code:1006});assert.deepEqual(said,[],'a false alarm says nothing');assert.equal(line.ws,neu);msg(neu,'lobby');assert.equal(heard.at(-1),'lobby');
+  line.close();assert.equal(neu.closed,1000);
+ }
 }
 // Two windows opened at once: both host for a moment, then the smaller id keeps the room.
 {
@@ -455,6 +497,32 @@ for(let trial=0;trial<6;trial++){
  // Off the asphalt the grass holds a car nobody drives; at a standstill it stays put.
  const c=new TestCar(data);c.reset(300);c.vx=30;assert.equal(faintedInput(c).brake,0);c.surface={...c.surface,onRoad:false,pit:false};assert(faintedInput(c).brake>0);c.vx=c.vy=0;assert.equal(faintedInput(c).brake,1);
  report.driverless={rolled:{metresOff:Math.round(rolled.d-rolled.edge)},towed:{metresOff:Math.round(towed.d-towed.edge),seconds:Math.round(towed.when.fora)}};
+ // The players' case (a car left in the middle of the road, the yellow flag to the end, and no truck):
+ // a gentle slope kept a car nobody drives rolling at walking pace down the road for minutes, never
+ // stopped, so the truck never came (Chapecó, seed 358632, #10 left 3.9 s in: still 2 m/s 40 s later).
+ // Down to a crawl it is stopped: the truck comes, and the car is on the grass soon, pulled along (no
+ // jump from one step to the next).
+ {
+  const chapeco=JSON.parse(fs.readFileSync(new URL('../dados/pista_chapeco.json',import.meta.url)));
+  const player=new TestCar(chapeco);player.resetGrid();const field=new RaceField(chapeco,{seed:358632});field.reset(player.surface.s,{grid:true});player.x=player.y=-9999;
+  for(let k=0;k<3.9*120;k++)field.step(player,dt,5);
+  const r=field.rivals[10],c=r.car,stages=[];let jump=0,last=null,t=0;field.strand(r,'conexão caiu');
+  for(;t<60&&r.stop.stage!=='fora';t+=dt){field.step(player,dt,5);if(stages.at(-1)!==r.stop.stage)stages.push(r.stop.stage);if(r.stop.stage==='reboque'&&last)jump=Math.max(jump,Math.hypot(c.x-last[0],c.y-last[1]));last=[c.x,c.y];}
+  // (it coasts down from 66 km/h for some 35 s first, then the truck takes 14 s)
+  assert.deepEqual(stages,['parado','reboque','fora'],'towed: '+JSON.stringify({t,stages}));assert(t<55,'on the grass in '+t.toFixed(1)+' s');
+  assert(!c.surface.onRoad&&Math.abs(c.surface.d)>c.surface.width/2+1.5,'parked past the edge');assert(jump<.1,'pulled, not jumped: '+jump);
+  report.driverless.slope={seconds:Math.round(t)};
+ }
+ // The tow's way (RaceField towPath): from the car, over to the edge, onto the grass, with no sharp
+ // turn; a car facing back the way it came is hooked by its tail; a side given is kept.
+ {
+  const field=new RaceField(data,{seed:3}),c=new TestCar(data);c.reset(300);c.vx=c.vy=0;
+  const P=field.towPath(c),start=P.at(0),end=P.at(P.end),q=c.sample(end.x,end.y);
+  assert(Math.hypot(start.x-c.x,start.y-c.y)<.6,'it starts at the car');assert(P.park);
+  assert(!q.onRoad&&Math.abs(q.d)>q.width/2+2.5,'it ends on the grass: '+JSON.stringify({d:q.d,width:q.width}));
+  let turn=0;for(let u=0;u<P.end;u+=.5)turn=Math.max(turn,Math.abs(wrap(P.at(u+.5).heading-P.at(u).heading)));assert(turn<.12,'no sharp turn: '+turn);
+  assert.equal(P.flip,false);c.heading+=Math.PI;assert.equal(field.towPath(c).flip,true);assert.equal(field.towPath(c,-P.side).side,-P.side);
+ }
 }
 // The host's field when a pilot is gone mid-race (RaceField strand, multiplayer.js left): a car past
 // its flag keeps its result (no tow, no AB: a bot brings it in); one still racing waits with nobody at
@@ -476,6 +544,9 @@ for(let trial=0;trial<6;trial++){
  field.strand(racing,'conexão caiu');racing.progress=goal;field.step(player,1/120,laps);
  assert.equal(racing.stop.flagged,true);assert.equal(racing.finished,false);assert.equal(field.reclaim(racing),false,'its AB stands');
  assert(racing.retired&&racing.stop,'still without its pilot');assert.equal(field.classification(laps).find(r=>r.number===racing.entry.number).dnf,true);
+ // Unless its pilot says it finished: the line crossed at the wheel before the host heard it (its
+ // window never finishes a car nobody drives).
+ assert.equal(field.reclaim(racing,true),true);assert(!racing.stop&&!racing.retired);
  // The car a pilot takes back mid-race stands where it is, not stopped, as far as the race goes.
  const back=new RemoteCar(done.car,{progress:done.progress,finished:true,finishTime:300});assert.equal(back.state.finished,true);assert.equal(back.state.finishTime,300);
 }
@@ -516,16 +587,47 @@ for(let trial=0;trial<6;trial++){
 // finish, and one the host had reach the flag without its pilot stays AB; a connection made anew waits
 // for the race to come back; the host's word on the cars waiting; the card's words.
 {
- const note=()=>{},mp=fields=>Object.assign(Object.create(Multiplayer.prototype),{remotes:new Map(),stopped:new Map(),trucks:new Map(),flags:new Map(),phase:'racing',cut:null,lost:false,finishedAt:null},fields);
+ const note=()=>{},mp=fields=>Object.assign(Object.create(Multiplayer.prototype),{remotes:new Map(),stopped:new Map(),trucks:new Map(),flags:new Map(),phase:'racing',cut:null,lost:false,pause:null,finishedAt:null},fields);
  const heard=(car,extra={},age=0)=>{const r=new RemoteCar(null);r.receive({...readCar(packCar(car)),...extra},{seq:1});r.age=age;return r;};
- // Host: no state from a guest for 10 s while the host's own line is down, nor just after it is back:
- // its car stays its pilot's; still nothing STRANDED seconds after the line is back: left without a driver.
+ // (a room's line: down while it has a problem, or its echo is late)
+ const lineQuiet=function(){return this.problem!==null||!!this.echoLate;};
+ // Host: no state from a guest for 10 s while the host's own line is down (closed, or no echo while the
+ // browser still has it open), nor just after it is back: its car stays its pilot's; still nothing
+ // STRANDED seconds after the line is back: left without a driver. A bot's seat is no guest's.
  {
-  const stranded=[],r={puppet:()=>FAINTED,seat:'64'},remote=heard(new TestCar(data),{},10);
-  const m=mp({room:{problem:'fora',note},immersive:{field:{rivals:[r],strand:car=>stranded.push(car)}}});m.remotes.set('64',remote);
+  const race={id:'0000abcd',car:'99',seats:[{id:'0000000b',name:'Ana',number:'99'},{id:'0000000a',name:'Bia',number:'64'}]};
+  const stranded=[],r={puppet:()=>FAINTED,seat:'64'},bot={puppet:()=>FAINTED,seat:'19'},remote=heard(new TestCar(data),{},10);
+  const room={id:'0000000b',problem:'fora',lineQuiet,note},m=mp({room,race,immersive:{field:{rivals:[r,bot],strand:car=>stranded.push(car)}}});m.remotes.set('64',remote).set('19',heard(new TestCar(data),{},10));
   m.checkSilence();assert.deepEqual(stranded,[],'the host\'s own line down');
-  m.room.problem=null;m.checkSilence();assert.deepEqual(stranded,[],'just back: its guests\' states take a moment');
-  m.lineDown-=6;m.checkSilence();assert.deepEqual(stranded,[r],'the line back for a while and still nothing: the guest\'s silence');assert.equal(remote.waiting,r);
+  room.problem=null;m.checkSilence();assert.deepEqual(stranded,[],'just back: its guests\' states take a moment');
+  m.lineDown-=6;room.echoLate=true;m.checkSilence();assert.deepEqual(stranded,[],'no echo: the host\'s own line still');
+  room.echoLate=false;m.lineDown-=6;m.checkSilence();assert.deepEqual(stranded,[r],'the line back for a while and still nothing: the guest\'s silence');assert.equal(remote.waiting,r);
+  // A window the room made its host during someone else's race (every car there a puppet: the old
+  // host's and the bots): nobody in it is this window's guest, nobody is left without a driver.
+  stranded.length=0;remote.waiting=null;room.id='0000000a';m.checkSilence();assert.deepEqual(stranded,[],'not this window\'s race');
+ }
+ // The race stands still while its host is out of reach (players' wish: "se o anfitrião cair, pausa
+ // todo mundo… e espera ele voltar"): the host's own line down (with other pilots in its race), a
+ // guest's host gone from the room or silent; not a guest whose own line is the one down (its car goes
+ // on without a driver: checkCut), nor a race the room has lost. The result's wait is put off by as
+ // long, and holds meanwhile.
+ {
+  const t=()=>performance.now()/1000,race={id:'0000abcd',car:'99',seats:[{id:'0000000b',name:'Ana',number:'99'},{id:'0000000a',name:'Bia',number:'64'}]};
+  const host=mp({room:{role:'host',id:'0000000b',problem:'fora',away:new Map(),lineQuiet,note},race,immersive:{}});
+  host.updatePause();assert.equal(host.pause?.why,'linha');assert.equal(host.frozen(),true);assert.match(host.statusText({}),/^Sua conexão caiu · corrida pausada para todos/);
+  host.finishedAt=t()-10;host.pause.since-=4;host.room.problem=null;host.updatePause();assert.equal(host.frozen(),false);assert(Math.abs(t()-host.finishedAt-6)<.5,'the result\'s wait put off');
+  const solo=mp({room:{role:'host',id:'0000000b',problem:'fora',away:new Map(),lineQuiet,note},race:{...race,seats:race.seats.slice(0,1)},immersive:{}});solo.updatePause();assert.equal(solo.pause,null,'alone in its race: nothing to stand still for');
+  const room={role:'guest',id:'0000000a',problem:null,hostAway:false,hostSeen:t(),lineQuiet,note},guest=mp({room,race,immersive:{}});
+  guest.updatePause();assert.equal(guest.pause,null,'the host heard');
+  room.hostSeen=t()-3;guest.updatePause();assert.equal(guest.pause?.why,'silencio');assert.match(guest.statusText({}),/^Sem sinal do anfitrião há 3 s · corrida pausada/);
+  room.hostAway=true;guest.updatePause();assert.equal(guest.pause.why,'saiu');assert.match(guest.statusText({}),/^O anfitrião caiu/);
+  room.hostAway=false;room.hostSeen=t();guest.updatePause();assert.equal(guest.pause,null,'heard again: on it goes');
+  // Its own echo late with the host silent too (a stalled server: every echo is late, the host's as
+  // well): it stands still with the rest. Its own line closed: its car goes on without a driver (cut).
+  room.hostSeen=t()-3;room.echoLate=true;guest.updatePause();assert.equal(guest.pause?.why,'silencio','a stalled server: still with the rest');
+  room.echoLate=false;room.problem='reconectando';guest.cut={mine:null,seatedAt:null,clock:0};guest.updatePause();assert.equal(guest.pause,null,'its own line down: its car without a driver');
+  room.problem=null;guest.cut=null;guest.lost=true;guest.updatePause();assert.equal(guest.pause,null,'a race the room has lost');
+  guest.lost=false;guest.updatePause();guest.immersive={freeFinished:true,finishing:false};assert.equal(guest.holdResults(),true,'the result waits');
  }
  // Guest: its line down, its car with nobody at the wheel; back in its seat, the host's word on it decides.
  {
@@ -558,9 +660,9 @@ for(let trial=0;trial<6;trial++){
  // (seated still, or away: its line dropped); not one who left by the menu, nor for a car AB past the
  // flag. None waiting: nothing built, nothing drawn.
  {
-  const rivals=[{seat:'64',stop:{stage:'fora'}},{seat:'19',stop:{stage:'parado',flagged:true}},{seat:'73',stop:{stage:'reboque'}},{seat:'11',stop:null}],told=[];let drawn=0;
+  const rivals=[{seat:'64',stop:{stage:'fora'}},{seat:'19',stop:{stage:'parado',flagged:true}},{seat:'73',stop:{stage:'reboque',side:-1}},{seat:'11',stop:null}],told=[];let drawn=0;
   const h=mp({room:{role:'host',id:'0000000b',race:{seats:[{number:'99'},{number:'19'}]},away:new Map([['0000000a',{number:'64'}]]),setStops:list=>told.push(list),note},immersive:{field:{rivals}},drawStops:()=>drawn++});
-  assert.deepEqual(h.stopList(),[{number:'64',stage:'fora',back:true},{number:'19',stage:'parado',back:false},{number:'73',stage:'reboque',back:false}]);
+  assert.deepEqual(h.stopList(),[{number:'64',stage:'fora',back:true},{number:'19',stage:'parado',back:false},{number:'73',stage:'reboque',back:false,side:-1}]);
   for(const r of rivals)r.stop=null;h.syncStops();assert.deepEqual(told,[[]]);assert.equal(drawn,0,'nothing waiting: nothing drawn');
  }
  // The card: a car in the pit lane is no yellow flag (as for the rivals); a guest already left without
@@ -578,7 +680,14 @@ for(let trial=0;trial<6;trial++){
   assert.equal(m.trouble(),null,'neither is "sem sinal"');bia.waiting=null;assert.equal(m.trouble(),'Sem sinal de Bia (4 s)');bia.waiting=rivals[0];
   m.stopped.set('64',{stage:'fora',since:0,back:true});assert.equal(m.trouble(),'#64 Bia fora da pista · esperando o piloto voltar');
   m.stopped.set('64',{stage:'fora',since:0,back:false});assert.equal(m.trouble(),null,'her pilot left: nobody to wait for');
-  assert.equal(m.stillRacing(),1,'Caio past his flag, Bia still racing');rivals[0].retired=true;assert.equal(m.stillRacing(),0,'Bia AB: no wait');
+  assert.equal(m.stillRacing(),1,'Caio past his flag, Bia still racing');
+  // Her car left without its pilot (retired at once): she may yet come back and finish, so the result
+  // waits; not once it is AB for good. Out of her seat for a moment (her line dropped: away), still
+  // waited for; gone by the menu, not.
+  Object.assign(m.room,{race,away:new Map()});Object.assign(rivals[0],{retired:true,stop:{stage:'fora'}});assert.equal(m.stillRacing(),1,'Bia without a driver, still hers');
+  rivals[0].stop.flagged=true;assert.equal(m.stillRacing(),0,'Bia AB for good: no wait');
+  rivals[0].stop.flagged=false;race.seats=race.seats.filter(s=>s.number!=='64');m.room.away.set('0000000a',{number:'64'});assert.equal(m.stillRacing(),1,'away for a moment');
+  m.room.away.clear();assert.equal(m.stillRacing(),0,'she left the race');
  }
 }
 // --- RaceField: the same seed builds the same grid in every window; remote cars are placed, not

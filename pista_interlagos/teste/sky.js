@@ -65,6 +65,8 @@ export function createSky(renderer,scene,{mobile=false}={}){
  return {
   dome,environment,sunDirection:SUN_DIRECTION,horizon:HORIZON,
   update(dt){uniforms.time.value+=dt;},
+  // Fewer cloud octaves in the light scenery levels (the Gráficos tab).
+  setDetail(mobile){const octaves=mobile?4:6;if(material.defines.CLOUD_OCTAVES!==octaves){material.defines.CLOUD_OCTAVES=octaves;material.needsUpdate=true;}},
   info:()=>({clouds:uniforms.cloudCover.value,environment:!!scene.environment,fog:[scene.fog.near,scene.fog.far]})
  };
 }

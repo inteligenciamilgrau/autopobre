@@ -290,13 +290,14 @@ export class ImmersiveVisuals {
   g.name='Interior_leve';return g;
  }
  box(parent,p,size,color){const o=new THREE.Mesh(new THREE.BoxGeometry(...size),this.mat(color));o.position.set(...p);o.castShadow=true;o.receiveShadow=true;parent.add(o);return o;}
- labelTexture(text,w,h,fg,bg){
-  const c=document.createElement('canvas');c.width=1024;c.height=Math.max(128,Math.round(1024*h/w));const ctx=c.getContext('2d');ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`bold ${Math.round(c.height*.55)}px Arial`;ctx.fillText(text,512,c.height/2,970);
+ // px: the canvas's width (a small sign needs less than a banner across a building).
+ labelTexture(text,w,h,fg,bg,px=1024){
+  const c=document.createElement('canvas');c.width=px;c.height=Math.max(px/8,Math.round(px*h/w));const ctx=c.getContext('2d');ctx.fillStyle=bg;ctx.fillRect(0,0,c.width,c.height);ctx.fillStyle=fg;ctx.textAlign='center';ctx.textBaseline='middle';ctx.font=`bold ${Math.round(c.height*.55)}px Arial`;ctx.fillText(text,px/2,c.height/2,px*.947);
   const tex=new THREE.CanvasTexture(c);tex.colorSpace=THREE.SRGBColorSpace;return tex;
  }
  tag(parent,text,p,w=3,h=.5,fg='#fff',bg='#192d30'){const sprite=new THREE.Sprite(new THREE.SpriteMaterial({map:this.labelTexture(text,w,h,fg,bg),depthWrite:false}));sprite.position.set(...p);sprite.scale.set(w,h,1);parent.add(sprite);return sprite;}
  // A flat banner fixed to a wall, facing `heading` (a sprite this wide turns into the wall).
- banner(parent,text,p,heading,w,h,fg,bg){const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:this.labelTexture(text,w,h,fg,bg)}));m.position.copy(p);m.rotation.y=heading;parent.add(m);return m;}
+ banner(parent,text,p,heading,w,h,fg,bg,px){const m=new THREE.Mesh(new THREE.PlaneGeometry(w,h),new THREE.MeshBasicMaterial({map:this.labelTexture(text,w,h,fg,bg,px)}));m.position.copy(p);m.rotation.y=heading;parent.add(m);return m;}
  human(color){
   const root=new THREE.Group(),limbs=[];
   this.box(root,[0,1.13,0],[.33,.58,.46],color);this.box(root,[0,.82,0],[.3,.2,.4],color===0xd82125?color:0x252c33);
@@ -416,9 +417,9 @@ export class ImmersiveVisuals {
  }
  // A tow truck's amber light bar (truckModel): two quick flashes a second (now: seconds).
  flashBeacon(truck,now){const flash=(now*2)%1;truck.userData.beacon.material.emissiveIntensity=flash<.12||flash>.25&&flash<.37?7:.25;}
- // A model built here let go: its geometries, and the materials that are its own (the shared ones,
- // mat(), stay).
- disposeModel(root){const shared=new Set(Object.values(this.materials));root.traverse(o=>{if(!o.isMesh)return;o.geometry.dispose();if(!shared.has(o.material))o.material.dispose();});}
+ // A model built here let go: its geometries, and the materials that are its own with their textures
+ // (a truck's door signs; the shared materials, mat(), stay).
+ disposeModel(root){const shared=new Set(Object.values(this.materials));root.traverse(o=>{if(!o.isMesh)return;o.geometry.dispose();if(!shared.has(o.material)){o.material.map?.dispose();o.material.dispose();}});}
  // Flatbed tow truck ("guincho plataforma"): white cab with an orange stripe, aluminium bed,
  // dual rear wheels and an amber light bar that flashes. It faces +x; the strap hooks at x -2.45.
  truckModel(){const root=new THREE.Group(),glass=new THREE.MeshStandardMaterial({color:0x0c1114,roughness:.08,metalness:.3});
@@ -437,7 +438,7 @@ export class ImmersiveVisuals {
    this.box(root,[x,.9,z*1.03],[1.05,.06,wide?.62:.36],0x202326);
   }
   // The joke is painted on the doors, not floating over the truck.
-  for(const side of [-1,1])this.banner(root,'REBOQUE · SEM PRESSA',new THREE.Vector3(2.05,1.42,side*1.05),side>0?0:Math.PI,1.45,.3,'#1d1d1d','#e9e7e0');
+  for(const side of [-1,1])this.banner(root,'REBOQUE · SEM PRESSA',new THREE.Vector3(2.05,1.42,side*1.05),side>0?0:Math.PI,1.45,.3,'#1d1d1d','#e9e7e0',512);
   root.traverse(o=>{if(o.isMesh)o.castShadow=true;});return root;}
  // Smoothed body roll and pitch from the rival's own cornering and braking.
  lean(obj,c){const u=obj.userData;u.roll=(u.roll??0)+(Math.max(-.03,Math.min(.03,(c.latAccel??0)*.0022))-(u.roll??0))*.15;u.pitch=(u.pitch??0)+(Math.max(-.025,Math.min(.015,(c.longAccel??0)*.002))-(u.pitch??0))*.15;obj.quaternion.multiply(leanRotation.setFromEuler(leanEuler.set(u.roll,0,u.pitch)));}

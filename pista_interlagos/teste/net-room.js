@@ -28,9 +28,13 @@ export const SEATS=Object.freeze(CAR_CHOICES.map(e=>e.number));
 // within RECLAIM it takes its room again. A restored identity watches TWIN seconds for a live window
 // with the same one (a duplicated tab copies sessionStorage): then it takes a new one. Online, the
 // tab asks the room server for an echo every ECHO seconds (the server answers it itself, whatever the
-// host is doing): no echo for LINK_QUIET is a dead connection the browser has not noticed yet (it may
-// take it a minute), so it connects again. A server without the echo is never checked.
-const SILENT=3,ONLINE_SILENT=30,ELECTION=.9,READY_WAIT=60,FROZEN=.25,TIE=.5,BEACON=1,PING=1,HELLO=2,RATE=240,HOST_GRACE=10,RECLAIM=30,TWIN=3,ECHO=1,LINK_QUIET=10;
+// host is doing): one ECHO_LATE seconds late says the line is down (lineQuiet: multiplayer.js stands a
+// host's race still), and none for LINK_QUIET is a dead connection the browser has not noticed yet (it
+// may take it a minute), so it connects again. A server without the echo is never checked. In a race
+// under way the same-machine room's guests wait RACE_HOST_WAIT for a host gone quiet (not one that said
+// goodbye) before electing another (the race stands still meanwhile; online the room server keeps a
+// racing host's place as long).
+const SILENT=3,ONLINE_SILENT=30,ELECTION=.9,READY_WAIT=60,FROZEN=.25,TIE=.5,BEACON=1,PING=1,HELLO=2,RATE=240,HOST_GRACE=10,RECLAIM=30,TWIN=3,ECHO=1,ECHO_LATE=2.5,LINK_QUIET=10,RACE_HOST_WAIT=600;
 const SAVED='autopobre-sala-id-',SAVED_SEAT='autopobre-sala-carro-';
 const sessionStore=()=>{try{return globalThis.sessionStorage??null;}catch{return null;}};
 function readSaved(storage,room){
@@ -65,11 +69,12 @@ const validSeats=v=>Array.isArray(v)&&v.length<=SEATS.length&&v.every(validSeat)
 const validPick=v=>v===undefined||isInt(v,0,1e9);
 const validWait=v=>v===undefined||typeof v==='boolean';
 // The cars whose pilots' lines dropped during the race (the host's word, multiplayer.js): which,
-// where they are in their wait (stopping on the road, on the tow truck's strap, or off the road), and
-// whether that pilot may still come back for it (back; a host without it: yes).
+// where they are in their wait (stopping on the road, on the tow truck's strap, or off the road),
+// whether that pilot may still come back for it (back; a host without it: yes), and the side of the
+// track the tow takes it to (side, 1 left or -1 right; a host without it: each window works it out).
 export const STOP_STAGES=Object.freeze(['parado','reboque','fora']);
-const validStops=v=>v===undefined||Array.isArray(v)&&v.length<=SEATS.length&&v.every(x=>x&&typeof x==='object'&&SEATS.includes(x.number)&&STOP_STAGES.includes(x.stage)&&(x.back===undefined||typeof x.back==='boolean'));
-const sameStops=(a,b)=>a.length===b.length&&a.every((x,i)=>x.number===b[i].number&&x.stage===b[i].stage&&(x.back??true)===(b[i].back??true));
+const validStops=v=>v===undefined||Array.isArray(v)&&v.length<=SEATS.length&&v.every(x=>x&&typeof x==='object'&&SEATS.includes(x.number)&&STOP_STAGES.includes(x.stage)&&(x.back===undefined||typeof x.back==='boolean')&&(x.side===undefined||x.side===1||x.side===-1));
+const sameStops=(a,b)=>a.length===b.length&&a.every((x,i)=>x.number===b[i].number&&x.stage===b[i].stage&&(x.back??true)===(b[i].back??true)&&x.side===b[i].side);
 function validRace(r){
  return r===null||r&&typeof r==='object'&&isId(r.id)&&typeof r.circuit==='string'&&/^[a-z0-9_-]{1,32}$/.test(r.circuit)&&isInt(r.laps,1,50)&&isInt(r.seed,0,4294967295)&&SEATS.includes(r.car)
   &&typeof r.ace==='boolean'&&typeof r.retirements==='boolean'&&typeof r.ghosts==='boolean'&&(r.level===null||typeof r.level==='string'&&/^[a-z]{1,16}$/.test(r.level))&&validSeats(r.seats)&&['waiting','racing'].includes(r.state);
@@ -219,6 +224,9 @@ export class Room {
  renew(){this.id=randomId(this.random);this.restored=null;this.twinUntil=0;this.lastNumber=null;this.save();this.elect();}
  // A guest whose host said goodbye and has not come back yet.
  get hostAway(){return this.role==='guest'&&this.hostLeft!==undefined;}
+ // Online: this tab's line is down (closed, or the server's echo ECHO_LATE seconds late); the same-
+ // machine room has no line of its own.
+ lineQuiet(now=this.clock()){return this.online&&(this.problem!==null||this.echo!==undefined&&now-this.echo>ECHO_LATE);}
  // A guest still at the door (online) says its new name too: the host sees who is knocking.
  setName(value){const name=playerName(value)||'Piloto';if(name===this.name)return;this.name=name;if(this.role==='host'){this.players.get(this.id).name=name;this.beacon();}else if(this.role==='guest')this.hello();}
  send(m){m.from=this.id;if(this.online){this.link.send(m);return;}try{this.channel.postMessage(m);}catch{}}
@@ -363,7 +371,7 @@ export class Room {
   this.send({t:'lobby',name:this.name,age:Math.round((now-this.hostSince)*100)/100,players:[...this.players.values()].map(({id,name,number,done,wait})=>({id,name,number,pick:done,wait:!!wait})),race:r&&{id:r.id,circuit:r.circuit,laps:r.laps,seed:r.seed,car:r.car,ace:r.ace,level:r.level,retirements:r.retirements,ghosts:r.ghosts,seats:r.seats,state:r.state},stops:r?.state==='racing'?this.stops:[]});
  }
  // Host (multiplayer.js, every frame): the cars waiting for their pilots; a change is told at once.
- setStops(list){if(this.role!=='host'||sameStops(list,this.stops))return;this.stops=list.map(({number,stage,back=true})=>({number,stage,back:!!back}));this.beacon();}
+ setStops(list){if(this.role!=='host'||sameStops(list,this.stops))return;this.stops=list.map(({number,stage,back=true,side})=>({number,stage,back:!!back,...(side===1||side===-1?{side}:{})}));this.beacon();}
  // Host: the next race with the host and the guests waiting for it seated; announced only when its
  // countdown begins (seatEveryone keeps the seats up to date until the start). The
  // seed, the host's car (car: the one at the back of the grid, whose driver sits out) and RaceField's
@@ -407,8 +415,11 @@ export class Room {
    for(const p of [...this.players.values()])if(p.id!==this.id&&now-p.seen>limit(p)){this.note('silêncio '+p.id);this.drop(p.id);}
    return;
   }
-  // A host that said goodbye (a reload) gets HOST_GRACE to come back; a silent one, SILENT.
-  if(!this.online&&now-this.hostSeen>(this.hostLeft!==undefined?HOST_GRACE:silent)){this.elect();return;}
+  // A host that said goodbye (a reload: its race went with its page) gets HOST_GRACE to come back; a
+  // silent one, SILENT, or during a race this window races in RACE_HOST_WAIT (the race stands still for
+  // it meanwhile).
+  const racing=this.race?.state==='racing'&&this.race.seats.some(s=>s.id===this.id);
+  if(!this.online&&now-this.hostSeen>(this.hostLeft!==undefined?HOST_GRACE:racing?RACE_HOST_WAIT:silent)){this.elect();return;}
   if(now>=this.nextPing){this.nextPing=now+PING;this.pings.set(++this.pingN,now);if(this.pings.size>8)this.pings.delete(this.pings.keys().next().value);this.send({t:'ping',n:this.pingN});}
   if(now>=this.nextHello&&!this.pending)this.hello();
  }

@@ -14,7 +14,10 @@
 //   keys per room.
 // A tab keeps its token (sessionStorage): back within HOST_GRACE after a reload, a host hosts again
 // and a guest keeps its id and its admission; a host that does not come back hands the room to the
-// guest that has been there longest.
+// guest that has been there longest. During a race (the host's lobby says so) a host whose line dropped
+// (no goodbye: a reload or a closed tab says one, and its race is gone with its page) keeps its place
+// for RACE_GRACE instead: its guests' game stands the race still until it is back (players' wish: a
+// race on the host's machine, a championship's round, must never pass to another for a dropped line).
 const MAX_PEERS=19;          // 15 seats and a few watching
 const MAX_BYTES=16384;       // one message
 const RATE_MESSAGES=90;      // per connection, per second
@@ -23,6 +26,7 @@ const OVER_LIMIT_CLOSE=3;    // seconds over the limit before the connection is 
 const AUTH_WAIT=10000;       // ms to present the key
 const FAILS_PER_MINUTE=20;   // wrong keys in a room before it refuses new connections for a minute
 const HOST_GRACE=15000;      // ms a host that left may take to come back (env HOST_GRACE_MS in tests)
+const RACE_GRACE=600000;     // the same during a race (env RACE_GRACE_MS in tests)
 const HOST_TYPES=new Set(['lobby','go','snap','pong','admit','deny','kick','config','bye']);
 const GUEST_TYPES=new Set(['hello','ready','state','ping','bye']);
 const ROOM=/^[a-z0-9-]{1,24}$/,ID=/^[0-9a-f]{8}$/,TOKEN=/^[0-9a-f]{32}$/;
@@ -57,8 +61,8 @@ export class Sala {
   this.peers=new Map();        // id -> peer (authenticated connections)
   this.tokens=new Map();       // token -> {id, token, admitted, since}: who has been in this room
   this.banned=new Set();       // tokens the host kicked
-  this.hostId=null;this.hostToken=null;this.hostAwayTimer=null;this.porteiro=true;
-  this.fails=[];this.refuseUntil=0;this.grace=Number(env.HOST_GRACE_MS)||HOST_GRACE;this.authWait=Number(env.AUTH_WAIT_MS)||AUTH_WAIT;
+  this.hostId=null;this.hostToken=null;this.hostAwayTimer=null;this.porteiro=true;this.racing=false;
+  this.fails=[];this.refuseUntil=0;this.grace=Number(env.HOST_GRACE_MS)||HOST_GRACE;this.raceGrace=Number(env.RACE_GRACE_MS)||RACE_GRACE;this.authWait=Number(env.AUTH_WAIT_MS)||AUTH_WAIT;
  }
  async fetch(){
   const [client,socket]=Object.values(new WebSocketPair());
@@ -148,7 +152,9 @@ export class Sala {
    case 'deny':if(to&&!this.tokens.get(to.token)?.admitted)this.shut(to,CLOSE.denied,'Entrada recusada');return;
    case 'kick':if(to&&to!==peer){this.banned.add(to.token);this.shut(to,CLOSE.kicked,'Removido pelo anfitrião');}return;
    case 'pong':if(to)this.send(to,m);return;
-   case 'bye':this.shut(peer,1000,'Saiu');return;
+   case 'bye':peer.bye=true;this.shut(peer,1000,'Saiu');return;
+   // (the host's lobby says whether its race is under way: how long its place waits, gone)
+   case 'lobby':this.racing=m.race?.state==='racing';this.toGuests(m);return;
    default:this.toGuests(m);
   }
  }
@@ -159,14 +165,15 @@ export class Sala {
   if(!peer.id||this.peers.get(peer.id)!==peer)return;
   this.peers.delete(peer.id);
   if(peer.id!==this.hostId){this.toHost({t:'bye',from:peer.id});return;}
-  // The host left (a reload, most likely): its guests wait for it before one of them hosts.
+  // The host left (a reload, or its line dropped): its guests wait for it before one of them hosts,
+  // a long while when its line dropped in the middle of its race.
   this.toGuests({t:'host-away'});
   clearTimeout(this.hostAwayTimer);
   this.hostAwayTimer=setTimeout(()=>{
    this.hostAwayTimer=null;if(this.peers.has(this.hostId))return;
    const next=[...this.peers.values()].sort((a,b)=>this.tokens.get(a.token).since-this.tokens.get(b.token).since)[0];
-   this.hostId=null;this.hostToken=null;if(!next)return;
+   this.hostId=null;this.hostToken=null;this.racing=false;if(!next)return;
    this.makeHost(next);this.send(next,{t:'role',role:'host'});this.toGuests({t:'host',id:next.id});this.knocks();
-  },this.grace);
+  },this.racing&&!peer.bye?this.raceGrace:this.grace);
  }
 }

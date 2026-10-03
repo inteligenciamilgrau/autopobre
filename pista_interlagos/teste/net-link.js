@@ -18,24 +18,40 @@ export class ServerLink {
  // socket: how to open the WebSocket (the Node checks add the Origin a browser sends).
  constructor({url,room,key,name,storage=session(),socket=url=>new WebSocket(url)}){
   Object.assign(this,{url,room,key,name,storage,socket});this.ws=null;this.tries=0;this.closing=false;this.onmessage=null;this.onclose=null;this.onopen=null;
+  // ws: the newest connection; live: the one the room hears (the old one, while a new one made by
+  // reconnect has not been welcomed yet).
+  this.live=null;
  }
  get tokenKey(){return 'autopobre-sala-token-'+this.room;}
  get token(){try{const t=this.storage?.getItem(this.tokenKey);return TOKEN.test(t??'')?t:null;}catch{return null;}}
  saveToken(token){if(!TOKEN.test(token??''))return;try{this.storage?.setItem(this.tokenKey,token);}catch{}}
  open(){
   this.closing=false;clearTimeout(this.retry);
-  let ws;try{ws=this.ws=this.socket(`${this.url}/sala/${encodeURIComponent(this.room)}`);}catch{this.lost();return;}
-  ws.onopen=()=>{this.tries=0;ws.send(JSON.stringify({t:'auth',key:this.key()??'',token:this.token,name:this.name()??''}));this.onopen?.();};
+  let ws;try{ws=this.ws=this.socket(`${this.url}/sala/${encodeURIComponent(this.room)}`);}catch{this.ws=null;this.lost();return;}
+  ws.onopen=()=>{ws.send(JSON.stringify({t:'auth',key:this.key()??'',token:this.token,name:this.name()??''}));this.onopen?.();};
+  // The room hears the live connection only: a new one from its welcome on, the old one until then.
   ws.onmessage=e=>{
-   if(typeof e.data!=='string'||e.data.length>MAX_BYTES)return;
+   if(ws!==this.ws&&ws!==this.live||typeof e.data!=='string'||e.data.length>MAX_BYTES)return;
    let m;try{m=JSON.parse(e.data);}catch{return;}
-   if(m&&typeof m==='object'&&!Array.isArray(m)){if(m.t==='welcome')this.saveToken(m.token);this.onmessage?.(m);}
+   if(!m||typeof m!=='object'||Array.isArray(m))return;
+   if(m.t==='welcome'){this.saveToken(m.token);this.tries=0;this.live=ws;}else if(ws!==this.live)return;
+   this.onmessage?.(m);
   };
-  ws.onclose=e=>{if(this.ws!==ws)return;this.ws=null;const reason=CLOSED[e.code];if(reason||this.closing)this.onclose?.(reason??'saiu');else this.lost();};
+  ws.onclose=e=>{
+   // An old connection replaced by a new one: nothing to tell (the new one is on its way).
+   if(ws!==this.ws){if(this.live===ws)this.live=null;return;}
+   this.ws=null;if(this.live===ws)this.live=null;
+   const reason=CLOSED[e.code];if(reason||this.closing){this.onclose?.(reason??'saiu');return;}
+   // A new connection that failed while the old one still works (the alarm was false): that one goes on.
+   if(this.live?.readyState===1){this.ws=this.live;return;}
+   this.lost();
+  };
   ws.onerror=()=>{};
  }
  // The connection dropped (network, a server restart, the day's limit): try again, soon at first,
  // then every RETRIES' last delay for as long as the page stays ('fora' once the quick tries ran out).
+ // Only a welcome starts the tries over: a server that lets the connection in and closes it at once
+ // (an error, a key too late) waits longer each time too.
  lost(){
   if(this.closing)return;const delay=RETRIES[Math.min(this.tries++,RETRIES.length-1)];
   this.onclose?.(this.tries>RETRIES.length?'fora':'reconectando');clearTimeout(this.retry);this.retry=setTimeout(()=>this.open(),delay);
@@ -45,9 +61,10 @@ export class ServerLink {
  // server to close once the new one is in (the same token: no goodbye reaches the room, so a false
  // alarm costs nothing), or to die on its own. Not while a new one is still connecting.
  reconnect(){if(this.closing||!this.ws||this.ws.readyState===0)return;this.open();}
- // For the checks (multiplayer.js dropLine): the line drops as a network drops it, no goodbye; slow:
- // the next try only after the longest wait.
- drop(slow=false){const ws=this.ws;if(!ws)return;if(slow)this.tries=RETRIES.length-1;try{ws.close(4000);}catch{}}
- send(m){if(this.ws?.readyState===1)try{this.ws.send(JSON.stringify(m));}catch{}}
- close(){this.closing=true;clearTimeout(this.retry);try{this.ws?.close(1000);}catch{}this.ws=null;}
+ // For the checks (multiplayer.js dropLine): the line drops as a network drops it, no goodbye (a new
+ // connection on its way too); slow: the next try only after the longest wait.
+ drop(slow=false){if(!this.ws)return;if(slow)this.tries=RETRIES.length-1;for(const ws of new Set([this.ws,this.live]))try{ws?.close(4000);}catch{}}
+ // (through the live connection: a new one is not the room's until its welcome)
+ send(m){const ws=this.live?.readyState===1?this.live:this.ws;if(ws?.readyState===1)try{ws.send(JSON.stringify(m));}catch{}}
+ close(){this.closing=true;clearTimeout(this.retry);for(const ws of new Set([this.ws,this.live]))try{ws?.close(1000);}catch{}this.ws=this.live=null;}
 }

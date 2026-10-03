@@ -84,6 +84,12 @@ assert.equal(controls.pad.index,3);assert.equal(controls.brake,0);assert.equal(c
 pads=[wornAt(.6)];controls.poll(1/60);assert.ok(controls.brake>.4&&controls.brake<.55,`half the worn LT ${controls.brake}`);
 pads=[wornAt(1)];controls.poll(1/60);assert.equal(controls.brake,1);
 pads=[wornAt(.2)];controls.poll(1/60);assert.equal(controls.brake,0);
+// Sticks resting a little off centre (an Xbox pad in spec may rest up to XInput's dead zone, a worn one
+// near it): no steering, no driving input taking the wheel from the automatic pilot, and no look
+// turning the camera every frame (before: the left stick at 0.15 steered, the right one orbited).
+looks.length=0;pads=[pad({axes:[.15,-.2,.22,-.24]})];for(let k=0;k<3;k++)controls.poll(1/60);
+assert.deepEqual([controls.steering,controls.walk,controls.driving,looks.length],[0,0,false,0],'resting sticks do nothing');
+pads=[pad({axes:[.3,0,0,0]})];controls.poll(1/60);assert.ok(controls.steering>0&&!controls.driving,'a stick just past its dead zone steers a little, without taking the wheel');
 // A held button still holds its key after the game let go of the keys (main.js: the menu, a pause).
 pads=[pad({buttons:{1:1}})];controls.poll(1/60);assert.equal(controls.holds('KeyQ'),true);assert.equal(controls.holds('KeyE'),false);
 pads=[pad()];controls.poll(1/60);assert.equal(controls.holds('KeyQ'),false);

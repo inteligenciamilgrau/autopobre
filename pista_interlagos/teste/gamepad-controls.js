@@ -18,13 +18,15 @@ export const BUTTON_KEYS=Object.freeze({
 export const MENU_BUTTON=9; // Menu / Options: the pause menu, and back to the race
 export const STEERING_CURVES=Object.freeze({suave:2.2,normal:1.6,direta:1});
 // A trigger's travel counts from where it rests: the lowest it has read up to TRIGGER_REST (a worn
-// trigger never goes back to 0; one pressed further when first read rests at 0 until let go).
-const STICK_DEADZONE=.12,TRIGGER_DEADZONE=.04,TRIGGER_REST=.3,LOOK_SPEED=900;
+// trigger never goes back to 0; one pressed further when first read rests at 0 until let go). The
+// sticks' dead zones are XInput's own (left 7849/32767, right 8689/32767): an Xbox pad in spec rests
+// inside them, worn ones a little off centre too. A driving input takes the wheel only past DRIVING.
+const STICK_DEADZONE=.24,LOOK_DEADZONE=.265,TRIGGER_DEADZONE=.04,TRIGGER_REST=.3,LOOK_SPEED=900,DRIVING=.05;
 const keyName=code=>code==='Space'?' ':code.startsWith('Key')?code.slice(3).toLowerCase():code.startsWith('Digit')?code.slice(5):code==='ShiftLeft'?'Shift':code;
 // Stick travel past the dead zone, full at 95% (worn sticks and diagonals never reach 1), then the
 // curve: above 1 the middle turns gently and the ends still give full lock.
-export function stickValue(value,curve=STEERING_CURVES.normal){
- const amount=Math.min(1,Math.max(0,(Math.abs(value||0)-STICK_DEADZONE)/(.95-STICK_DEADZONE)));
+export function stickValue(value,curve=STEERING_CURVES.normal,deadzone=STICK_DEADZONE){
+ const amount=Math.min(1,Math.max(0,(Math.abs(value||0)-deadzone)/(.95-deadzone)));
  return amount?Math.sign(value)*amount**curve:0;
 }
 export function triggerValue(value,rest=0){const r=Math.max(0,rest||0)+TRIGGER_DEADZONE;return Math.min(1,Math.max(0,((value||0)-r)/(1-r)));}
@@ -43,8 +45,9 @@ export class GamepadControls {
  // A device plugged in that is no standard pad (a wheel, pedals, some pads in some browsers): its
  // buttons and axes mean other things, so it drives nothing; the settings say so (null: none).
  get unsupported(){return this.pad||!this.other?null:padName(this.other);}
- // Driving input: the triggers or the stick are in use (the recon lap gives the wheel back to the player).
- get driving(){return !!(this.throttle||this.brake||this.steering);}
+ // Driving input: the triggers or the stick are in use (the recon lap gives the wheel back to the
+ // player), more than a pad resting a little off its centre gives.
+ get driving(){return this.throttle>DRIVING||this.brake>DRIVING||Math.abs(this.steering)>DRIVING;}
  setSteering(name){this.curve=STEERING_CURVES[name]??STEERING_CURVES.normal;}
  // main.js: whether a held button presses that key now (a key the game let go of meanwhile, its menu
  // or a pause, is still held while the button is).
@@ -82,7 +85,7 @@ export class GamepadControls {
    for(const code of codes)this.key(down?'keydown':'keyup',code);
   }
   const menu=!!button(MENU_BUTTON)?.pressed;if(menu&&!this.menuHeld)this.onMenu?.();this.menuHeld=menu;
-  const lookX=stickValue(axis(2),1.4),lookY=stickValue(axis(3),1.4);
+  const lookX=stickValue(axis(2),1.4,LOOK_DEADZONE),lookY=stickValue(axis(3),1.4,LOOK_DEADZONE);
   if((lookX||lookY)&&dt>0)this.onLook?.(lookX*LOOK_SPEED*dt,lookY*LOOK_SPEED*.6*dt);
  }
  key(type,code){this.target.dispatchEvent(new KeyboardEvent(type,{code,key:keyName(code),bubbles:true,cancelable:true}));}

@@ -27,10 +27,10 @@ def watch(page):
 
 
 def set_water(page, on):
-    """Tick the box in the race settings, as a player would."""
+    """Pick it in the graphics settings, as a player would."""
     page.click('#settingsButton' if page.is_visible('#settingsButton') else '#touchMenu' if page.is_visible('#touchMenu') else '#menuButton')
-    page.click('#tab-race')
-    page.locator('#realisticWater').set_checked(on)
+    page.click('#tab-graphics')
+    page.select_option('#gfx-water', 'realista' if on else 'simples')
     page.click('#settingsClose')
 
 
@@ -42,11 +42,11 @@ with sync_playwright() as p:
         page = context.new_page(); page.set_default_timeout(120000)
         watch(page)
         open_menu(page, URL)
-        assert not page.evaluate("document.querySelector('#realisticWater').checked"), 'realistic water must start off'
+        assert page.evaluate("document.querySelector('#gfx-water').value") == 'simples', 'realistic water must start off'
         set_water(page, True)
-        assert json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))['realisticWater'] is True
+        assert json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))['graphics']['overrides'] == {'water': 'realista'}
         open_menu(page, URL)
-        assert page.evaluate("document.querySelector('#realisticWater').checked"), 'the choice must survive a reload'
+        assert page.evaluate("document.querySelector('#gfx-water').value") == 'realista', 'the choice must survive a reload'
         enter_track(page)
         info = page.evaluate('interlagos.waterInfo()')
         assert info['realistic'] and not info['simpleVisible'] and info['bodies'] >= 2, info
@@ -78,7 +78,7 @@ with sync_playwright() as p:
         set_water(page, False)
         off = page.evaluate('interlagos.waterInfo()')
         assert not off['realistic'] and off['simpleVisible'], off
-        assert json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))['realisticWater'] is False
+        assert 'water' not in json.loads(page.evaluate(f"localStorage.getItem('{KEY}')"))['graphics']['overrides']
         set_water(page, True)
         frames(page)
         assert page.evaluate('interlagos.waterInfo().realistic')

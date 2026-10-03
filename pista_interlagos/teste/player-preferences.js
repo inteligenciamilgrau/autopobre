@@ -1,5 +1,6 @@
 import {circuitId} from './circuits.js';
 import {DUEL_DEFAULT,carEntry,AI_LEVELS,PLAYER_CAR_DEFAULT} from './race-roster.js';
+import {normalizeGraphics,DEBUG_OVERLAY_MODES,DEBUG_OVERLAY_CORNERS} from './graphics-settings.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
 // 'tv' films from the trackside towers and verge cameras (tv-camera.js).
 // Race length in laps, for the free race and the story alike, on every circuit.
@@ -21,12 +22,14 @@ export function normalizePreferences(value){
   aiLevel:AI_LEVELS.includes(source.aiLevel)?source.aiLevel:'facil',
   // Breakdowns (race-field.js): one to four rivals retire in every race, as in the Old Stock. On unless turned off.
   retirements:typeof source.retirements==='boolean'?source.retirements:true,
-  // Lakes with reflections and wind ripples cost an extra scene render per frame: opt-in.
-  realisticWater:typeof source.realisticWater==='boolean'?source.realisticWater:false,
   // The cockpit view shows the V06 body round the controls; true keeps the old box interior.
   classicInterior:typeof source.classicInterior==='boolean'?source.classicInterior:false,
-  // Film look (cinematic.js): 'auto' is the full look on computers and the light one on phones.
-  cinematic:['auto','full','lite','off'].includes(source.cinematic)?source.cinematic:'auto',
+  // Graphics (graphics-settings.js): a level, "Automático" unless picked, and the settings changed by
+  // hand. It took over the lake water and film look settings saved before (realisticWater, cinematic).
+  graphics:normalizeGraphics(source.graphics,source),
+  // Performance overlay (debug-overlay.js, F3): off unless asked for, and its corner.
+  debugOverlay:DEBUG_OVERLAY_MODES.some(([v])=>v===source.debugOverlay)?source.debugOverlay:'off',
+  debugCorner:DEBUG_OVERLAY_CORNERS.some(([v])=>v===source.debugCorner)?source.debugCorner:'auto',
   // The rival of the 1x1 (Modo Corrida's track screen), by car number (the 99 when the player races another car).
   duelRival:typeof source.duelRival==='string'&&carEntry(source.duelRival)?source.duelRival:DUEL_DEFAULT,
   // The car the player races in Modo Corrida (the car screen, car-select.js), by number; the story is the 99's.

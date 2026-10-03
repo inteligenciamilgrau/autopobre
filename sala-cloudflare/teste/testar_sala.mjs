@@ -5,9 +5,9 @@
 import assert from 'node:assert/strict';
 import http from 'node:http';
 import {startWrangler} from './wrangler-dev.mjs';
-const PORT=8797,KEY='chave-de-teste-local',ORIGIN='http://teste.local',GRACE=600,AUTH_WAIT=1500;
+const PORT=8797,KEY='chave-de-teste-local',ORIGIN='http://teste.local',GRACE=600,RACE_GRACE=2500,AUTH_WAIT=1500;
 const wait=(ms=40)=>new Promise(r=>setTimeout(r,ms));
-const stop=await startWrangler({port:PORT,vars:{HOST_GRACE_MS:GRACE,AUTH_WAIT_MS:AUTH_WAIT}});
+const stop=await startWrangler({port:PORT,vars:{HOST_GRACE_MS:GRACE,RACE_GRACE_MS:RACE_GRACE,AUTH_WAIT_MS:AUTH_WAIT}});
 let rooms=0;const fresh=()=>'sala-'+(++rooms)+'-'+Math.random().toString(36).slice(2,6);
 // The HTTP status of a WebSocket request that is turned away before the upgrade.
 const refused=(path,origin)=>new Promise(done=>{const req=http.request({host:'127.0.0.1',port:PORT,path,headers:{Connection:'Upgrade',Upgrade:'websocket','Sec-WebSocket-Version':'13','Sec-WebSocket-Key':'dGhlIHNhbXBsZSBub25jZQ==',...(origin?{Origin:origin}:{})}});
@@ -98,6 +98,27 @@ const report={};
  await caio.until(()=>caio.of('host').some(m=>m.id===bia.me.id));
  for(const c of [bia,caio])c.ws.close();
  report.reload='ok';
+}
+
+// A host whose line drops in the middle of its race (its lobby says the race is under way) keeps its
+// place much longer (RACE_GRACE): its guests' game stands the race still until it is back (players'
+// wish: a championship's round on the host's machine must not pass to another), and back it is still the
+// host. Gone for good, the room goes on with a guest as its host. One that said goodbye (a reload, a
+// closed tab: its race went with its page) has the usual grace.
+{
+ const racing={t:'lobby',name:'Ana',age:1,players:[],race:{state:'racing'}};
+ const room=fresh(),host=await open(room,{name:'Ana'});host.send({t:'config',porteiro:false});await wait(30);
+ const bia=await open(room,{name:'Bia'});host.send(racing);await bia.until(()=>bia.of('lobby')[0]);
+ host.ws.close();await bia.until(()=>bia.of('host-away')[0]);await wait(GRACE+700);
+ assert.equal(bia.of('role').length,0,'past the usual grace: still the host\'s place');
+ const back=await open(room,{token:host.me.token,name:'Ana'});assert.equal(back.me.role,'host','back: still the host');await bia.until(()=>bia.of('host').some(m=>m.id===host.me.id));
+ const t0=Date.now();back.ws.close();await bia.until(()=>bia.of('host-away').length>=2);await bia.until(()=>bia.of('role')[0],RACE_GRACE+3000);
+ assert(Date.now()-t0>=RACE_GRACE-100,'the race\'s grace ran out first');
+ const room2=fresh(),ana=await open(room2,{name:'Ana'});ana.send({t:'config',porteiro:false});await wait(30);
+ const caio=await open(room2,{name:'Caio'});ana.send(racing);await caio.until(()=>caio.of('lobby')[0]);
+ const t1=Date.now();ana.send({t:'bye'});await caio.until(()=>caio.of('role')[0],GRACE+3000);assert(Date.now()-t1<RACE_GRACE,'a goodbye: the usual grace');
+ for(const c of [bia,caio])c.ws.close();
+ report.raceGrace='ok';
 }
 
 // A full room, and a room that saw too many wrong keys.

@@ -5,7 +5,10 @@ import * as THREE from 'three';
 // lens glare, tone mapping and a colour grade are applied in a few screen passes.
 // 'full' runs everything (desktop), 'lite' keeps only the haze and the grade
 // (phones), 'off' draws straight to the screen as before.
+// Within those, the Gráficos tab switches parts on and off (setFeatures): the occlusion and the
+// lens (bloom, sun glare, depth of field) of 'full', the speed smear and the multisampling.
 export const CINEMATIC_LEVELS=['full','lite','off'];
+export const CINEMATIC_FEATURES=Object.freeze({ao:true,lens:true,motionBlur:true,samples:4});
 
 // Colour grade and lens, in one place so the look can be tuned without touching the shaders.
 export const LOOK={
@@ -210,8 +213,9 @@ void main(){
  gl_FragColor=vec4(clamp(color,0.0,1.0),1.0);
 }`;
 
-export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full'}={}){
- const look={...LOOK};
+export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full',features:wanted={}}={}){
+ const look={...LOOK},features={...CINEMATIC_FEATURES,...wanted};
+ const aoOn=()=>level==='full'&&features.ao,lensOn=()=>level==='full'&&features.lens;
  const quadScene=new THREE.Scene(),quadCamera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
  const triangle=new THREE.BufferGeometry();triangle.setAttribute('position',new THREE.Float32BufferAttribute([-1,-1,0,3,-1,0,-1,3,0],3));
  const quad=new THREE.Mesh(triangle);quad.frustumCulled=false;quadScene.add(quad);
@@ -233,26 +237,31 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
   hazeDensity:{value:0},hazeFalloff:{value:0},hazeStart:{value:0},hazeBase:{value:0}};
  const tent=pass(tentShader,{tInput:{value:null},texel:{value:new THREE.Vector2()}});
  const lumMaterial=pass(lumShader,{tInput:{value:null}}),adaptMaterial=pass(adaptShader,{tLum:{value:null},tPrev:{value:null},rate:{value:1}});
- const composites={full:pass(compositeShader,compositeUniforms,{AO:'',BLOOM:''}),lite:pass(compositeShader,compositeUniforms)};
+ // One composite program per set of parts in use, built when first needed (they share the uniforms).
+ const composites=new Map();
+ const composite=()=>{const ao=stats.ao,lens=stats.lens,key=(ao?'ao':'')+(lens?'lens':'');let m=composites.get(key);if(!m){m=pass(compositeShader,compositeUniforms,{...(ao?{AO:''}:{}),...(lens?{BLOOM:''}:{})});composites.set(key,m);}return m;};
  const size=new THREE.Vector2(),sunProjected=new THREE.Vector3(),cameraDirection=new THREE.Vector3();
  let width=0,height=0,frame=0,time=0,previousToneMapping=renderer.toneMapping,previousColorSpace=renderer.outputColorSpace;
- const stats={level,passes:0,width:0,height:0,samples:0,sunVisible:0};
+ const stats={level,passes:0,width:0,height:0,samples:0,sunVisible:0,ao:false,lens:false};
 
  function allocate(){
   dispose();
-  // Multisampling of the HDR frame: 4x up to about 1080p, fewer on very large drawing buffers
-  // (a 4x half-float frame at 4K would take hundreds of MB of video memory).
-  const pixels=width*height,samples=level!=='full'?0:pixels<2.3e6?4:pixels<5.2e6?2:0;
+  // Multisampling of the HDR frame as asked (features.samples): 4x up to about 1080p, fewer on very
+  // large drawing buffers (a 4x half-float frame at 4K would take hundreds of MB of video memory).
+  const pixels=width*height,samples=Math.min(features.samples,pixels<2.3e6?4:pixels<5.2e6?2:0,renderer.capabilities.maxSamples??4);
   hdr=new THREE.WebGLRenderTarget(width,height,{type:THREE.HalfFloatType,samples,depthTexture:new THREE.DepthTexture(width,height,THREE.FloatType)});
   hdr.texture.minFilter=hdr.texture.magFilter=THREE.LinearFilter;hdr.texture.generateMipmaps=false;
   // Passes that only draw for the player's own view (lake reflections) treat this target as the screen.
   hdr.isMainView=true;stats.samples=samples;
   lumTarget=target();lumTarget.setSize(16,16);lumTarget.texture.minFilter=lumTarget.texture.magFilter=THREE.NearestFilter;
   adapt=[target(),target()];for(const t of adapt)t.setSize(1,1);adaptReset=true;
-  if(level!=='full')return;
+  stats.ao=aoOn();stats.lens=lensOn();
   const hw=Math.max(1,width>>1),hh=Math.max(1,height>>1);
-  aoA=target({type:THREE.HalfFloatType,format:THREE.RGFormat});aoB=target({type:THREE.HalfFloatType,format:THREE.RGFormat});aoA.setSize(hw,hh);aoB.setSize(hw,hh);
-  for(const t of [aoA,aoB])t.texture.minFilter=t.texture.magFilter=THREE.NearestFilter;
+  if(stats.ao){
+   aoA=target({type:THREE.HalfFloatType,format:THREE.RGFormat});aoB=target({type:THREE.HalfFloatType,format:THREE.RGFormat});aoA.setSize(hw,hh);aoB.setSize(hw,hh);
+   for(const t of [aoA,aoB])t.texture.minFilter=t.texture.magFilter=THREE.NearestFilter;
+  }
+  if(!stats.lens)return;
   for(let i=0,w=hw,h=hh;i<5;i++,w=Math.max(1,w>>1),h=Math.max(1,h>>1)){const a=target(),b=target();a.setSize(w,h);b.setSize(w,h);bloom.push({down:a,up:b,w,h});}
   sunTarget=target({type:THREE.UnsignedByteType});sunTarget.setSize(1,1);
   dofHalf=target();dofHalf.setSize(hw,hh);dofBlur=target();dofBlur.setSize(hw,hh);dofQuarter=target();dofQuarter.setSize(Math.max(1,hw>>1),Math.max(1,hh>>1));
@@ -271,6 +280,9 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
   look,stats,
   get level(){return level;},
   setLevel(value){if(!CINEMATIC_LEVELS.includes(value)||value===level)return level;level=value;stats.level=level;width=height=0;if(level==='off')dispose();applyRendererState();return level;},
+  // {ao, lens, motionBlur, samples}: the targets are rebuilt at the next frame when one of them changes.
+  get features(){return {...features};},
+  setFeatures(patch){const before=JSON.stringify(features);for(const key of Object.keys(CINEMATIC_FEATURES))if(patch&&typeof patch[key]===typeof CINEMATIC_FEATURES[key])features[key]=patch[key];if(JSON.stringify(features)!==before)width=height=0;return {...features};},
   // context: {dt, speed (m/s), mode (camera), hazeBase (m)}
   render(scene,camera,{dt=0,speed=0,mode='chase',hazeBase=0,dof=null}={}){
    if(level==='off'){renderer.setRenderTarget(null);renderer.render(scene,camera);return;}
@@ -281,15 +293,18 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
    renderer.setRenderTarget(hdr);renderer.render(scene,camera);
    const calls=info.render.calls,triangles=info.render.triangles;info.autoReset=false;
    const projection=camera.projectionMatrix.elements;
-   for(const m of [aoMaterial,composites.full,composites.lite]){const u=m.uniforms;u.tDepth.value=hdr.depthTexture;u.cameraNear.value=camera.near;u.cameraFar.value=camera.far;u.projScale.value.set(projection[0],projection[5]);u.depthSize.value.set(width,height);}
+   for(const u of [aoMaterial.uniforms,compositeUniforms]){u.tDepth.value=hdr.depthTexture;u.cameraNear.value=camera.near;u.cameraFar.value=camera.far;u.projScale.value.set(projection[0],projection[5]);u.depthSize.value.set(width,height);}
    const u=compositeUniforms;
-   if(level==='full'){
+   if(stats.ao){
     const hw=aoA.width,hh=aoA.height;
     aoMaterial.uniforms.fullTexel.value.set(1/width,1/height);aoMaterial.uniforms.frame.value=frame;
     aoMaterial.uniforms.radius.value=look.aoRadius;aoMaterial.uniforms.intensity.value=look.aoIntensity;aoMaterial.uniforms.bias.value=look.aoBias;aoMaterial.uniforms.fade.value.set(...look.aoFade);
     draw(aoMaterial,aoA);
     blurMaterial.uniforms.tInput.value=aoA.texture;blurMaterial.uniforms.direction.value.set(1/hw,0);draw(blurMaterial,aoB);
     blurMaterial.uniforms.tInput.value=aoB.texture;blurMaterial.uniforms.direction.value.set(0,1/hh);draw(blurMaterial,aoA);
+    u.tAO.value=aoA.texture;u.aoSize.value.set(hw,hh);
+   }
+   if(stats.lens){
     prefilter.uniforms.tInput.value=hdr.texture;prefilter.uniforms.texel.value.set(1/width,1/height);prefilter.uniforms.threshold.value=look.bloomThreshold;prefilter.uniforms.knee.value=look.bloomKnee;
     draw(prefilter,bloom[0].down);
     for(let i=1;i<bloom.length;i++){down.uniforms.tInput.value=bloom[i-1].down.texture;down.uniforms.texel.value.set(1/bloom[i-1].w,1/bloom[i-1].h);draw(down,bloom[i].down);}
@@ -311,7 +326,7 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
      tent.uniforms.tInput.value=dofQuarter.texture;tent.uniforms.texel.value.set(1/dofQuarter.width,1/dofQuarter.height);draw(tent,dofBlur);
      u.tDof.value=dofBlur.texture;
     }
-    u.tAO.value=aoA.texture;u.tBloom.value=bloom[0].up.texture;u.tSun.value=sunTarget.texture;u.aoSize.value.set(hw,hh);
+    u.tBloom.value=bloom[0].up.texture;u.tSun.value=sunTarget.texture;
    }
    // Eye adaptation: scene brightness, eased toward from the previous frame.
    lumMaterial.uniforms.tInput.value=hdr.texture;draw(lumMaterial,lumTarget);
@@ -325,10 +340,10 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
    u.hazeColor.value.set(...look.hazeColor);u.hazeSun.value.set(...look.hazeSun);u.hazeDensity.value=look.hazeDensity;u.hazeFalloff.value=look.hazeFalloff;u.hazeStart.value=look.hazeStart;u.hazeBase.value=hazeBase;
    // A little smear at speed, only for the cameras that ride with the car.
    const riding=mode==='chase'||mode==='close'||mode==='hood'||mode==='cockpit';
-   u.speedBlur.value=level==='full'&&riding?THREE.MathUtils.clamp((speed-34)/45,0,1):0;
-   draw(composites[level],null);
+   u.speedBlur.value=features.motionBlur&&riding?THREE.MathUtils.clamp((speed-34)/45,0,1):0;
+   draw(composite(),null);
    info.render.calls=calls;info.render.triangles=triangles;info.autoReset=autoReset;
-   stats.sunVisible=u.sunFront.value;
+   stats.sunVisible=stats.lens?u.sunFront.value:0;
   },
   // Compile the scene's programs for the off-screen target during loading.
   async compile(scene,camera){
@@ -339,11 +354,11 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
    await pending;
   },
   setSun(direction){compositeUniforms.sunDir.value.copy(direction).normalize();},
-  dispose(){dispose();for(const m of [aoMaterial,blurMaterial,prefilter,down,up,tent,sunMaterial,lumMaterial,adaptMaterial,composites.full,composites.lite])m.dispose();triangle.dispose();},
+  dispose(){dispose();for(const m of [aoMaterial,blurMaterial,prefilter,down,up,tent,sunMaterial,lumMaterial,adaptMaterial,...composites.values()])m.dispose();triangle.dispose();},
   // Reads the adapted mean luminance back from the GPU: for tests and tuning only.
   adaptation(){if(!adapt[0])return null;const out=new Uint16Array(4);renderer.readRenderTargetPixels(adapt[0],0,0,1,1,out);const mean=Math.exp(THREE.DataUtils.fromHalfFloat(out[0]));
    return {mean,scale:THREE.MathUtils.clamp(look.adaptKey/mean,...look.adaptRange)};},
   resetAdaptation(){adaptReset=true;},
-  info:()=>({...stats,look:{...look}})
+  info:()=>({...stats,features:{...features},look:{...look}})
  };
 }

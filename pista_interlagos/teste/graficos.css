@@ -1,0 +1,44 @@
+/* 03 Gráficos (graphics-panel.js): the four levels as cards, then the settings by hand. */
+.graphics-levels{display:grid;grid-template-columns:repeat(auto-fit,minmax(118px,1fr));gap:10px;margin:22px 0 14px}
+.graphics-level{display:flex;flex-direction:column;align-items:flex-start;gap:7px;min-height:118px;padding:13px 12px;text-align:left;background:#0b1b17;border:1px solid #667d6c66;border-radius:10px;color:#c9d6cc;cursor:pointer}
+.graphics-level b{font-size:15px;color:#f2f3ea}.graphics-level small{font-size:10px;line-height:1.45;color:#91a795}
+.graphics-level:hover{border-color:#dfc85d88}
+.graphics-level[aria-checked=true]{background:#e1c35418;border-color:#edca50;box-shadow:inset 0 0 0 1px #edca5055}.graphics-level[aria-checked=true] b{color:#f0d67a}
+.graphics-level.implied{border-style:dashed;border-color:#dfc85d88}
+.graphics-bars{display:flex;gap:3px;align-items:flex-end;height:14px}.graphics-bars i{width:7px;border-radius:2px;background:#ffffff1c}.graphics-bars i:nth-child(1){height:5px}.graphics-bars i:nth-child(2){height:8px}.graphics-bars i:nth-child(3){height:11px}.graphics-bars i:nth-child(4){height:14px}.graphics-bars i.on{background:#edca50}
+.graphics-status{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin:0 0 16px}.settings-content .graphics-status p{margin:0;flex:1 1 260px;color:#c6d3c8}
+.graphics-status button{font-size:11px;padding:8px 12px;background:#213a2e}
+.graphics-manual{border-top:1px solid #ffffff18;padding-top:6px}.graphics-manual summary{cursor:pointer;padding:12px 0;font-size:15px;font-weight:700;color:#f2f3ea}.graphics-manual summary small{font-weight:400;font-size:11px;color:#91a795;margin-left:8px}
+.graphics-controls{display:grid;gap:16px;margin-bottom:8px}
+.graphics-group{display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:14px 18px;margin:0;padding:14px 16px 16px;border:1px solid #ffffff14;border-radius:10px;background:#ffffff04}
+.graphics-group legend{padding:0 6px;font-size:10px;letter-spacing:1.6px;font-weight:750;color:#d6bd6a;text-transform:uppercase}
+.graphics-setting{display:flex;flex-direction:column;gap:6px;font-size:12px;color:#e2e8dc}
+.graphics-setting>span{display:flex;align-items:center;gap:8px}
+.graphics-changed{display:none;font-style:normal;font-size:9px;letter-spacing:.6px;text-transform:uppercase;padding:2px 6px;border-radius:8px;background:#edca5026;color:#f0d67a}
+.graphics-setting.changed .graphics-changed{display:inline}
+.graphics-setting.changed select{border-color:#edca50}
+.graphics-setting small{font-size:10px;line-height:1.45;color:#8ea296}
+.graphics-setting.blocked{opacity:.5}
+.graphics-debug{margin-top:26px;padding-top:22px;border-top:1px solid #ffffff18}.graphics-debug h4{margin:0 0 6px;font-size:17px;color:#f2f3ea}.graphics-debug .choices{margin:14px 0 0}
+/* On this tab the race shows through, to see each change as it is made. */
+#settings:has(#settings-graphics:not([hidden]))::backdrop{background:#030b0c66;backdrop-filter:none}
+@media(max-width:700px){.graphics-levels{grid-template-columns:repeat(auto-fit,minmax(104px,1fr))}.graphics-level{min-height:0}.graphics-group{grid-template-columns:1fr;padding:12px}}
+.touch-device .graphics-debug kbd{display:none}
+
+/* Performance overlay (debug-overlay.js, F3). */
+#debugOverlay{position:fixed;z-index:60;pointer-events:none;padding:6px 9px;border-radius:8px;border:1px solid #ffffff24;background:#07120fe0;color:#e9efe4;font:600 11px/1.4 ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-variant-numeric:tabular-nums;box-shadow:0 6px 20px #0006}
+#debugOverlay[hidden]{display:none}
+#debugOverlay.dbg-tl{top:max(8px,env(safe-area-inset-top));left:max(8px,env(safe-area-inset-left))}
+#debugOverlay.dbg-tc{top:max(6px,env(safe-area-inset-top));left:50%;transform:translateX(-50%)}
+#debugOverlay.dbg-tr{top:max(8px,env(safe-area-inset-top));right:max(8px,env(safe-area-inset-right))}
+#debugOverlay.dbg-bl{bottom:max(8px,env(safe-area-inset-bottom));left:max(8px,env(safe-area-inset-left))}
+#debugOverlay.dbg-br{bottom:max(8px,env(safe-area-inset-bottom));right:max(8px,env(safe-area-inset-right))}
+.dbg-head{display:flex;align-items:baseline;gap:6px;white-space:nowrap}
+.dbg-fps{font-size:17px;min-width:2ch;text-align:right}.dbg-head span{font-size:10px;color:#9fb3a9}.dbg-ms{font-style:normal;color:#c9d6cc;margin-left:4px}
+.dbg-key{margin-left:auto;padding-left:10px;font-size:9px;color:#ffffff59}.touch-device .dbg-key{display:none}
+#debugOverlay[data-grade=good] .dbg-fps{color:#9fd37c}#debugOverlay[data-grade=fair] .dbg-fps{color:#e8c752}#debugOverlay[data-grade=poor] .dbg-fps{color:#ef6b55}
+.dbg-graph{display:none;width:200px;height:46px;margin:5px 0 4px;background:#ffffff08;border-radius:3px}
+.dbg-lines{display:none;margin:0;grid-template-columns:auto auto;gap:1px 10px;max-width:380px}
+.dbg-lines dt{color:#8ea296;font-weight:500}.dbg-lines dd{margin:0;color:#e9efe4;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#debugOverlay.dbg-full .dbg-graph{display:block}#debugOverlay.dbg-full .dbg-lines{display:grid}
+.touch-device #debugOverlay{font-size:9px;padding:4px 7px}.touch-device .dbg-fps{font-size:14px}.touch-device .dbg-lines{max-width:330px}

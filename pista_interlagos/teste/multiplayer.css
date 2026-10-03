@@ -40,6 +40,13 @@
 #mpRoom.mp-yellow .mp-status{font-weight:800}
 @keyframes mp-yellow{50%{background:#ffe04a}}
 @media(prefers-reduced-motion:reduce){#mpRoom.mp-yellow{animation:none}}
+/* The race standing still for its host (multiplayer.js pause): the pill in blue, and a plate in the
+   middle of the screen saying why. */
+#mpRoom.mp-paused{background:#2b63c4;border-color:#2b63c4}
+#mpRoom.mp-paused .mp-status{font-weight:800}
+#mpPause{position:absolute;left:50%;top:36%;z-index:41;transform:translate(-50%,-50%);max-width:min(560px,calc(100vw - 32px));padding:14px 22px;border:1px solid #9cc4ff66;border-radius:12px;background:#0b1a30d9;color:#f5f6ed;text-align:center;font:13px/1.4 Inter,"Segoe UI",Arial,sans-serif;pointer-events:none;box-shadow:0 8px 30px #0008}
+#mpPause b{display:block;margin-bottom:4px;font-size:24px;letter-spacing:3px;color:#9cc4ff}
+#mpPause[hidden]{display:none}
 #mpRoom.mp-tracks{bottom:12px}
 /* The car screen keeps that bottom edge free for it (the chosen car's plate sits low on the stage). */
 body.mp-room #cars{padding-bottom:58px}

@@ -771,8 +771,10 @@ function treeColor(rand,dry=0){
 // Circuits from open data pass cover (data.scenery.cover: a class per terrain cell) and
 // buildings (data.scenery.buildings: real footprints as oriented rectangles) instead of
 // an orthophoto; cityAngle points the distant skyline at the city (radians, track frame).
-export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban'}){
- const root=new THREE.Group();root.name='Paisagem';
+// density: trees and houses per area against the standard build (the Gráficos tab's scenery level);
+// lod: how near a tree block shows its full crowns.
+export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban',density=1,lod=mobile?80:130}){
+ const root=new THREE.Group();root.name='Paisagem';const spread=1/Math.sqrt(density);
  const rand=random(data.samples.length*7919+17),stats={trees:0,houses:0,water:0};
  const trees=[],tall=[],houses=[],flats=[],lajes=[],rounds=[];
  const {x0,y0,width,height}=field;
@@ -798,7 +800,7 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
    simpleWater=waterMesh(field,bodies,waves,shore);root.add(simpleWater);
    simplePatch=new THREE.Mesh(waves.patchGeometry(),simpleWaterMaterial(shore,waves,true));simplePatch.name='Lago_ondas';simplePatch.receiveShadow=true;simplePatch.visible=false;root.add(simplePatch);
   }
-  const spacing=mobile?8.5:6;
+  const spacing=(mobile?8.5:6)*spread;
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
    const px=x+(rand()-.5)*spacing*.9,py=y+(rand()-.5)*spacing*.9,i=ortho.index(px,py),cell=field.cell(px,py);
    if(i<0||cell<0||field.water[cell]||!dry(px,py,2.5))continue;const edge=field.edge[cell],cover=landCover(ortho,i);
@@ -810,7 +812,7 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
    }
   }
   // Houses follow the local street grid: the orientation of the photo's edges.
-  const houseSpacing=mobile?11:8.2,ow=ortho.w;
+  const houseSpacing=(mobile?11:8.2)*spread,ow=ortho.w;
   for(let y=y0+houseSpacing/2;y<y0+height;y+=houseSpacing)for(let x=x0+houseSpacing/2;x<x0+width;x+=houseSpacing){
    const px=x+(rand()-.5)*2.5,py=y+(rand()-.5)*2.5,i=ortho.index(px,py),cell=field.cell(px,py);
    if(i<0||cell<0||field.inside[cell]||field.water[cell]||field.edge[cell]<42||!dry(px,py,6))continue;
@@ -825,7 +827,7 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
  }else if(cover){
   // Woods and scrub where the land-cover grid (ESA WorldCover, OSM woods) says so.
   const classAt=(x,y)=>{const i=Math.floor((x-cover.x0)/cover.step+.5),j=Math.floor((y-cover.y0)/cover.step+.5);return i<0||j<0||i>=cover.nx||j>=cover.ny?'0':cover.classes[j*cover.nx+i];};
-  const spacing=mobile?9:6.5;
+  const spacing=(mobile?9:6.5)*spread;
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
    const px=x+(rand()-.5)*spacing*.9,py=y+(rand()-.5)*spacing*.9,cell=field.cell(px,py),kind=classAt(px,py);
    if(cell<0||(kind!=='1'&&kind!=='2'))continue;const edge=field.edge[cell];
@@ -854,7 +856,7 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
   }
  }else if(style==='cerrado'){
   // Sparse, low cerrado trees away from the oval and the service area.
-  const spacing=mobile?16:11;
+  const spacing=(mobile?16:11)*spread;
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
    const px=x+(rand()-.5)*spacing,py=y+(rand()-.5)*spacing,cell=field.cell(px,py);if(cell<0||field.edge[cell]<55||field.inside[cell]&&field.edge[cell]<70)continue;
    if(rand()>.18+.5*smooth(.55,.8,Math.sin(px*.013)*Math.cos(py*.011)*.5+.5))continue;
@@ -869,7 +871,7 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
   const group=chunked(name,near,treeMaterial,list,composeTree,{size:200});root.add(group);
   for(const mesh of group.children){mesh.geometry=far;lodBlocks.push({mesh,near,far,center:mesh.boundingSphere.center.clone(),radius:mesh.boundingSphere.radius});}
  }
- const lodDistance=mobile?80:130;
+ const lodDistance=lod;
  const houseMaterial=sceneryMaterial('house'),composeHouse=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);};
  if(houses.length)root.add(chunked('Casas',houseGeometry(false),houseMaterial,houses,composeHouse,{size:450}));
  if(flats.length)root.add(chunked('Predios',houseGeometry(true),houseMaterial,flats,composeHouse,{size:900}));

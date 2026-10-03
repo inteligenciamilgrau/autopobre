@@ -46,6 +46,9 @@ import {updatePeople,hitPeople,takePeopleEvents,tumbleInfo} from './pit-crew.js'
 import {TreeField} from './tree-contact.js';
 import {TvCamera} from './tv-camera.js';
 import {CinematicIntro} from './intro-cinematic.js';
+import {resolveGraphics,FrameLimiter,SHADOW_LEVELS,VIEW_DISTANCES,SCENERY_LEVELS,MIRROR_SIZES,GRAPHICS_LEVEL_NAMES,GRAPHICS_OPTIONS,DEBUG_OVERLAY_MODES,DEBUG_OVERLAY_CORNERS} from './graphics-settings.js';
+import {GraphicsPanel} from './graphics-panel.js';
+import {DebugOverlay} from './debug-overlay.js';
 const $=id=>document.getElementById(id);
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;let mobile;
 const preferences=new PlayerPreferences();
@@ -103,8 +106,6 @@ $('aiLevel').onchange=()=>{preferences.update({aiLevel:$('aiLevel').value});if(i
 // Breakdowns ("Abandonos"): taken at the next start too.
 $('retirements').checked=preferences.values.retirements;
 $('retirements').onchange=()=>{preferences.update({retirements:$('retirements').checked});if(immersive)immersive.field.retirements=preferences.values.retirements;};
-$('realisticWater').checked=preferences.values.realisticWater;
-$('realisticWater').onchange=()=>{preferences.update({realisticWater:$('realisticWater').checked});landscape?.setRealisticWater(preferences.values.realisticWater);};
 // Race length (both modes, every circuit), picked in the race settings or on the track screen: one
 // preference, taken at the next start, so a race under way keeps its own.
 for(const laps of [$('raceLaps'),$('tracksLaps')]){for(let n=LAPS.min;n<=LAPS.max;n++)laps.add(new Option(`${n} volta${n>1?'s':''}${n===LAPS.standard?' (padrão)':''}`,String(n)));laps.value=String(preferences.values.laps);
@@ -115,9 +116,15 @@ for(const laps of [$('raceLaps'),$('tracksLaps')]){for(let n=LAPS.min;n<=LAPS.ma
  pick.onchange=()=>{preferences.update({duelRival:pick.value});updateMenuLabels();};}
 $('classicInterior').checked=preferences.values.classicInterior;
 $('classicInterior').onchange=()=>{preferences.update({classicInterior:$('classicInterior').checked});if(ready)cabinVisibility();};
-// Film look level (cinematic.js): auto, full, lite or off.
-$('cinematicLevel').value=preferences.values.cinematic;
-$('cinematicLevel').onchange=()=>{preferences.update({cinematic:$('cinematicLevel').value});cinematic?.setLevel(cinematicLevel());};
+// Graphics (the Gráficos tab, graphics-settings.js): the values in force on this device, applied by
+// applyGraphics. sceneryBuilt is the scenery level the loaded circuit was built with.
+let graphics=resolveGraphics(preferences.values.graphics,{touch:touchDevice}),sceneryBuilt=null;
+const graphicsPanel=new GraphicsPanel({root:$('settings-graphics'),touch:touchDevice,graphics:preferences.values.graphics,onChange:value=>{preferences.update({graphics:value});applyGraphics();}});
+// The performance overlay (debug-overlay.js): the tab's two selects, and F3 cycles it.
+const debugOverlay=new DebugOverlay({renderer:()=>renderer,touch:touchDevice,lines:debugLines,target:()=>graphics.values.fpsLimit||60});
+for(const [id,key,choices] of [['debugMode','debugOverlay',DEBUG_OVERLAY_MODES],['debugPlace','debugCorner',DEBUG_OVERLAY_CORNERS]]){const select=$(id);for(const [value,label] of choices)select.add(new Option(label,value));select.onchange=()=>setDebugOverlay({[key]:select.value});}
+function setDebugOverlay(patch){preferences.update(patch);const {debugOverlay:shown,debugCorner:corner}=preferences.values;$('debugMode').value=shown;$('debugPlace').value=corner;debugOverlay.setMode(shown);debugOverlay.setCorner(corner);}
+setDebugOverlay({});
 // The opening menu picks the mode: Modo Corrida (free race) or Modo História (immersive).
 function chooseImmersive(value){
  preferences.update({immersive:value});if(ready)updateMenuLabels();
@@ -205,15 +212,61 @@ function updateRecordTvs(now){
 }
 function initializeRenderer(){
  if(renderer)return;
- renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:!touchDevice});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
- sky=createSky(renderer,scene,{mobile:touchDevice});
+ // The screen's own antialiasing serves the Simples film look; it is fixed when the page loads.
+ renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:graphics.values.antialias>0});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+ sky=createSky(renderer,scene,{mobile:SCENERY_LEVELS[graphics.values.scenery].mobile});
  // Film look: linear HDR scene, then occlusion, haze, bloom, lens and grade (cinematic.js).
- cinematic=createCinematic(renderer,{mobile:touchDevice,level:cinematicLevel()});cinematic.setSun(SUN_DIRECTION);
- cockpit=createCockpit(renderer);carBody.add(cockpit.root);if(touchDevice)cockpit.mirrorTarget.setSize(510,85);
+ cinematic=createCinematic(renderer,{mobile:touchDevice,level:cinematicLevel(),features:cinematicFeatures()});cinematic.setSun(SUN_DIRECTION);
+ cockpit=createCockpit(renderer);carBody.add(cockpit.root);
  // The door mirrors show the same picture of the road behind (side-mirrors.js).
  sideMirrors=new SideMirrors(cockpit.mirrorTarget.texture);
  skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
+ applyGraphics();
+}
+// The Gráficos tab's values on the renderer, the sun, the film look, the fog and the mirrors. All of
+// it takes effect at once except the scenery (built with the circuit: loadCircuit rebuilds it at the
+// next start) and the screen's own antialiasing (initializeRenderer).
+function applyGraphics(){
+ graphics=graphicsPanel.show(preferences.values.graphics);const g=graphics.values;
+ resolution.max=Math.min(devicePixelRatio,g.resolution);resolution.min=Math.min(resolution.max,touchDevice?.6:.7);resolution.dynamic=g.dynamicResolution;frameCap.limit=g.fpsLimit;
+ if(!renderer)return;
+ const wasOff=cinematic.level==='off',hadShadows=sun.castShadow;
+ if(Math.abs(renderer.getPixelRatio()-resolution.max)>.001){renderer.setPixelRatio(resolution.max);renderer.setSize(innerWidth,innerHeight,false);}
+ // Sun shadows: off, or a map of this size covering this much round the car (a new size is allocated at the next frame).
+ const shadow=SHADOW_LEVELS[g.shadows];sun.castShadow=renderer.shadowMap.enabled=!!shadow;
+ if(shadow){
+  const size=Math.min(shadow.size,renderer.capabilities.maxTextureSize);if(sun.shadow.mapSize.x!==size){sun.shadow.mapSize.set(size,size);sun.shadow.map?.dispose();sun.shadow.map=null;}
+  Object.assign(sun.shadow.camera,{left:-shadow.reach,right:shadow.reach,top:shadow.reach,bottom:-shadow.reach});sun.shadow.camera.updateProjectionMatrix();sun.shadow.radius=shadow.radius;
+ }
+ cinematic.setLevel(cinematicLevel());cinematic.setFeatures(cinematicFeatures());
+ const view=VIEW_DISTANCES[g.viewDistance];[scene.fog.near,scene.fog.far]=view.fog;camera.far=view.far;camera.updateProjectionMatrix();
+ // The cockpit mirror's picture; switched off it goes dark (the door mirrors hide).
+ const mirror=MIRROR_SIZES[g.mirrors];
+ if(mirror)cockpit.mirrorTarget.setSize(...mirror);else{renderer.setRenderTarget(cockpit.mirrorTarget);renderer.clear();renderer.setRenderTarget(null);}
+ sky.setDetail(SCENERY_LEVELS[g.scenery].mobile);
+ landscape?.setRealisticWater(g.water==='realista');
+ if(ready&&(wasOff!==(cinematic.level==='off')||hadShadows!==sun.castShadow))precompileGraphics();
+}
+// The Simples look (other tone mapping) and shadows on or off need every material's program again:
+// compiled the first time on the next frame, that froze the page for seconds. They compile in
+// parallel instead while the picture and the game hold (frame), and the tab says so.
+let graphicsCompiling=null;
+function precompileGraphics(){
+ const token=graphicsCompiling={};graphicsPanel.busy(true);
+ // Never held for good: after 8 s the picture comes back and whatever is left compiles as before.
+ Promise.race([cinematic.compile(scene,camera),new Promise(done=>setTimeout(done,8000))]).catch(err=>console.warn(err)).finally(()=>{if(graphicsCompiling!==token)return;graphicsCompiling=null;graphicsPanel.busy(false);});
+}
+const cinematicFeatures=()=>({ao:graphics.values.ao,lens:graphics.values.lens,motionBlur:graphics.values.motionBlur,samples:graphics.values.antialias});
+// The game's own lines in the full performance overlay.
+function debugLines(){
+ const g=graphics.values,c=cinematic?.info(),shadow=SHADOW_LEVELS[g.shadows],ratio=v=>v.toLocaleString('pt-BR',{maximumFractionDigits:2});
+ const rows=[['Gráficos',`${GRAPHICS_LEVEL_NAMES[graphics.level]}${graphics.auto?' (automático)':''}${graphics.changed.length?` · ${graphics.changed.length} ajuste${graphics.changed.length>1?'s':''} à mão`:''}`],
+  ['Densidade',`máx. ${ratio(resolution.max)}× · ${g.dynamicResolution?`dinâmica (mín. ${ratio(resolution.min)}×)`:'fixa'}${frameCap.limit?` · limite ${frameCap.limit} FPS`:''}`]];
+ if(c)rows.push(['Visual',c.level==='off'?'Simples':`${c.level==='full'?'Completo':'Leve'} · ${c.passes} passes · MSAA ${c.samples}×${c.ao?' · oclusão':''}${c.lens?' · lente':''}`]);
+ rows.push(['Sombras',shadow&&renderer?`${sun.shadow.mapSize.x} px · ${shadow.reach} m`:'desligadas'],['Visão',`neblina até ${scene.fog?.far??'-'} m · ${GRAPHICS_OPTIONS.water.choices.find(([v])=>v===g.water)[1].toLowerCase()} nos lagos`]);
+ if(ready)rows.push(['Cenário',`${GRAPHICS_OPTIONS.scenery.choices.find(([v])=>v===sceneryBuilt)?.[1]??'-'} · ${landscape?.stats.trees??0} árvores · ${(immersive?.visual?.rivals?.length??0)+1} carros`],['Pista',`${circuit.name} · câmera ${$('camera').querySelector(`option[value="${mode}"]`)?.textContent??mode}`]);
+ return rows;
 }
 const carAudio=new CarAudio();
 // Each channel keeps its level while silenced: the slider stays put, dimmed, and says so.
@@ -643,21 +696,24 @@ intro.onEnd=kind=>{
  camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();followInitialized=false;
  if(introHidden){for(const o of introHidden)o.visible=true;introHidden=null;}
 };
-// Visual quality: ?cinema=full|lite|off overrides the saved choice; 'auto' is lite on phones.
-function cinematicLevel(){const asked=new URLSearchParams(window.location.search).get('cinema')??preferences.values.cinematic;return ['full','lite','off'].includes(asked)?asked:touchDevice?'lite':'full';}
+// Film look: the Gráficos tab's choice; ?cinema=full|lite|off overrides it for one visit.
+function cinematicLevel(){const asked=new URLSearchParams(window.location.search).get('cinema');return ['full','lite','off'].includes(asked)?asked:graphics.values.post;}
 // The haze thins with height above the circuit's mean ground level.
 let hazeData=null,hazeLevel=0;
 function hazeBase(){if(hazeData!==data){hazeData=data;const z=data?.terrain?.z;hazeLevel=z?.length?z.reduce((a,b)=>a+b,0)/z.length:0;}return hazeLevel;}
 let accumulator=0,lastHud=0,renderedFrame=0,mirrorFrame=0,frameImpact=0;
 // Time since the last 1/120 s physics step: cars are drawn where they are at this frame.
 const renderAhead=()=>clamp(accumulator,0,1/120);
-// Adaptive resolution: slower GPUs trade sharpness for a steady frame rate.
-const resolution={max:Math.min(devicePixelRatio,touchDevice?1:1.5),min:touchDevice?.6:.7,frame:1/60,timer:0};
+// Adaptive resolution: slower GPUs trade sharpness for a steady frame rate, between the Gráficos
+// tab's pixel density (max) and a floor; it aims at the tab's FPS limit, or 60.
+const resolution={max:Math.min(devicePixelRatio,graphics.values.resolution),min:touchDevice?.6:.7,dynamic:true,frame:1/60,timer:0};
 function adaptResolution(rawDt){
- if(rawDt>.25)return;resolution.frame+=(rawDt-resolution.frame)*.05;resolution.timer+=rawDt;if(resolution.timer<1.5)return;resolution.timer=0;
- const current=renderer.getPixelRatio(),next=resolution.frame>1/42?Math.max(resolution.min,current-.1):resolution.frame<1/56?Math.min(resolution.max,current+.05):current;
+ if(rawDt>.25||!resolution.dynamic)return;resolution.frame+=(rawDt-resolution.frame)*.05;resolution.timer+=rawDt;if(resolution.timer<1.5)return;resolution.timer=0;
+ const target=1/(frameCap.limit||60),current=renderer.getPixelRatio(),next=resolution.frame>target*1.43?Math.max(resolution.min,current-.1):resolution.frame<target*1.07?Math.min(resolution.max,current+.05):current;
  if(Math.abs(next-current)>.001){renderer.setPixelRatio(next);renderer.setSize(innerWidth,innerHeight,false);}
 }
+// The Gráficos tab's FPS limit (graphics-settings.js FrameLimiter).
+const frameCap=new FrameLimiter();
 function updateCountdown(){const count=immersive?.active?(immersive.state.phase==='grid'?Math.max(1,Math.ceil(immersive.state.countdown)):0):Math.ceil(immersive?.freeCountdown||0),go=immersive?.goTime>0;const visible=sessionStarted&&!paused&&(count>0||go);$('raceCountdown').hidden=!visible;if(visible){const label=count>0?String(count):'VAI!';if($('countdownNumber').textContent!==label){$('countdownNumber').textContent=label;$('countdownCaption').textContent=count>0?'PREPARE-SE':'BOA CORRIDA!';}}}
 // Crossing the line: one line at the top of the screen with the lap just run and how far it is
 // from the best lap before it (minus: faster, green; plus: slower, red), for a few seconds. The
@@ -681,25 +737,29 @@ function lapBanner(dt){
  bestBefore=car.best;
  if(lapShown>0){lapShown-=dt;if(lapShown<=0)banner.hidden=true;}
 }
-function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.poll(dt);multiplayer?.frame(dt);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);if(renderer&&!sessionStarted&&!$('cars').classList.contains('hidden'))carSelect.render(renderer,dt);return;}
+function frame(now=performance.now()){requestAnimationFrame(frame);if(frameCap.skip(now))return;if(graphicsCompiling){clock.getDelta();return;}debugOverlay.begin(now);try{runFrame();}finally{debugOverlay.end();}}
+// One frame of the game: controls, physics steps, people, cameras and the picture.
+function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.poll(dt);multiplayer?.frame(dt);mobile?.update(paused,pitstop?.coffee?'crowd':immersive?.active?immersive.state.phase:'race');if(touchDevice)document.body.classList.toggle('can-look-back',lookBackAllowed());updateCountdown();if(!ready||!sessionStarted){carAudio.updateScene({},[],dt);if(renderer&&!sessionStarted&&!$('cars').classList.contains('hidden'))carSelect.render(renderer,dt);return;}
  renderedFrame++;if(!paused&&!document.hidden)adaptResolution(rawDt);
  if(intro.active&&automatic)intro.stop();
  if(intro.active&&!immersive.active&&immersive.freeCountdown>0){immersive.freeCountdown=3;$('raceCountdown').hidden=true;}
- // In a multiplayer race the result waits while other humans still race (multiplayer.js holdResults).
+ // In a multiplayer race the result waits while other humans still race (multiplayer.js holdResults),
+ // and the whole race stands still while its host is out of reach (frozen: no step, no engine sound).
  if(!immersive.active&&immersive.freeResultReady&&!paused&&!multiplayer?.holdResults()){accumulator=0;recordChampionshipRound();menu(true);}
+ const frozen=!!multiplayer?.frozen();if(frozen)accumulator=0;
  // The sound is heard from the rival the recon lap watches (N), otherwise from the player's car.
  const heard=watchedRival()?.car??car;
  if(automatic&&!paused&&(mobile?.throttle||mobile?.brake||mobile?.steering||gamepad.driving))takeWheel();
- if(!paused){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
+ if(!paused&&!frozen){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
- tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[1.2,5.5]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused?0:dt,renderer.domElement.height);if(!paused)for(const r of immersive?.rivals??[])if(r.broken?.smokeLeft>0)tyreSmoke.plume(r.car,dt);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
+ tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[1.2,5.5]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused||frozen?0:dt,renderer.domElement.height);if(!paused&&!frozen)for(const r of immersive?.rivals??[])if(r.broken?.smokeLeft>0)tyreSmoke.plume(r.car,dt);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
  const skid=skidMarks.wheels.reduce((sum,w)=>sum+w.strength,0)/4;
  // The same command drives the engine sound and the driver's hands and feet.
  const driveCommand=pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input();
  const rivalSound=heard!==car?immersive.rivalSound(heard):null;
  brakeLamps.userData.set(model?.visible&&!driveCommand.engineOff?driveCommand.brake:0);
- carAudio.update(heard,rivalSound?.command??driveCommand,rivalSound?.skid??skid,paused,mode);
+ carAudio.update(heard,rivalSound?.command??driveCommand,rivalSound?.skid??skid,paused||frozen,mode);
  carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
  // A watched rival is posed by immersive.update below: its camera follows after that.
@@ -729,7 +789,8 @@ function frame(){requestAnimationFrame(frame);const rawDt=clock.getDelta(),dt=Ma
  // Render the reflection from this frame's car pose before displaying the cockpit.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
  const watchedCar=watchedRival();
- if(mode==='cockpit'&&!gridPreview()&&!watchedCar){
+ // Mirrors switched off in the Gráficos tab skip this extra pass.
+ if(mode==='cockpit'&&!gridPreview()&&!watchedCar&&MIRROR_SIZES[graphics.values.mirrors]){
   // The mirror sees the road behind, not the body round it (the classic view hides it anyway).
   const bodyShown=!!model?.visible;cockpit.root.visible=false;driver.root.visible=false;if(model)model.visible=false;
   cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carBody.matrixWorld);
@@ -846,7 +907,15 @@ function renderTracks(){
  }
  renderChampionshipPanel($('tracks'),championshipFor());
 }
-const openSettings=setupSettings(()=>{menu(true);showRoster();},returnToMainMenu);
+// The Gráficos tab's pixel sizes follow the window: refreshed whenever the settings open.
+const openSettings=setupSettings(()=>{menu(true);showRoster();graphicsPanel.show(preferences.values.graphics);},returnToMainMenu);
+// For checks: the graphics in force and what the renderer really uses; set() takes {level, overrides}.
+window.interlagosGraficos={
+ info:()=>({...graphics,stored:structuredClone(preferences.values.graphics),pixelRatio:renderer?.getPixelRatio()??null,resolution:{max:resolution.max,min:resolution.min,dynamic:resolution.dynamic},fpsLimit:frameCap.limit,
+  shadow:{cast:sun.castShadow,enabled:!!renderer?.shadowMap.enabled,size:sun.shadow.mapSize.x,reach:sun.shadow.camera.right,radius:sun.shadow.radius},fog:scene.fog?[scene.fog.near,scene.fog.far]:null,far:camera.far,
+  compiling:!!graphicsCompiling,mirror:cockpit?[cockpit.mirrorTarget.width,cockpit.mirrorTarget.height]:null,cinematic:cinematic?(({look,...rest})=>rest)(cinematic.info()):null,scenery:sceneryBuilt,water:landscape?.waterInfo().realistic??null,debug:debugOverlay.info()}),
+ set:value=>{preferences.update({graphics:value});applyGraphics();return window.interlagosGraficos.info();}
+};
 // Championship (championship.js): one per mode and calendar (Todas as pistas, Old Stock 2026), the
 // panel's tab picks the calendar (remembered). championshipRace is the round on track; storyRound, a
 // Modo História round already scored that the judge can still disqualify and whose next vaquinha is
@@ -886,6 +955,8 @@ function padStatus(pad){
  if(!sessionStarted)return;const shown=pad.connected?`${text} · RT acelera, LT freia`:odd?text:'Controle desconectado';status(shown);setTimeout(()=>{if($('status').textContent===shown)status('');},4000);
 }
 document.addEventListener('keydown',e=>{
+ // F3 cycles the performance overlay (off, FPS, full) anywhere, menus and dialogs included.
+ if(e.code==='F3'){e.preventDefault();if(!e.repeat)setDebugOverlay({debugOverlay:{off:'fps',fps:'full',full:'off'}[preferences.values.debugOverlay]});return;}
  if(lapRecords.dialog.open||championshipDialog.dialog.open)return;
  if(pitstop?.opened&&!$('settings').open){if(e.code==='Escape')openSettings();else if(e.code==='KeyP')hold(!held);else if(!paused){if(pitstop.coffee&&['KeyW','KeyA','KeyS','KeyD','ArrowUp','ArrowDown','ArrowLeft','ArrowRight'].includes(e.code)){e.preventDefault();keys.add(e.code);}if(!e.repeat&&pitstop.handleKey(e.code))e.preventDefault();}return;}
  if($('settings').open){if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}return;}
@@ -1048,13 +1119,15 @@ function clearCircuit(){
  window.interlagos={ready:false,audioInfo:()=>carAudio.info()};
 }
 async function loadCircuit(){
- const reuse=ready&&loadedCircuit===circuit.id;
+ const reuse=ready&&loadedCircuit===circuit.id&&sceneryBuilt===graphics.values.scenery;
  loading=true;ready=false;if(window.interlagos)window.interlagos.ready=false;$('start').disabled=true;$('storyStart').disabled=true;$('singleRace').disabled=$('soloRace').disabled=$('duelRace').disabled=true;$('championshipStart').disabled=true;$('tour').disabled=true;$('livery').disabled=true;
  for(const button of document.querySelectorAll('[data-circuit]'))button.disabled=true;
  updateMenuLabels();
  try{
  if(reuse){if(activeLivery!==$('livery').value)await setLivery($('livery').value);ready=true;window.interlagos.ready=true;$('skinButton').disabled=false;return true;}
  initializeRenderer();clearCircuit();showCircuitSelection();
+ // The Gráficos tab's scenery level (graphics-settings.js): taken now, a change waits for the next start.
+ const sceneryLevel=graphics.values.scenery,scenery=SCENERY_LEVELS[sceneryLevel];
 
  // Track files live in dados/, beside teste/ here and beside index.html once published (preparar_publicacao.py).
  data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/'+(circuit.data??'pista.json'))).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);
@@ -1062,16 +1135,16 @@ async function loadCircuit(){
  if(!driver){driver=await createDriver(cockpit);carBody.add(driver.root);}
  terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];
  if(circuit.id==='curvelo'){
-  const groundMaterial=terrainMaterial(terrainTextures,landscapeField,{mobile:touchDevice});groundMaterial.userData.terrain=true;
+  const groundMaterial=terrainMaterial(terrainTextures,landscapeField,{mobile:scenery.mobile});groundMaterial.userData.terrain=true;
   standTops=flattenStatic(createCurveloScene(data,roadSurface,{groundMaterial,gravelMap:terrainTextures.gravel}));
-  landscape=createLandscape({data,field:landscapeField,mobile:touchDevice,style:'cerrado'});
+  landscape=createLandscape({data,field:landscapeField,mobile:scenery.mobile,density:scenery.density,lod:scenery.lod,style:'cerrado'});
  }else if(data.scenery){
   // Cascavel, ECPA: terrain, asphalt and gantry from the open-data track file (open-circuit.js);
   // woods from the land-cover grid and the real building footprints (landscape.js).
   const groundFit=fitGround(data);
-  const open=await createOpenCircuit(data,roadSurface,{heights:groundFit.heights,textures:terrainTextures,field:landscapeField,groundUrl:circuit.ground,label:`${circuit.track} · AUTO-POBRE RACING`,mobile:touchDevice});
+  const open=await createOpenCircuit(data,roadSurface,{heights:groundFit.heights,textures:terrainTextures,field:landscapeField,groundUrl:circuit.ground,label:`${circuit.track} · AUTO-POBRE RACING`,mobile:scenery.mobile});
   scene.add(open.root);cameraObstacles.push(...open.obstacles);
-  landscape=createLandscape({data,field:landscapeField,cover:data.scenery.cover,buildings:data.scenery.buildings,cityAngle:data.meta.city_angle??Math.PI/2,mobile:touchDevice,style:'urban'});
+  landscape=createLandscape({data,field:landscapeField,cover:data.scenery.cover,buildings:data.scenery.buildings,cityAngle:data.meta.city_angle??Math.PI/2,mobile:scenery.mobile,density:scenery.density,lod:scenery.lod,style:'urban'});
   const stands=createGrandstands(data,terrainTextures,(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y));scene.add(stands.root);cameraObstacles.push(...stands.obstacles);standTops=stands.rows;
   Object.assign(landscape.stats,{ground:groundFit.stats,stands:stands.stats,circuit:open.stats});
  }else{
@@ -1079,18 +1152,18 @@ async function loadCircuit(){
   // The orthophoto stays as land-cover data and far-distance colour; close up it becomes grass, woods, paving and water.
   // The ground is the one the car drives on, lowered wherever it would rise through asphalt, kerbs, pit floors or stands.
   const groundFit=fitGround(data);
-  track.scene.traverse(o=>{if(!o.isMesh||o.material?.name!=='GeoSampa_Ortofoto_2020')return;const photo=o.material;ortho=readOrtho(photo.map,o.geometry);if(!applyGroundHeights(o.geometry,data,groundFit.heights))console.warn('Terreno do GLB fora da grade de pista.json; relevo sem ajuste.');o.material=terrainMaterial(terrainTextures,landscapeField,{ortho:photo.map,mobile:touchDevice});o.material.userData.terrain=true;photo.map=null;photo.dispose();});
+  track.scene.traverse(o=>{if(!o.isMesh||o.material?.name!=='GeoSampa_Ortofoto_2020')return;const photo=o.material;ortho=readOrtho(photo.map,o.geometry);if(!applyGroundHeights(o.geometry,data,groundFit.heights))console.warn('Terreno do GLB fora da grade de pista.json; relevo sem ajuste.');o.material=terrainMaterial(terrainTextures,landscapeField,{ortho:photo.map,mobile:scenery.mobile});o.material.userData.terrain=true;photo.map=null;photo.dispose();});
   // Lakes come out of the orthophoto: their beds, already dug in the physics ground, are dug into the
   // visible terrain too, before flattenStatic copies it into the static batches.
-  landscape=createLandscape({data,field:landscapeField,ortho,mobile:touchDevice});
+  landscape=createLandscape({data,field:landscapeField,ortho,mobile:scenery.mobile,density:scenery.density,lod:scenery.lod});
   if(landscape.digLakeBeds(groundFit.heights))track.scene.traverse(o=>{if(o.material?.userData.terrain)applyGroundHeights(o.geometry,data,groundFit.heights);});
-  if(landscape.stats.water){lakeContact=new LakeContact({water:landscape.water,mobile:touchDevice,onSound:(name,options)=>carAudio.effect(name,options)});scene.add(lakeContact.mesh);}
+  if(landscape.stats.water){lakeContact=new LakeContact({water:landscape.water,mobile:scenery.mobile,onSound:(name,options)=>carAudio.effect(name,options)});scene.add(lakeContact.mesh);}
   const legacyStands=flattenStatic(track.scene).length;
   const stands=createGrandstands(data,terrainTextures,(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y));scene.add(stands.root);cameraObstacles.push(...stands.obstacles);standTops=stands.rows;
   Object.assign(landscape.stats,{ground:groundFit.stats,stands:stands.stats,legacyStands});
  }
  scene.add(landscape.root);
- const crowd=createCrowd(standTops,{mobile:touchDevice});scene.add(crowd.root);landscape.stats.fans=crowd.count;await ensureCarModel();
+ const crowd=createCrowd(standTops,{mobile:scenery.mobile});scene.add(crowd.root);landscape.stats.fans=crowd.count;await ensureCarModel();
  const guardrails=createGuardrails(data);scene.add(guardrails.root);cameraObstacles.push(guardrails.rails);
  scene.add(createCurbs(data));
  // Surveyed pit lane: entry after the Cafe, garages, exit around the S do Senna.
@@ -1106,7 +1179,7 @@ async function loadCircuit(){
  tvCamera=new TvCamera(data,trackside.towers,(x,y,i)=>{tvProbe.index=i;return tvProbe.sample(x,y).z;},tvObstacles);
  landscape.clearAround(tvCamera.cameras.filter(c=>!c.tower).map(c=>({x:c.position.x,y:-c.position.z,r:3.5})));
  // The trees left standing are posts the Opala can hit.
- treeField=new TreeField(landscape.trunks(),{mobile:touchDevice});scene.add(treeField.points);car.posts=treeField;
+ treeField=new TreeField(landscape.trunks(),{mobile:scenery.mobile});scene.add(treeField.points);car.posts=treeField;
  restBodyPose();
  carLivery.clear();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
@@ -1122,7 +1195,7 @@ async function loadCircuit(){
  // Box 99: Curvelo's service lane, or the surveyed garage at Interlagos.
  if(circuit.id==='curvelo'||pitLayout)pitstop=new PitStop({scene,car,carRoot,driver,mode:immersive,data,roadSurface,layout:pitLayout,obstacles:cameraObstacles,openings,onOpen:()=>{automatic=false;keys.clear();mobile?.clear();mobile?.setHandbrake(false);setCameraMode('chase');if(document.pointerLockElement)document.exitPointerLock();},onClose:()=>{keys.clear();mobile?.clear();followInitialized=false;},onSettings:openSettings});
  pitstop?.setDamage(preferences.values.damage);
- landscape.setRealisticWater(preferences.values.realisticWater);
+ landscape.setRealisticWater(graphics.values.water==='realista');
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');
  // Car 70's Old Stock ads sit on its doors, bent onto the body.
  oldStockMaterial=new THREE.MeshStandardMaterial({map:branding.oldStock,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
@@ -1131,7 +1204,7 @@ async function loadCircuit(){
  // Compile the new programs while the loading label is still shown, instead of
  // freezing the first race frame (D3D shader compilation is slow on Windows).
  updateCar(1);updateCamera(1);landscape.revealWaves(true);try{await cinematic.compile(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}finally{landscape.revealWaves(false);}
- ready=true;loadedCircuit=circuit.id;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;
+ ready=true;loadedCircuit=circuit.id;sceneryBuilt=sceneryLevel;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;
  window.interlagos={ready:true,circuit:circuit.id,car,renderAhead,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
   immersiveInfo:()=>immersive.info(),pitInfo:()=>pitstop?.info()??null,
   audioInfo:()=>carAudio.info(),mobileInfo:()=>({enabled:touchDevice,steering:mobile?.steering??0,throttle:mobile?.throttle??0,brake:mobile?.brake??0,pressed:[...(mobile?.pressed??[])],pixelRatio:renderer.getPixelRatio()}),gamepadInfo:()=>({connected:gamepad.connected,name:gamepad.connected?gamepad.name:'',steering:gamepad.steering,throttle:gamepad.throttle,brake:gamepad.brake,held:[...gamepad.held],rumble:gamepad.rumble,curve:gamepad.curve}),
