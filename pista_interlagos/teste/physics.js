@@ -129,7 +129,7 @@ export class TestCar {
  resetGrid({back=GRID_START_BACK,lane=0}={}){const target=this.data.meta.reconstructed_xy_m-back;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));if(lane){this.x+=this.surface.lx*lane;this.y+=this.surface.ly*lane;this.settle();}this.awaitingStart=true;}
  reset(index=0){this.awaitingStart=false;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.shifts=0;this.rightings=0;this.rightedAt=null;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.beforeCross=null;this.recover(index);}
  // Put the car back at rest on the centre line, keeping its clock, laps and race progress.
- recover(index=this.index){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.rpm=IDLE_RPM;this.shiftTimer=0;this.longAccel=0;this.latAccel=0;this.crashImpactSpeed=0;this.settle();}
+ recover(index=this.index){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.manualGear=false;this.rpm=IDLE_RPM;this.shiftTimer=0;this.longAccel=0;this.latAccel=0;this.crashImpactSpeed=0;this.settle();}
  // Seat the body on its wheels at the current position and heading: level with
  // the ground under the four tyres, and clear of any bank under the body.
  settle(){
@@ -238,9 +238,10 @@ export class TestCar {
   const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
   const condition=this.condition?.factors,grounded=this.wheelsDown>0;
   const loose=!p.onRoad,mu=(p.onRoad?(input.handbrake?.99:ROAD_GRIP):GRASS_GRIP)*(condition?.grip??1);
-  // Smooth the driver's input, then scale it to the lock available at this speed.
+  // Smooth the driver's input, then scale it to the lock available at this speed. A racing wheel
+  // (input.wheel) is already where the driver's hands put it: it turns the wheels at once.
   const command=clamp(input.left-input.right,-1,1),inputResponse=command*(this.steerInput??0)<0?20:12;
-  this.steerInput=(this.steerInput??0)+(command-(this.steerInput??0))*(1-Math.exp(-dt*inputResponse));
+  this.steerInput=input.wheel?command:(this.steerInput??0)+(command-(this.steerInput??0))*(1-Math.exp(-dt*inputResponse));
   // With the tail out, steering against the slide gets extra lock up to the
   // slide angle, and castor already turns the wheels part of the way.
   const drift=v>3?Math.atan2(lat-REAR_AXLE*this.yaw,v):0,baseSteer=this.steerInput*steerLimit(speed)*(condition?.steering??1);
@@ -250,13 +251,20 @@ export class TestCar {
   this.steerVisual=this.steerInput*MAX_STEER*(condition?.steering??1)/(1+speed/28)+this.steer-baseSteer;
   // Deliberate low-speed stunt assist: hold + throttle spins the driven rear
   // tyres; steering allows a tight powered circle. Ordinary driving is unchanged.
-  const burning=!!(input.handbrake&&input.throttle&&!input.reverse&&p.onRoad&&speed<12&&this.wheelsDown===4);
+  // The player's own gear (Câmbio manual: -1 reverse, 0 neutral, 1-5); without it the gearbox is automatic.
+  const manual=Number.isInteger(input.gear)&&input.gear>=-1&&input.gear<=5;this.manualGear=manual;
+  const burning=!!(input.handbrake&&input.throttle&&!input.reverse&&!(manual&&input.gear<1)&&p.onRoad&&speed<12&&this.wheelsDown===4);
   this.burnout=(this.burnout??0)+((burning?input.throttle:0)-(this.burnout??0))*(1-Math.exp(-dt*(burning?3:input.throttle?2:7)));
   const turn=clamp(this.steerInput/(1+speed/28),-1,1);
-  // --- Engine and five-speed gearbox (automatic, with a short torque cut per shift).
+  // --- Engine and five-speed gearbox (automatic, or the player's), with a short torque cut per shift.
+  // Q (input.reverse) backs up in either; a manual gear is engaged as soon as it is asked for (an H
+  // lever thrown too low over-revs: the engine brakes hard but takes no harm).
   const kmh=Math.abs(v)*3.6,power=(this.engineScale??1)*(condition?.power??1);
   this.shiftTimer=Math.max(0,(this.shiftTimer??0)-dt);
   if(input.reverse)this.gear=-1;
+  else if(manual){
+   if(input.gear!==this.gear){if(this.gear>0&&input.gear>0)this.shiftTimer=SHIFT_TIME*(input.gear>this.gear?1:.6);this.gear=input.gear;this.shifts=(this.shifts??0)+1;}
+  }
   else{
    if(!(this.gear>0))this.gear=1;
    if(this.shiftTimer===0){
@@ -267,17 +275,23 @@ export class TestCar {
   const ratio=GEAR_RPM_PER_KMH[Math.max(1,this.gear)],wheelRpm=kmh*ratio;
   // The clutch slips at launch, so the engine can sit in its torque band from rest.
   const engineRpm=Math.max(wheelRpm,this.gear===1?IDLE_RPM+input.throttle*2600:IDLE_RPM);
+  // A wheel's clutch pedal (manual only): the drive fades out from a quarter of its travel to 85%;
+  // neutral drives nothing. The automatic is always engaged.
+  const engaged=!manual||input.reverse?1:this.gear===0?0:clamp((.85-(input.clutch||0))/.6,0,1);
   let drive=0;
   if(this.gear>0){
    drive=input.throttle*engineTorque(Math.min(engineRpm,REDLINE_RPM))*ratio*TORQUE_TO_ACCEL*power;
    if(wheelRpm>=REDLINE_RPM)drive=0;
    if(this.shiftTimer>0)drive*=.12;
+   drive*=engaged;
   }
   // Pit lane: no limiter. Beyond the painted limit the driver answers for it:
   // speeding there costs the lap, like cutting the track.
   const limit=pitLimit(this.pitGeo,p);this.limiter=limit!==null;
   if(limit!==null&&speed>limit+PIT_TOLERANCE){if(this.lapValid)this.pitPenalty={kmh:speed*3.6,clock:this.clock};this.lapValid=false;this.invalidReason='pit';}
-  if(input.reverse)drive-=3*(condition?.power??1);
+  // Reverse: Q backs up at once; the manual's R gear backs up with the throttle.
+  const back=input.reverse?1:manual&&this.gear<0?input.throttle*engaged:0;
+  if(back)drive-=3*back*(condition?.power??1);
   // Rear-wheel drive: acceleration moves load onto the rear axle, and a
   // traction limiter keeps the driven tyres just past the peak of grip.
   // Unloaded rear tyres (a crest, a jump) have nothing to push against; climbing
@@ -286,12 +300,14 @@ export class TestCar {
   let wheelspin=0;
   // Loose ground still takes some push from spinning tyres.
   if(!burning&&drive>traction){wheelspin=drive-traction;drive=traction+(p.onRoad?0:wheelspin*.55*rearGrip);}
-  this.rearSlipSpeed=Math.max(this.burnout*20,p.onRoad&&speed<30&&grounded?clamp(wheelspin*1.4,0,7):0,grounded?0:input.throttle*(this.gear>0)*9);
-  this.rpm=this.gear<0?IDLE_RPM+Math.abs(v)*3.6*110+input.reverse*400:clamp(engineRpm+this.rearSlipSpeed*3.6*ratio*.6+(burning?input.throttle*3500:0),IDLE_RPM,REDLINE_RPM+80);
+  this.rearSlipSpeed=Math.max(this.burnout*20,p.onRoad&&speed<30&&grounded?clamp(wheelspin*1.4,0,7):0,grounded?0:input.throttle*(this.gear>0)*engaged*9);
+  this.rpm=this.gear<0?IDLE_RPM+Math.abs(v)*3.6*110+back*400:clamp(engineRpm+this.rearSlipSpeed*3.6*ratio*.6+(burning?input.throttle*3500:0),IDLE_RPM,REDLINE_RPM+80);
+  // Declutched or in neutral the engine revs free, up to its limiter.
+  if(engaged<1)this.rpm=this.rpm*engaged+(IDLE_RPM+input.throttle*(REDLINE_RPM-IDLE_RPM))*(1-engaged);
   // --- Longitudinal forces.
   // Turf rolls harder than asphalt; beyond that, grip, bumps and slopes slow a car on grass.
   const rolling=p.onRoad?.16:GRASS_ROLLING;
-  const engineBrake=this.gear>0&&input.throttle<.05&&this.shiftTimer===0&&Math.abs(v)>1?.18+.5*clamp(wheelRpm/REDLINE_RPM,0,1):0;
+  const engineBrake=this.gear>0&&input.throttle<.05&&this.shiftTimer===0&&Math.abs(v)>1?(.18+.5*clamp(wheelRpm/REDLINE_RPM,0,1))*engaged:0;
   // Brakes cannot exceed the tyres: on grass the car simply cannot stop as hard.
   const brakeDecel=Math.min(Math.max(input.brake*11*(condition?.brakes??1),input.handbrake&&!burning?7:0),mu*G*1.02);
   // --- Combined grip: longitudinal work leaves less of each axle's tyres for

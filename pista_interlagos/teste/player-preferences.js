@@ -1,6 +1,7 @@
 import {circuitId} from './circuits.js';
 import {DUEL_DEFAULT,carEntry,AI_LEVELS,PLAYER_CAR_DEFAULT,CAR_MODELS,CAR_MODEL_DEFAULT} from './race-roster.js';
 import {normalizeGraphics,DEBUG_OVERLAY_MODES,DEBUG_OVERLAY_CORNERS} from './graphics-settings.js';
+import {WHEEL_LOCKS,WHEEL_LOCK_DEFAULT} from './wheel-controls.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
 // 'tv' films from the trackside towers and verge cameras (tv-camera.js).
 // Race length in laps, for the free race and the story alike, on every circuit.
@@ -42,7 +43,11 @@ export function normalizePreferences(value){
   ghost:typeof source.ghost==='boolean'?source.ghost:false,
   // Xbox / PlayStation controller (gamepad-controls.js): how the left stick steers, and the shake on impacts.
   padSteering:['suave','normal','direta'].includes(source.padSteering)?source.padSteering:'normal',
-  padRumble:typeof source.padRumble==='boolean'?source.padRumble:true
+  padRumble:typeof source.padRumble==='boolean'?source.padRumble:true,
+  // Câmbio (the Controles tab): automatic unless the player shifts the gears (manual-gearbox.js).
+  gearbox:['automatico','manual'].includes(source.gearbox)?source.gearbox:'automatico',
+  // A racing wheel's full lock in the game, in degrees from one side to the other (wheel-controls.js).
+  wheelLock:WHEEL_LOCKS.includes(source.wheelLock)?source.wheelLock:WHEEL_LOCK_DEFAULT
  };
 }
 function browserStorage(){try{return globalThis.localStorage;}catch{return null;}}

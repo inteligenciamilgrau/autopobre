@@ -1,7 +1,8 @@
 import {clamp,GEAR_RPM_PER_KMH,SHIFT_UP_RPM,SHIFT_DOWN_RPM} from './physics.js';
 
 // What the seated driver does with the car's controls. The gearbox itself is
-// automatic (physics.js); this only choreographs a human hand and feet around it.
+// automatic (physics.js), or the player's (Câmbio manual); this only choreographs
+// a human hand and feet around it.
 
 // H gate: lane -1 left, 0 centre, 1 right; throw +1 forward, -1 back.
 export const GATE=Object.freeze({'-1':[1,-1],1:[-1,1],2:[-1,-1],3:[0,1],4:[0,-1],5:[1,1]});
@@ -43,17 +44,20 @@ export class DriverControls{
   this.throttle=0;this.brake=0;this.footOnBrake=0;
   this.lastKmh=null;this.kmhRate=0;this.anticipate=0;this.cooldown=0;this.linger=0;this.shifts=0;
  }
- // state: throttle, brake, handbrake, gear (physics), kmh; returns the pose of controls and limbs.
+ // state: throttle, brake, handbrake, gear (physics), kmh, manual (the player shifts), clutch (a wheel's
+ // pedal); returns the pose of controls and limbs.
  update(state,dt){
   dt=Math.max(0,dt||0);if(dt===0)return this.info();
-  const kmh=Math.abs(state.kmh??0),throttle=clamp(state.throttle??0,0,1),brake=clamp(state.brake??0,0,1),pulling=(state.handbrake??0)>0;
-  const g=Number.isInteger(state.gear)&&state.gear!==0?state.gear:this.visualGear;
-  // A driver hears the engine climb or fall towards the change point before it arrives.
+  const kmh=Math.abs(state.kmh??0),throttle=clamp(state.throttle??0,0,1),brake=clamp(state.brake??0,0,1),pulling=(state.handbrake??0)>0,pedal=clamp(state.clutch??0,0,1);
+  // The player's neutral puts the lever in the middle of the gate.
+  const g=Number.isInteger(state.gear)&&(state.gear!==0||state.manual)?state.gear:this.visualGear;
+  // A driver hears the engine climb or fall towards the change point before it arrives
+  // (the automatic's; the player's own changes come unannounced).
   if(this.lastKmh!==null)this.kmhRate=approach(this.kmhRate,(kmh-this.lastKmh)/dt,8,dt);
   this.lastKmh=kmh;
   let soon=Infinity;
-  if(g>0&&g<5&&throttle>.3&&this.kmhRate>1)soon=(SHIFT_UP_RPM/GEAR_RPM_PER_KMH[g]-kmh)/this.kmhRate;
-  if(g>1&&this.kmhRate<-1)soon=Math.min(soon,(kmh-(SHIFT_DOWN_RPM+(brake>.3?700:0))/GEAR_RPM_PER_KMH[g])/-this.kmhRate);
+  if(!state.manual&&g>0&&g<5&&throttle>.3&&this.kmhRate>1)soon=(SHIFT_UP_RPM/GEAR_RPM_PER_KMH[g]-kmh)/this.kmhRate;
+  if(!state.manual&&g>1&&this.kmhRate<-1)soon=Math.min(soon,(kmh-(SHIFT_DOWN_RPM+(brake>.3?700:0))/GEAR_RPM_PER_KMH[g])/-this.kmhRate);
   this.cooldown=Math.max(0,this.cooldown-dt);
   if(soon>-.05&&soon<ANTICIPATE&&this.cooldown===0)this.anticipate=Math.max(this.anticipate,.6);
   else if(this.anticipate>0){this.anticipate=Math.max(0,this.anticipate-dt);if(this.anticipate===0)this.cooldown=.6;}
@@ -71,10 +75,11 @@ export class DriverControls{
   const shifting=!!this.shift||needShift&&this.hand.to==='knob';
   const standing=kmh<4&&throttle<.05,handbrakeTurn=pulling&&kmh>10;
   const pressClutch=shifting&&this.hand.t>.5||standing||handbrakeTurn;
-  if(pressClutch||this.anticipate>0||this.clutch>.02)this.leftLinger=.45;else this.leftLinger=Math.max(0,this.leftLinger-dt);
+  if(pressClutch||this.anticipate>0||this.clutch>.02||pedal>.02)this.leftLinger=.45;else this.leftLinger=Math.max(0,this.leftLinger-dt);
   this.leftFoot=toward(this.leftFoot,this.leftLinger>0?1:0,dt/.12);
   if(pressClutch&&this.leftFoot>.85){this.clutch=approach(this.clutch,1,24,dt);this.slowRelease=standing;}
-  else if(!pressClutch)this.clutch=Math.max(0,approach(this.clutch,-.02,this.slowRelease?3.5:10,dt));
+  // (with the player's own clutch pedal, the left foot goes as deep as theirs)
+  else if(!pressClutch)this.clutch=Math.max(0,approach(this.clutch,this.leftFoot>.85&&pedal>.02?pedal:-.02,pedal>.02?24:this.slowRelease?3.5:10,dt));
   if(!this.shift&&needShift&&onKnob&&this.clutch>.55){const path=gatePath(this.visualGear,g);this.shift={path,t:0,to:g,duration:shiftDuration(path)};}
   if(this.shift){
    this.shift.t=Math.min(1,this.shift.t+dt/this.shift.duration);this.lever=pointOnPath(this.shift.path,minimumJerk(this.shift.t));

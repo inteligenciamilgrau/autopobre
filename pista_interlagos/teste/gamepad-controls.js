@@ -16,6 +16,8 @@ export const BUTTON_KEYS=Object.freeze({
  12:['Digit2','KeyG'],13:['KeyN'],14:['Digit1'],15:['Digit3'] // D-pad: answers 1 2 3 on foot; ↑ in the car the ghost lap; ↓ the next driver in the recon lap
 });
 export const MENU_BUTTON=9; // Menu / Options: the pause menu, and back to the race
+// Câmbio manual (manual-gearbox.js): the D-pad's → shifts up and ← down (onShift), besides their keys.
+export const SHIFT_BUTTONS=Object.freeze({15:1,14:-1});
 export const STEERING_CURVES=Object.freeze({suave:2.2,normal:1.6,direta:1});
 // A trigger's travel counts from where it rests: the lowest it has read up to TRIGGER_REST (a worn
 // trigger never goes back to 0; one pressed further when first read rests at 0 until let go). The
@@ -33,8 +35,10 @@ export function triggerValue(value,rest=0){const r=Math.max(0,rest||0)+TRIGGER_D
 function readPads(){try{return [...(navigator.getGamepads?.()??[])].filter(Boolean);}catch{return [];}}
 const padName=pad=>pad?.id.replace(/\s*\(.*\)\s*$/,'').trim()||'Controle';
 export class GamepadControls {
- constructor({target=document,onMenu,onLook,onChange}={}){
-  this.target=target;this.onMenu=onMenu;this.onLook=onLook;this.onChange=onChange;
+ // ignore(pad): a device another reader drives (a racing wheel set up in wheel-controls.js, which
+ // may even call itself a standard pad). suspended: reads nothing (the wheel's setup is listening).
+ constructor({target=document,onMenu,onLook,onChange,onShift,ignore}={}){
+  this.target=target;this.onMenu=onMenu;this.onLook=onLook;this.onChange=onChange;this.onShift=onShift;this.ignore=ignore;this.suspended=false;
   this.steering=this.throttle=this.brake=this.walk=0;this.held=new Set();this.menuHeld=false;this.pad=null;this.other=null;
   this.curve=STEERING_CURVES.normal;this.rumble=true;this.touching=new Map();this.rests=new Map();
   addEventListener('gamepadconnected',()=>this.poll(0));addEventListener('gamepaddisconnected',()=>this.poll(0));
@@ -55,7 +59,7 @@ export class GamepadControls {
  // The standard pad the player last took up: one whose button or stick has just been pressed takes
  // over, one held all along (a trigger that rests above zero) never does; else the same one as before.
  pick(){
-  const all=readPads(),pads=all.filter(p=>p.mapping==='standard');this.other=all.find(p=>p.mapping!=='standard')??null;if(!pads.length)return null;
+  const all=readPads().filter(p=>!this.ignore?.(p)),pads=all.filter(p=>p.mapping==='standard');this.other=all.find(p=>p.mapping!=='standard')??null;if(!pads.length)return null;
   let pad=pads.find(p=>p.index===this.pad?.index&&p.id===this.pad?.id)??null;
   for(const p of pads){
    const key=p.index+' '+p.id,touched=p.buttons.some(b=>b.pressed||b.value>.1)||p.axes.some(a=>Math.abs(a)>.5);
@@ -68,7 +72,7 @@ export class GamepadControls {
  // Once per frame. Hidden pages read nothing: what is held lets go.
  poll(dt){
   const seen=c=>[c.pad?.id,c.pad?.index,c.unsupported].join('|'),before=seen(this);
-  this.pad=document.hidden?null:this.pick();const pad=this.pad;if(seen(this)!==before)this.onChange?.(this);
+  this.pad=document.hidden||this.suspended?null:this.pick();const pad=this.pad;if(seen(this)!==before)this.onChange?.(this);
   if(!pad){this.steering=this.throttle=this.brake=this.walk=0;this.releaseAll();this.menuHeld=false;return;}
   const button=i=>pad.buttons[i],axis=i=>pad.axes[i]??0;
   // (LT and RT, each from where it rests on this pad: a worn one gives no brake or throttle at rest)
@@ -83,6 +87,7 @@ export class GamepadControls {
    if(down===was)continue;
    if(down)this.held.add(index);else this.held.delete(index);
    for(const code of codes)this.key(down?'keydown':'keyup',code);
+   if(down&&SHIFT_BUTTONS[index])this.onShift?.(SHIFT_BUTTONS[index]);
   }
   const menu=!!button(MENU_BUTTON)?.pressed;if(menu&&!this.menuHeld)this.onMenu?.();this.menuHeld=menu;
   const lookX=stickValue(axis(2),1.4,LOOK_DEADZONE),lookY=stickValue(axis(3),1.4,LOOK_DEADZONE);
