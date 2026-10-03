@@ -35,6 +35,15 @@ for(let i=80;i<300;i+=11)for(const d of [-7.6,7.6]){
  ray.set(new THREE.Vector3(x,50,-y),new THREE.Vector3(0,-1,0));const hits=ray.intersectObject(ground,false);
  assert(hits.length&&hits[0].point.y<c.sample(x,y).z+.02,'landscape must not cover the banked kerbs');
 }
+// The flat turn's gravel trap follows the ground across its width, so no grass shows through mid-trap.
+const gravel=scene.getObjectByName('Caixa_de_brita');
+for(const p of a){if(p[0]<895||p[0]>1080)continue;
+ for(let d=-29.5;d<=-12;d+=.5){
+  const x=p[1]+p[9]*d,y=p[2]+p[10]*d;ray.set(new THREE.Vector3(x,60,-y),new THREE.Vector3(0,-1,0));
+  const top=ray.intersectObject(gravel,false)[0],below=ray.intersectObject(ground,false)[0];
+  assert(top&&below&&top.point.y>below.point.y+.03,`grass shows through the gravel trap at s=${p[0].toFixed(0)} d=${d}`);
+ }
+}
 scene.traverse(o=>{o.geometry?.dispose();});
 const report=[];
 for(const active of [false,true]){

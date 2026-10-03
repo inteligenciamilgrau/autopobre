@@ -63,7 +63,7 @@ preferences.update({circuit:circuit.id});
 let screen='opening',menuMode=preferences.values.immersive?'historia':'corrida';
 function showCircuitSelection(){
  document.title=`${circuit.name} · Auto-Pobre Racing`;
- document.querySelector('.wordmark').firstChild.textContent=circuit.name.toUpperCase();
+ document.querySelector('.wordmark').firstChild.textContent=$('mapTitle').textContent=circuit.name.toUpperCase();
  document.querySelector('.session>span').textContent=circuit.length.toLocaleString('pt-BR')+' m';
  document.querySelector('.maplabel').firstChild.textContent=circuit.label;
  $('circuitDescription').textContent=circuit.description;$('circuitIntro').textContent=circuit.intro;
@@ -198,13 +198,13 @@ function cabinVisibility(){
  // The opening films the car from outside, whatever view the race then starts in.
  const inside=mode==='cockpit'&&!gridPreview()&&!watchedRival()&&!intro.active,classic=preferences.values.classicInterior;
  // A Fusca (fusca.js) has no room for the Opala's cockpit: its own interior shows, and the driver with the
- // controls he works sits in its seat (seatShift, showFusca).
- if(cockpit){cockpit.root.visible=!fuscaBody.active&&(inside||!!model);cockpit.setView({inside,classic});if(driver)driver.root.position.set(seatShift.x,cockpit.drop()+seatShift.y,seatShift.z);}
+ // controls he works sits in its seat (seatShift, showFusca), at the V06 view's height (the classic box is the Opala's).
+ if(cockpit){cockpit.root.visible=!fuscaBody.active&&(inside||!!model);cockpit.setView({inside,classic:classic&&!fuscaBody.active});if(driver)driver.root.position.set(seatShift.x,cockpit.drop()+seatShift.y,seatShift.z);}
  if(model){model.visible=!inside||!classic;carStructure.visible=!(inside&&classic);}
 }
 const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
 function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
-let cockpit,skidMarks,tyreSmoke,sideMirrors;
+let cockpit,skidMarks,tyreSmoke,sideMirrors,fuscaMirrors;
 // The player's Opala on the sprung body: its model, cabin structure (setLivery) and brake lights
 // (brake-lights.js), hidden together while the player races a Fusca (fuscaBody, showFusca).
 const opalaShell=new THREE.Group();opalaShell.name='Opala_do_jogador';carBody.add(opalaShell);
@@ -249,7 +249,7 @@ function updateGhost(dt){
  const t=car.clock-car.lapStart+renderAhead();ghostOnTrack=t<lap.time+.8;lap.poseAt(t,ghostPose);ghostCar.place(ghostPose);ghostCar.update(paused?0:dt);
  const near=camera.position.distanceTo(ghostCar.body.position),apart=Math.hypot(ghostPose.x-car.x,ghostPose.y-car.y);ghostCar.detail(near);
  ghostCar.setOpacity(clamp(1-(t-lap.time)/.8,0,1)*clamp((near-2.5)/4,0,1)*(.3+.7*clamp((apart-1.5)/4,0,1)));
- ghostCar.setLabel(`FANTASMA · ${fmt(lap.time)}`);ghostCar.label.visible=mode!=='tv'&&near<60;
+ ghostCar.setPlate(fmt(lap.time));
 }
 // The timing panel's ghost line: its lap, and the gap to it at this point of the track (minus: ahead).
 function ghostHud(){
@@ -278,8 +278,8 @@ function initializeRenderer(){
  // Film look: linear HDR scene, then occlusion, haze, bloom, lens and grade (cinematic.js).
  cinematic=createCinematic(renderer,{mobile:touchDevice,level:cinematicLevel(),features:cinematicFeatures()});cinematic.setSun(SUN_DIRECTION);
  cockpit=createCockpit(renderer);carBody.add(cockpit.root);
- // The door mirrors show the same picture of the road behind (side-mirrors.js).
- sideMirrors=new SideMirrors(cockpit.mirrorTarget.texture);
+ // The door mirrors show the same picture of the road behind (side-mirrors.js); a Fusca's too, and its rear-view mirror.
+ sideMirrors=new SideMirrors(cockpit.mirrorTarget.texture);fuscaMirrors=new SideMirrors(cockpit.mirrorTarget.texture);fuscaBody.mirror=cockpit.mirrorTarget.texture;
  skidMarks=new SkidMarks(16384);scene.add(skidMarks.mesh);
  tyreSmoke=new TyreSmoke();scene.add(tyreSmoke.mesh);
  applyGraphics();
@@ -443,7 +443,9 @@ async function fuscaWanted(){
 // cockpit and brake lamps hide, and the driver and the cockpit camera move to the Fusca's seat.
 function showFusca(entry){
  const on=!!entry&&fuscaBody.apply(fuscaTemplate,entry);if(!on)fuscaBody.clear();
- opalaShell.visible=!on;seatShift.fromArray(on?FUSCA_SEAT:[0,0,0]);eyeShift.fromArray(on?FUSCA_EYE:[0,0,0]);cabinVisibility();return on;
+ opalaShell.visible=!on;seatShift.fromArray(on?FUSCA_SEAT:[0,0,0]);eyeShift.fromArray(on?FUSCA_EYE:[0,0,0]);cabinVisibility();
+ // Its door mirrors' own glass, seen from the cockpit camera there.
+ fuscaMirrors?.attach(on?fuscaBody.car:null,carBody,cockpit.eye.clone().add(eyeShift),{glass:'Espelho_fusca'});return on;
 }
 // The Opala's model in the chosen paint: the car screen and the circuit load share one download.
 function ensureCarModel(){
@@ -466,7 +468,7 @@ const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do S
 function location(s){const sections=data.meta.sections||names;let name=sections[0][1];for(const [d,n] of sections)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
 function drawMap(){
- const ctx=$('map').getContext('2d'),w=260,h=300;ctx.clearRect(0,0,w,h);
+ const ctx=$('map').getContext('2d'),w=260,h=$('map').height;ctx.clearRect(0,0,w,h);
  const xy=p=>projectMap(p[1],p[2]);
  ctx.beginPath();data.samples.forEach((p,i)=>{const [x,y]=xy(p);i?ctx.lineTo(x,y):ctx.moveTo(x,y);});ctx.closePath();ctx.lineWidth=8;ctx.strokeStyle='#ffffff16';ctx.stroke();ctx.lineWidth=2;ctx.strokeStyle='#b6c5b5';ctx.stroke();
  if(immersive&&(!immersive.active||['starting','grid','race'].includes(immersive.state.phase))){for(const [i,r] of immersive.rivals.entries()){const [x,y]=projectMap(r.car.x,r.car.y);ctx.beginPath();ctx.arc(x,y,3.5,0,Math.PI*2);ctx.fillStyle=cssColor(r.entry.mark);ctx.fill();ctx.strokeStyle='#0c1c17';ctx.lineWidth=1.2;ctx.stroke();}}
@@ -844,7 +846,7 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
  // A watched rival is posed by immersive.update below: its camera follows after that.
- updateOpenings(paused?0:dt);updateCar(dt);if(!watchedRival())updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,heard===car?carAudio.state:null).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});gamepad.bump(Math.max(frameImpact,immersive?.takeKnock()??0));frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
+ updateOpenings(paused?0:dt);updateCar(dt);if(!watchedRival())updateCamera(dt);const dash=cockpit.update(car,paused?0:dt,heard===car?carAudio.state:null),phoneArrived=dash.phoneArrived;if(phoneArrived)carAudio.notifyPhone();fuscaBody.update(dash.speed,dash.rpm,(immersive?.active?immersive.state.fuel:immersive?.freeFuel??12)/12);driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});gamepad.bump(Math.max(frameImpact,immersive?.takeKnock()??0));frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  if(immersive?.visual)immersive.visual.renderAhead=renderAhead();immersive?.update(paused?0:dt,camera);if(watchedRival())updateCamera(dt);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);updateGhost(dt);
  // Marshals, cameramen, crews, the terrace and the café idle; passing cars catch their eye.
@@ -871,12 +873,14 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
  const watchedCar=watchedRival();
  // Mirrors switched off in the Gráficos tab skip this extra pass.
- // The Fusca hides the Opala's cockpit, mirror and all.
- if(mode==='cockpit'&&!gridPreview()&&!watchedCar&&MIRROR_SIZES[graphics.values.mirrors]&&!fuscaBody.active){
+ // A Fusca's (fusca-cockpit.js) take the same picture, from its own mirror's height.
+ const mirrors=fuscaBody.active?fuscaMirrors:sideMirrors;
+ if(mode==='cockpit'&&!gridPreview()&&!watchedCar&&MIRROR_SIZES[graphics.values.mirrors]){
   // The mirror sees the road behind, not the body round it (the classic view hides it anyway).
-  const bodyShown=!!model?.visible;cockpit.root.visible=false;driver.root.visible=false;if(model)model.visible=false;
-  cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carBody.matrixWorld);
-  look.set(-30,1.14,0).applyMatrix4(carBody.matrixWorld);
+  const bodyShown=!!model?.visible,cockpitShown=cockpit.root.visible;cockpit.root.visible=false;driver.root.visible=false;if(model)model.visible=false;if(fuscaBody.car)fuscaBody.car.visible=false;
+  const mirrorHeight=fuscaBody.active?1.28:1.14;
+  cockpit.rearCamera.position.set(-.65,mirrorHeight,0).applyMatrix4(carBody.matrixWorld);
+  look.set(-30,mirrorHeight,0).applyMatrix4(carBody.matrixWorld);
   cockpit.rearCamera.up.set(0,1,0).transformDirection(carBody.matrixWorld);cockpit.rearCamera.lookAt(look);
   const oldShadowUpdate=renderer.shadowMap.autoUpdate;renderer.shadowMap.autoUpdate=false;
   tyreSmoke.material.uniforms.viewport.value=cockpit.mirrorTarget.height;
@@ -884,9 +888,9 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
   tyreSmoke.material.uniforms.viewport.value=renderer.domElement.height;
   mirrorFrame=renderedFrame;
   // The door mirrors look up this picture in the main pass below.
-  sideMirrors.show(true);sideMirrors.update(camera.position,carBody,cockpit.rearCamera);
-  renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=true;driver.root.visible=true;if(model)model.visible=bodyShown;
- }else sideMirrors.show(false);
+  mirrors.show(true);mirrors.update(camera.position,carBody,cockpit.rearCamera);
+  renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=cockpitShown;driver.root.visible=true;if(model)model.visible=bodyShown;if(fuscaBody.car)fuscaBody.car.visible=true;
+ }else mirrors.show(false);
  // Long lenses (broadcast camera, opening shots) get depth of field focused on their subject.
  const subject=watchedCar?.car??car,dof=intro.active?intro.dof:mode==='tv'?{focus:camera.position.distanceTo(watchedCar?.obj.position??carRoot.position),amount:.35}:null;
  cinematic.render(scene,camera,{dt:paused?0:dt,speed:Math.hypot(subject.vx,subject.vy),mode,hazeBase:hazeBase(),dof});
@@ -1226,7 +1230,9 @@ async function loadCircuit(){
  const sceneryLevel=graphics.values.scenery,scenery=SCENERY_LEVELS[sceneryLevel];
 
  // Track files live in dados/, beside teste/ here and beside index.html once published (preparar_publicacao.py).
- data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/'+(circuit.data??'pista.json'))).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);ghostRecorder.reset();
+ data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/'+(circuit.data??'pista.json'))).json();data.meta.id=circuit.id;data.meta.name=circuit.name;
+ // The circuit name sits in the top band of the map (#mapTitle); phones hide it and keep the whole canvas.
+ projectMap=mapProjection(data.samples,260,300,touchDevice?0:40);$('map').height=projectMap.height??300;car=new TestCar(data);ghostRecorder.reset();
  roadSurface=await createTrackSurface(renderer,data);
  if(!driver){driver=await createDriver(cockpit);carBody.add(driver.root);}
  terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];
@@ -1316,14 +1322,14 @@ async function loadCircuit(){
   driverInfo:()=>driver.info(),
   // The ghost (G): the lap it replays, where it is drawn and how see-through, and the lap being recorded.
   ghostInfo:()=>{const lap=currentGhost();return {enabled:preferences.values.ghost,lap:lap?{time:lap.time,samples:lap.n,pilot:lap.pilot}:null,onTrack:ghostOnTrack,visible:ghostCar.root.visible,opacity:ghostCar.opacity,
-   position:ghostCar.body.position.toArray(),pose:{...ghostPose},label:ghostCar.labelText,triangles:ghostCar.triangles,savedAt:ghostSavedAt,gap:$('ghostGap').textContent,time:$('ghostTime').textContent,
+   position:ghostCar.body.position.toArray(),pose:{...ghostPose},plate:ghostCar.plateText,plateAt:ghostCar.plate.position.toArray(),triangles:ghostCar.triangles,savedAt:ghostSavedAt,gap:$('ghostGap').textContent,time:$('ghostTime').textContent,
    recorder:{lapStart:ghostRecorder.lapStart,clean:ghostRecorder.clean,samples:ghostRecorder.values.length/7,progress:ghostRecorder.progress}};},
   rivalDrivers:()=>immersive.visual.rivals.map(o=>o.userData.driver?{...o.userData.driver.info(),shown:o.userData.detail.visible&&o.visible}:null),
   watchInfo:()=>{const r=watchedRival();return {watched,number:r?.entry.number??null,camera:camera.position.toArray(),target:r?r.obj.position.toArray():carRoot.position.toArray(),rpm:(r?.car??car).rpm};},
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
   // Interior cameras ride on the sprung body, so report them in its frame.
   cockpitInfo:()=>({...cockpit.info(),eyeLocal:carBody.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
-   renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray(),sideMirrors:sideMirrors.info()}),
+   renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray(),sideMirrors:(fuscaBody.active?fuscaMirrors:sideMirrors).info(),fusca:fuscaBody.info()?.cabin??null}),
   viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs,
    lookBack:{held:lookBack.held,allowed:lookBackAllowed(),amount:lookBack.amount,side:lookBack.side,viewYaw:headView.yaw,viewPitch:headView.pitch,eyeShift:[...twist]},photo:cockpitView&&structuredClone(cockpitView)}),
   // Interior photography: a fixed cockpit-local pose {eye:[x,y,z],yaw,pitch,fov,hideDriver,roll?} replaces the

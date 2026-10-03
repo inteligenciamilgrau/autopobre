@@ -9,7 +9,7 @@ import {shutOpenings,CarOpenings,carSpot,SPOT_OPENING} from './car-openings.js';
 import {createRivalDriver,CABIN_DROP,sharedDriverMaterials} from './rival-driver.js';
 import {createBrakeLights,sharedBrakeLights} from './brake-lights.js';
 import {podiumBanner,podiumPlate,podiumRibbon,signBoard} from './pit-textures.js';
-import {fuscaCar,FUSCA_PROFILE,FUSCA_SEAT} from './fusca.js';
+import {fuscaCar,rivalCabin,FUSCA_PROFILE,FUSCA_SEAT} from './fusca.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
 const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
@@ -363,11 +363,11 @@ export class ImmersiveVisuals {
   const build=e=>{const o=this.fuscaRival(template,e,e.shortName);o.userData.entry=e;o.visible=false;this.root.add(o);return o;};
   this.fuscaCars=RIVAL_ROSTER.map(build);this.fusca99=build(OPALA_99_RIVAL);
  }
- // A rival in a Fusca (fusca.js): the team's colours as the player's Fusca wears them, its driver moved
- // onto the Fusca's seat (the Fusca's own steering wheel hides behind his), and a distant model and brake
+ // A rival in a Fusca (fusca.js): the team's colours as the player's Fusca wears them, the cabin without the
+ // player's details (rivalCabin), its driver moved onto the Fusca's seat (the Fusca's own steering wheel hides behind his), and a distant model and brake
  // lights on both levels of detail as rivalCar gives an Opala.
  fuscaRival(template,entry,name=''){
-  const car=fuscaCar(template,entry),root=new THREE.Group(),detail=new THREE.Group();root.name=car.name+'_rival';detail.name='Rival_detalhe';detail.add(car);root.add(detail);
+  const car=rivalCabin(fuscaCar(template,entry)),root=new THREE.Group(),detail=new THREE.Group();root.name=car.name+'_rival';detail.name='Rival_detalhe';detail.add(car);root.add(detail);
   const own=car.getObjectByName('Volante_Fusca');if(own)own.visible=false;
   const driver=createRivalDriver({color:entry.color,number:entry.number});driver.root.position.add(new THREE.Vector3(...FUSCA_SEAT));detail.add(driver.root);
   const far=this.farProxy(entry.color,FUSCA_PROFILE),lamps=createBrakeLights({far:FUSCA_PROFILE.lamps});far.add(lamps);root.add(far);

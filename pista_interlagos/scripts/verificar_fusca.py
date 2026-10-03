@@ -1,7 +1,7 @@
 """The Fusca tab of Modo Corrida's car screen (car-select.js, fusca.js): the grid's 15 cars as Fuscas (the 99
 black with the yellow stripe), the studio turning the chosen one in its colours, the choice kept, and on
 track a field of Fuscas: the player's (the Opala's body, cockpit and brake lamps hidden, the driver in the
-Fusca's seat) and every rival's, each driver on the Fusca's seat, with Stevan Gaipo's Fusca 99 in the seat
+Fusca's seat, its own cabin with live mirrors and dials) and every rival's, each driver on the Fusca's seat, with Stevan Gaipo's Fusca 99 in the seat
 of the team taken; all of them collide with the Fusca's own body (physics.js FUSCA_BODY). Back on the menu the Opala returns; the Opala tab and Modo História stay Opalas.
 Usage: verificar_fusca.py [porta]
 Screens in renders/: fusca_99.png, fusca_73.png, fusca_19.png, fusca_opala_aba.png, fusca_grid.png,
@@ -18,7 +18,7 @@ ROOT=Path(__file__).resolve().parents[1]
 RENDERS=ROOT/'renders';RENDERS.mkdir(exist_ok=True)
 HOOK="""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();return true;}"""
 FIELD="""()=>{interlagos.immersiveInfo();const f=fixture,v=f.visual;return {rivals:f.rivals.map(r=>r.entry.number),seats:v.rivals.map(o=>o.userData.entry.number),
- models:v.rivals.map(o=>o.userData.fusca?'fusca':'opala'),bodies:f.rivals.map(r=>r.car.body.name),fieldBody:f.field.body.name,playerBody:interlagos.car.body.name,seat:v.rivals.map(o=>o.userData.driver?.root.position.toArray().map(c=>+c.toFixed(4))??null),
+ models:v.rivals.map(o=>o.userData.fusca?'fusca':'opala'),inside:v.rivals.map(o=>{let n=0;o.userData.fusca?.traverse(q=>{if(q.userData.interno)n++;});return n;}),bodies:f.rivals.map(r=>r.car.body.name),fieldBody:f.field.body.name,playerBody:interlagos.car.body.name,seat:v.rivals.map(o=>o.userData.driver?.root.position.toArray().map(c=>+c.toFixed(4))??null),
  opala99Shown:!!v.opala99?.visible,fuscasShown:v.root.children.filter(o=>o.visible&&o.userData.fusca).length,me:f.playerEntry?.number??'99'}}"""
 CARS="()=>interlagosCarros.info()"
 PREFS="()=>JSON.parse(localStorage.getItem('opala99-preferences-v1'))"
@@ -72,7 +72,9 @@ with sync_playwright() as p:
  assert field['models']==['fusca']*14 and field['fuscasShown']==14 and not field['opala99Shown'],field
  # And each meets the others, the walls and the ground with the Fusca's body (physics.js FUSCA_BODY).
  assert field['bodies']==['fusca']*14 and field['playerBody']=='fusca',field
- assert all(s==[.257,.02,0] for s in field['seat']),field['seat']
+ assert all(s==[.257,.02,.06] for s in field['seat']),field['seat']
+ # The rivals' cabins without the player's details (fusca.js rivalCabin: dials, switches, mirror glass...).
+ assert field['inside']==[0]*14,field['inside']
  shot(page,'fusca_grid.png')
  wait_race_start(page)
  # Driving: the wheels turn with the car; braking lights the tail lamps.
@@ -83,9 +85,17 @@ with sync_playwright() as p:
  cockpit=None
  for view in ['close','hood','cockpit','tv']:
   camera(page,view);page.wait_for_timeout(900);shot(page,f'fusca_corrida_{view}.png')
-  if view=='cockpit':cockpit=page.evaluate("(()=>{const c=interlagos.cockpitInfo();return {visible:c.visible,external:c.externalVisible,eye:c.eyeLocal}})()")
+  if view=='cockpit':
+   page.keyboard.down('KeyW');page.wait_for_timeout(1500)
+   cockpit=page.evaluate("(()=>{const c=interlagos.cockpitInfo();return {visible:c.visible,external:c.externalVisible,eye:c.eyeLocal,frame:c.renderedFrame,mirrorFrame:c.mirrorFrame,side:c.sideMirrors,cabin:c.fusca}})()")
+   page.keyboard.up('KeyW');shot(page,'fusca_corrida_cockpit_andando.png')
  print(json.dumps({'cockpit':cockpit},ensure_ascii=False),flush=True)
- assert not cockpit['visible'] and cockpit['eye'][0]>.1,cockpit
+ # The Opala's cockpit hides; the camera on the Fusca's centre line (fusca.js FUSCA_EYE); its rear-view mirror shows
+ # this frame's rear picture, both door mirrors are live, the dials' needles move (fusca-cockpit.js).
+ assert not cockpit['visible'] and max(abs(a-b) for a,b in zip(cockpit['eye'],[.057,1.2,.015]))<1e-3,cockpit
+ assert cockpit['mirrorFrame']==cockpit['frame'] and cockpit['cabin']['mirror']==1,cockpit
+ assert cockpit['side']['count']==2 and cockpit['side']['live'] and sorted(cockpit['side']['sides'])==[-1,1] and all(cockpit['side']['visible']),cockpit['side']
+ assert set(cockpit['cabin']['needles'])=={'speed','fuel','tach'} and cockpit['cabin']['needles']['speed']<-2.4,cockpit['cabin']
  camera(page,'chase')
  result['corrida']={'fusca':f,'cockpit':cockpit}
 

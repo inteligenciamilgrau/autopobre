@@ -146,15 +146,19 @@ function zoneSum(zones,fn,L){
 // These wear patterns are game art, not surveyed marks of the real circuit.
 export async function createTrackSurface(renderer,data){
  const loader=new THREE.TextureLoader();
- const [texture,normalMap,roughnessMap]=await Promise.all(['diff','nor_gl','rough'].map(kind=>loader.loadAsync(`./assets/texturas/asfalto_${kind}_v3.jpg`)));
+ const [texture,normalMap,roughnessMap,grainMap]=await Promise.all([...['diff','nor_gl','rough'].map(kind=>`asfalto_${kind}_v3.jpg`),'asfalto_grao_v1.jpg'].map(file=>loader.loadAsync(`./assets/texturas/${file}`)));
  texture.colorSpace=THREE.SRGBColorSpace;
- for(const map of [texture,normalMap,roughnessMap]){
-  map.wrapS=map.wrapT=THREE.RepeatWrapping;map.anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());map.minFilter=THREE.LinearMipmapLinearFilter;
+ const anisotropy=Math.min(16,renderer.capabilities.getMaxAnisotropy());
+ for(const map of [texture,normalMap,roughnessMap,grainMap]){
+  map.wrapS=map.wrapT=THREE.RepeatWrapping;map.anisotropy=anisotropy;map.minFilter=THREE.LinearMipmapLinearFilter;
  }
  const L=data.meta.reconstructed_xy_m,material=new THREE.MeshStandardMaterial({name:'Asfalto_PBR_circuito_v4',map:texture,normalMap,normalScale:new THREE.Vector2(.8,.8),roughnessMap,roughness:1,metalness:0});
  // The shader sets the asphalt's tone from the scanned aggregate.
  material.color.setRGB(1,1,1);
+ // Kept on the material so a circuit change disposes it with the other maps.
+ material.grainMap=grainMap;
  material.onBeforeCompile=shader=>{
+  shader.uniforms.grainMap={value:grainMap};shader.uniforms.grainAnisotropy={value:anisotropy};
   shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute vec4 roadData;\nvarying vec4 vRoad;');
   shader.vertexShader=shader.vertexShader.replace('#include <begin_vertex>','#include <begin_vertex>\nvRoad=roadData;');
   shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
@@ -163,13 +167,48 @@ float roadHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float roadNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(roadHash(i),roadHash(i+vec2(1,0)),f.x),mix(roadHash(i+vec2(0,1)),roadHash(i+vec2(1,1)),f.x),f.y);}
 float brakeZone(float s,float a,float b){return smoothstep(a,a+25.0,s)*(1.0-smoothstep(b-15.0,b,s));}
 float slabZone(float s,float a,float b){return smoothstep(a,a+4.0,s)*(1.0-smoothstep(b-4.0,b,s));}
+uniform sampler2D grainMap;
+uniform float grainAnisotropy;
+float brakeAt(float s){return clamp(${zoneSum(brakeZones(data),'brakeZone',L)},0.0,1.0);}
+// Old tyre marks: a car's two tracks (1.56 m apart) left where it braked hard or slid, 8-24 m
+// long, fading out. Each 9 m of the lap may start one, more often in the braking zones; a
+// fragment looks at the marks started in its stretch and the three before it. No pair strays
+// more than 4.7 m from the line (1.7 offset, 2 m of drift, .78 + .14 to a tyre's outer edge).
+float oldMarks(float s,float d,float path){
+ if(abs(d-path)>4.7)return 0.0;
+ float dark=0.0,cell=floor(s/9.0);
+ for(int k=0;k<4;k++){
+  float c=cell-float(k);
+  if(roadHash(vec2(c,13.7))>.2+.5*brakeAt(c*9.0+4.5))continue;
+  float t=s-c*9.0-roadHash(vec2(c,4.1))*9.0,len=8.0+roadHash(vec2(c,8.3))*16.0;
+  if(t<0.0||t>len)continue;
+  // Each pair drifts across the lane a little, as a car sliding or turning in does.
+  float center=path+(roadHash(vec2(c,2.9))-.5)*3.4+(roadHash(vec2(c,6.2))-.5)*.07*t+(roadHash(vec2(c,9.4))-.5)*.004*t*t;
+  float w=.08+.06*roadHash(vec2(c,1.3));
+  float line=1.0-smoothstep(w*.55,w,abs(abs(d-center)-.78));
+  float fade=smoothstep(0.0,1.2,t)*pow(1.0-t/len,.7)*(.6+.4*roadNoise(vec2(t*.8,c)));
+  dark=max(dark,line*fade*(.4+.45*roadHash(vec2(c,5.5))));
+ }
+ return dark;
+}
 `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
 // Scanned race-track asphalt (fresh, near black) weathered to the grey of a circuit in
 // the sun: contrast of the aggregate compressed around a lifted mean, a hint of its tint kept.
 vec3 fine=texture2D(map,vMapUv).rgb;
 float fineL=max(dot(fine,vec3(.2126,.7152,.0722)),1e-4);
-vec3 aggregate=vec3(.082*pow(fineL/.0137,.55))*mix(vec3(1.0),fine/fineL,.22);
+vec3 aggregate=vec3(.08*pow(fineL/.0137,.7))*mix(vec3(1.0),fine/fineL,.22);
+// Coarse grain (asfalto_grao_v1, drawn 6 m a tile): stones and patches that keep their contrast where
+// the scan's millimetre detail has mipmapped to grey, the texture the eye follows at speed. Two
+// scales, swapped by a broad noise, hide the tile.
+vec2 grainA=vMapUv*.3333,grainB=mat2(.799,.602,-.602,.799)*vMapUv*.253+vec2(.31,.67);
+float grainTex=mix(texture2D(grainMap,grainA).r,texture2D(grainMap,grainB).r,smoothstep(.42,.58,roadNoise(vMapUv*.09+11.0)));
+// The map flattens as its mip level rises, so its contrast is given back as the footprint grows;
+// close up, where a texel covers several pixels, the scan carries the detail and the grain steps back.
+vec2 grainDx=dFdx(grainA)*2048.0,grainDy=dFdy(grainA)*2048.0;
+float grainMajor=max(length(grainDx),length(grainDy)),grainMinor=min(length(grainDx),length(grainDy));
+float grainLod=log2(max(max(grainMajor/grainAnisotropy,grainMinor),1e-3));
+float grain=(grainTex-.5)*min(.7*exp2(max(grainLod,0.0)*max(grainLod,0.0)*.045),2.0)*mix(.3,1.0,smoothstep(-1.5,.5,grainLod));
 float d=vRoad.x, s=vRoad.y, width=vRoad.z;
 vec2 road=vec2(s,d);
 float macro=roadNoise(vMapUv*.18)*.65+roadNoise(vMapUv*.047)*.35;
@@ -178,14 +217,26 @@ float detailFade=1.0-smoothstep(.08,.45,length(fwidth(vMapUv*3.4)));
 // Lanes of different age along the lap (resurfacing), and gentle patchiness.
 float laneAge=roadNoise(vec2(s*.0032,d*.025+1.7));
 float wear=mix(.9,1.08,macro)*mix(.9,1.07,laneAge)*mix(1.0,.94+.12*roadNoise(vMapUv*3.4),detailFade);
-float brake=clamp(${zoneSum(brakeZones(data),'brakeZone',L)},0.0,1.0);
+float brake=brakeAt(s);
 float path=vRoad.w+(roadNoise(vec2(s*.012,5.3))-.5)*.8;
 float lateral=d-path;
 // Rubbered racing line, darkest where the cars brake.
 float rubber=exp(-pow(lateral/1.7,2.0))*(.2+.24*brake);
-float streak=roadNoise(vec2(d*24.0,s*.12));
+// Tyre tracks along the lap: fine darker and polished lines across the band the cars use, faded
+// where they would be thinner than a pixel.
+float acrossPixel=fwidth(d);
+float streak=mix(.5,roadNoise(vec2(d*24.0,s*.12)),1.0-smoothstep(.25,.6,acrossPixel*24.0));
+float tyreLines=(roadNoise(vec2(d*11.0,s*.025))-.5)*(1.0-smoothstep(.3,.7,acrossPixel*11.0))+(roadNoise(vec2(d*27.0+3.0,s*.06))-.5)*.5*(1.0-smoothstep(.3,.7,acrossPixel*27.0));
+rubber+=exp(-pow(lateral/2.9,2.0))*tyreLines*.22;
 float tirePair=exp(-pow((abs(lateral)-.80)/.19,2.0));
-rubber+=tirePair*brake*.22*(.3+.7*streak);
+rubber+=tirePair*(.06+.22*brake)*(.3+.7*streak);
+rubber+=oldMarks(s,d,path)*(1.0-smoothstep(.07,.16,acrossPixel));
+rubber=clamp(rubber,-.1,.8);
+// Oil and fuel drips down the middle of the line, between the wheel tracks, drawn out by the speed.
+vec2 dropUv=vec2(s/1.1,lateral/.4),dropCell=floor(dropUv),dropAt=dropCell+.2+.6*vec2(roadHash(dropCell+3.1),roadHash(dropCell+7.9));
+float dropRadius=.025+.05*roadHash(dropCell+1.7);
+float drop=step(roadHash(dropCell+5.3),.3)*(1.0-smoothstep(dropRadius*.6,dropRadius,length((dropUv-dropAt)*vec2(1.1/1.7,.4))));
+drop*=exp(-pow(lateral/.55,2.0))*(1.0-smoothstep(.05,.18,fwidth(s)));
 // Off the line: lighter, dusty, with rubber marbles thrown off the tyres.
 float offLine=smoothstep(1.4,3.8,abs(lateral))*(1.0-smoothstep(width*.42,width*.5,abs(d)));
 vec2 marbleCell=floor(road*vec2(9.0,11.0));
@@ -205,11 +256,13 @@ float patchAlong=smoothstep(5.0,5.2,along)*(1.0-smoothstep(32.0,32.2,along)),pat
 float roadRepair=step(.79,roadHash(vec2(section,7.6)))*patchAlong*patchAcross;
 float patchBorder=roadRepair*(1.0-smoothstep(.0,.07,min(min(along-5.2,32.0-along),1.2-abs(d-patchCenter))));
 float seam=(1.0-smoothstep(.01,.045,abs(abs(d)-width*.24)))*(.4+.6*roadNoise(vec2(s*.13,d)));
-vec3 asphaltColor=aggregate*wear*(1.0-rubber)*(1.0-joint*.3)*(1.0-roadRepair*.24)*(1.0-seam*.12);
+// Rubber fills the grain on the line.
+float grainTone=max(1.0+grain*3.5*(1.0-.6*clamp(rubber*2.5,0.0,1.0)),.2);
+vec3 asphaltColor=aggregate*wear*grainTone*(1.0-rubber)*(1.0-joint*.3)*(1.0-roadRepair*.24)*(1.0-seam*.12)*(1.0-drop*.5);
 // Concrete stretches (meta.surface_zones): pale slabs 5 m long with sawn joints, rubber still dark on the line.
 float concrete=clamp(${zoneSum(concreteZones(data),'slabZone',L)},0.0,1.0);
 float slabJoint=max(1.0-smoothstep(.02,.06,abs(fract(s/5.0+.5)-.5)*5.0),(1.0-smoothstep(.02,.06,abs(abs(d)-width*.25)))*step(.1,abs(d)));
-vec3 concreteColor=vec3(.235,.222,.2)*mix(.92,1.05,macro)*mix(.95,1.04,laneAge)*(1.0-rubber*.75)*(1.0-slabJoint*.45);
+vec3 concreteColor=vec3(.235,.222,.2)*mix(.92,1.05,macro)*mix(.95,1.04,laneAge)*(1.0+grain*.6)*(1.0-rubber*.75)*(1.0-slabJoint*.45);
 asphaltColor=mix(asphaltColor,asphaltColor*vec3(1.1,1.07,1.0),offLine*.55);
 asphaltColor=mix(asphaltColor,asphaltColor*vec3(1.16,1.1,.98),edge*.6);
 asphaltColor=mix(asphaltColor,vec3(.012,.011,.01),max(max(tar,patchBorder)*.85,marble*.8));
@@ -217,9 +270,10 @@ asphaltColor=mix(asphaltColor,concreteColor,concrete);
 diffuseColor.rgb*=asphaltColor;
 `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <roughnessmap_fragment>',`
-// Rubber and fresh tar are smoother than the open aggregate: they catch the low sun.
+// Rubber, fresh tar, oil and the tyre-polished stones are smoother than the open aggregate: they
+// catch the low sun.
 float fineRough=texture2D(roughnessMap,vRoughnessMapUv).g;
-float roughnessFactor=clamp(.62+.34*fineRough-rubber*.3-tar*.45-roadRepair*.08+edge*.05+concrete*.08,.3,1.0);
+float roughnessFactor=clamp(.62+.34*fineRough-rubber*.3-tar*.45-roadRepair*.08+edge*.05+concrete*.08-grain*.22-drop*.3,.3,1.0);
 `);
   shader.fragmentShader=shader.fragmentShader.replace('#include <normal_fragment_maps>',`
 vec3 asphaltN=texture2D(normalMap,vNormalMapUv).xyz*2.0-1.0;
@@ -227,9 +281,9 @@ asphaltN.xy*=normalScale*(1.0-.75*max(tar,rubber*.6));
 normal=normalize(tbn*asphaltN);
 `);
  };
- material.customProgramCacheKey=()=> 'opala-track-asphalt-circuit-v5-'+(data.meta.id||'interlagos');
+ material.customProgramCacheKey=()=> 'opala-track-asphalt-circuit-v6-'+(data.meta.id||'interlagos');
  const probe=new TestCar(data),length=data.meta.reconstructed_xy_m;
- const stats={texture:'assets/texturas/asfalto_diff_v3.jpg',normal:'assets/texturas/asfalto_nor_gl_v3.jpg',roughness:'assets/texturas/asfalto_rough_v3.jpg',resolution:2048,tileMetres:2,anisotropy:texture.anisotropy,vertices:0,wear:'decorative',pbr:true};
+ const stats={texture:'assets/texturas/asfalto_diff_v3.jpg',normal:'assets/texturas/asfalto_nor_gl_v3.jpg',roughness:'assets/texturas/asfalto_rough_v3.jpg',grain:'assets/texturas/asfalto_grao_v1.jpg',grainTileMetres:6,resolution:2048,tileMetres:2,anisotropy:texture.anisotropy,vertices:0,wear:'decorative',pbr:true};
  function geometry(source){
   const g=source.index?source.toNonIndexed():source;
   if(g!==source)source.dispose();

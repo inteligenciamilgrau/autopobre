@@ -1,6 +1,7 @@
 """Ghost lap (G) in the browser: with no lap saved, G only says so; a saved lap (driven here by the
 recon lap's racecraft, through the game's own recorder) comes on with G and races over the solo
-practice in every camera, with its lap and the gap on the timing panel and its dot on the map; a lap
+practice in every camera, its lap time on a plate on its rear bumper (no label over it), with its lap and
+the gap on the timing panel and its dot on the map; a lap
 that counts, driven in the game, becomes the new ghost and the lap banner says so; G turns it off;
 Modo História keeps its own (G on foot in the paddock says there is none yet). Usage: verificar_fantasma.py [porta]. Screens in renders/: fantasma_*.png."""
 import json
@@ -58,7 +59,7 @@ with sync_playwright() as p:
  assert recorded['saved'] and len(recorded['times'])==2 and recorded['size']<60000,recorded
  page.keyboard.press('KeyG');page.wait_for_timeout(200);g=info(page)
  assert g['enabled'] and g['lap'] and abs(g['lap']['time']-recorded['times'][1])<1e-6 and 'Fantasma ligado' in g['status'] and g['panel'] and g['button']=='true',g
- assert g['onTrack'] and g['label'].startswith('FANTASMA'),g
+ assert g['onTrack'] and g['plate']==g['time'],g
  result['ligado']={'volta':g['time'],'status':g['status']}
 
  # The 3-2-1 holds the clock: the ghost waits on its line, then drives off ahead of the parked Opala.
@@ -68,6 +69,12 @@ with sync_playwright() as p:
  assert b['visible'] and b['opacity']>.5 and moved>20,(a,b,moved)
  assert b['gap'].startswith('+'),b
  result['largada']={'andou_1s_m':round(moved,1),'gap':b['gap'],'opacity':round(b['opacity'],2)}
+
+ # Close behind it: its lap time on the plate on its rear bumper, behind the tail.
+ page.evaluate(BEFORE_LINE,7);page.wait_for_timeout(600);page.keyboard.press('KeyP');page.wait_for_timeout(300);g=info(page);shot(page,'placa')
+ assert g['visible'] and g['plate']==g['time'] and g['plateAt'][0]<-1.5 and abs(g['plateAt'][1]-.46)<1e-6,g
+ page.keyboard.press('KeyP');page.wait_for_timeout(200)
+ result['placa']={'texto':g['plate'],'posicao':[round(v,3) for v in g['plateAt']]}
 
  # Put back 14 m before the line: the ghost waits on it; frozen with P, every camera sees it.
  page.evaluate(BEFORE_LINE,14);page.wait_for_timeout(80);page.keyboard.press('KeyP');page.wait_for_timeout(300)

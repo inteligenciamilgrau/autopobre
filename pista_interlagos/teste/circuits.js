@@ -23,9 +23,14 @@ export function selectedCircuit(saved,search=''){
  const value=new URLSearchParams(search).get('circuito');
  return CIRCUITS[value!==null?circuitId(value):circuitId(saved)];
 }
-export function mapProjection(samples,width=260,height=300){
+// band: rows kept clear at the top for the circuit name. A wide track keeps its centred place
+// under the name; a tall one moves down and the canvas grows (project.height) instead of shrinking.
+export function mapProjection(samples,width=260,height=300,band=0){
  const xs=samples.map(p=>p[1]),ys=samples.map(p=>p[2]);
  const minX=Math.min(...xs),maxX=Math.max(...xs),minY=Math.min(...ys),maxY=Math.max(...ys);
  const scale=Math.min((width-32)/Math.max(1,maxX-minX),(height-36)/Math.max(1,maxY-minY));
- return (x,y)=>[width/2+(x-(minX+maxX)/2)*scale,height/2-(y-(minY+maxY)/2)*scale];
+ const drawn=(maxY-minY)*scale,top=Math.max((height-drawn)/2,band),centre=top+drawn/2;
+ const project=(x,y)=>[width/2+(x-(minX+maxX)/2)*scale,centre-(y-(minY+maxY)/2)*scale];
+ project.height=Math.max(height,Math.ceil(top+drawn+18));
+ return project;
 }

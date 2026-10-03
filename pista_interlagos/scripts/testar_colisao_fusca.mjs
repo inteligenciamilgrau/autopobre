@@ -15,14 +15,14 @@ assert.deepEqual({...OPALA_BODY,hull:undefined},{name:'opala',halfLength:2.38,ha
 assert.equal(OPALA_BODY.hull,HULL);assert.equal(HULL.length,23);assert.deepEqual(HULL[0],[2.25,.75,-.28]);assert.deepEqual(HULL[8],[-1.4,0,-.41]);
 assert.equal(new TestCar(data).body.name,'opala','a car is an Opala unless given another body');
 
-// --- The Fusca's plan and shell against its game model (accessors' bounds, every node but the wheels and its
-// steering wheel). glTF: +x forward, +y up, -z the left; the physics' y is the left, z up from the centre of mass.
+// --- The Fusca's plan and shell against its game model (accessors' bounds, every node but the wheels, its
+// steering wheel and the door mirrors, which stand out of the body as a car's do). glTF: +x forward, +y up, -z the left; the physics' y is the left, z up from the centre of mass.
 function modelBounds(file){
  const glb=fs.readFileSync(new URL(file,import.meta.url)),length=glb.readUInt32LE(12),json=JSON.parse(glb.toString('utf8',20,20+length));
  const cross=(a,b)=>[a[1]*b[2]-a[2]*b[1],a[2]*b[0]-a[0]*b[2],a[0]*b[1]-a[1]*b[0]];
  const rotate=(q,v)=>{const u=q.slice(0,3),t=cross(u,v).map(x=>2*x),c=cross(u,t);return v.map((x,i)=>x+q[3]*t[i]+c[i]);};
  const lo=[Infinity,Infinity,Infinity],hi=[-Infinity,-Infinity,-Infinity];
- const walk=(index,chain)=>{const node=json.nodes[index];if(/^Roda_.*_PIVO|^Volante_Fusca/.test(node.name??''))return;const here=[...chain,node];
+ const walk=(index,chain)=>{const node=json.nodes[index];if(/^Roda_.*_PIVO|^Volante_Fusca|_Retrovisores$/.test(node.name??''))return;const here=[...chain,node];
   if(node.mesh!==undefined)for(const primitive of json.meshes[node.mesh].primitives){const a=json.accessors[primitive.attributes.POSITION];
    for(const corner of [0,1,2,3,4,5,6,7].map(k=>[k&1?a.max[0]:a.min[0],k&2?a.max[1]:a.min[1],k&4?a.max[2]:a.min[2]])){
     let p=corner;for(const n of [...here].reverse()){p=p.map((v,i)=>v*(n.scale?.[i]??1));if(n.rotation)p=rotate(n.rotation,p);p=p.map((v,i)=>v+(n.translation?.[i]??0));}

@@ -86,9 +86,11 @@ Entre computadores diferentes, todos conversam só com o servidor das salas no C
 
 Para testar num PC só, sem servidor, abra duas janelas do mesmo navegador lado a lado com `#sala=teste&local=1`: elas conversam pelo próprio navegador (`BroadcastChannel`).
 
+**Para lives:** se o nome da sala tiver `_`, o que vem depois dele não aparece na tela. Com `#sala=amigos_xyz7`, o cartão da sala e a barra de endereço mostram `amigos_***`, e dá para compartilhar a tela sem que quem assiste leia o nome inteiro e entre. A sala continua sendo o nome inteiro. Este navegador guarda a parte secreta, então F5 ou outra aba com o endereço escondido abrem a mesma sala; em outro navegador, o endereço escondido não abre sala nenhuma e o cartão pede o link completo. Abra a sala antes de começar a live (enquanto a página carrega, a barra ainda mostra o link inteiro) e não digite na barra de endereço durante a transmissão (as sugestões do navegador podem mostrar o link completo).
+
 Os carros dos humanos batem entre si e nos bots. Se o anfitrião der F5, ele volta como anfitrião, e os convidados mantêm os carros.
 
-Opções no endereço: `&carro=73` escolhe o carro do convidado, `&auto=1` liga o piloto automático daquela janela, `&fantasmas=1` (no anfitrião) faz os humanos passarem uns pelos outros, `&local=1` usa só as janelas deste navegador, `&servidor=local` usa o servidor das salas rodando neste PC (`wrangler dev`), e `&lag=150&perda=5` simulam 150 ms de atraso e 5% de mensagens perdidas. O código fica em `teste/multiplayer.js`, `teste/net-room.js`, `teste/net-link.js` e `teste/net-cars.js`. Os testes são `scripts/testar_multiplayer.mjs` (Node) e `scripts/verificar_multiplayer.py [porta] [--servidor]` (navegador).
+Opções no endereço: `&carro=73` escolhe o carro do convidado, `&auto=1` liga o piloto automático daquela janela, `&fantasmas=1` (no anfitrião) faz os humanos passarem uns pelos outros, `&local=1` usa só as janelas deste navegador, `&servidor=local` usa o servidor das salas rodando neste PC (`wrangler dev`), e `&lag=150&perda=5` simulam 150 ms de atraso e 5% de mensagens perdidas. O código fica em `teste/multiplayer.js`, `teste/net-room.js`, `teste/net-link.js` e `teste/net-cars.js`. Os testes são `scripts/testar_multiplayer.mjs` (Node), `scripts/verificar_multiplayer.py [porta] [--servidor]` e `scripts/verificar_sala_secreta.py [porta]` (navegador).
 
 ## O que entra no Git
 

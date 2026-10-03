@@ -2,7 +2,7 @@
 // prediction under network delay, and RaceField's remote and ghost cars.
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
-import {Room,roomParams,roomName,playerName,validMessage,SEATS} from '../teste/net-room.js';
+import {Room,roomParams,roomName,roomLabel,roomAddress,HIDDEN,playerName,validMessage,SEATS} from '../teste/net-room.js';
 import {fieldRoster} from '../teste/race-roster.js';
 import {RemoteCar,packCar,readCar,CAR_FIELDS} from '../teste/net-cars.js';
 import {RaceField,TOW_ARRIVE,FAINTED,faintedInput,inTheWay,pitRoute} from '../teste/race-field.js';
@@ -17,7 +17,7 @@ const report={};
 // --- The address: #sala=NOME and its options.
 {
  const p=roomParams('#sala=Teste Óla&carro=73&auto=1&lag=150&perda=5');
- assert.deepEqual(p,{room:'testeola',car:'73',auto:true,ghosts:false,local:false,server:null,lag:150,loss:.05});
+ assert.deepEqual(p,{room:'testeola',label:'testeola',car:'73',auto:true,ghosts:false,local:false,server:null,lag:150,loss:.05});
  assert.equal(roomParams('#sala=a&local=1').local,true);assert.equal(roomParams('#sala=a&servidor=local').server,'local');assert.equal(roomParams('#sala=a&servidor=outro').server,null);
  assert.equal(roomParams('#sala=a&fantasmas=1').ghosts,true,'humans pass through each other only when asked');
  assert.equal(roomParams('#carro=73'),null,'no room without sala');
@@ -29,6 +29,28 @@ const report={};
  assert.equal(playerName('  Bia‮​ <b>oi</b>\n\t  '),'Bia <b>oi</b>','control and format characters go, text stays text');
  assert.equal(playerName('a'.repeat(80)).length,24);
  assert.equal(SEATS.length,15);assert.equal(SEATS[0],'99');
+}
+
+// --- A secret in the room's name (lives): what follows "_" is never on screen, the room is the whole name.
+{
+ const store=new Map(),local={getItem:k=>store.get(k)??null,setItem:(k,v)=>store.set(k,String(v))};
+ assert.equal(roomLabel('Amigos_Segredo7'),'amigos_***');assert.equal(roomLabel('amigos'),'amigos');
+ assert.equal(roomLabel('amigos_'),'amigos','nothing after the "_": nothing hidden');assert.equal(roomLabel('_xyz'),'_***');
+ assert.equal(roomLabel(`amigos_${HIDDEN}`),'amigos_***');
+ const p=roomParams('#sala=Amigos_Segredo7&carro=73');assert.equal(p.room,'amigossegredo7','the same room as before ("_" not kept)');assert.equal(p.label,'amigos_***');
+ // Opened whole: read whole, shown hidden (the other options kept), the secret kept in this browser.
+ const whole=roomAddress('#sala=Amigos_Segredo7&carro=73&servidor=local',local);
+ assert.equal(whole.lost,false);assert.equal(roomParams(whole.hash).room,'amigossegredo7');assert.equal(roomParams(whole.hash).server,'local');
+ assert.equal(whole.shown,`#sala=Amigos_${HIDDEN}&carro=73&servidor=local`);assert.ok(!whole.shown.toLowerCase().includes('segredo'),whole.shown);
+ // F5 (or another tab here) with the hidden address: the same room.
+ const again=roomAddress(whole.shown,local);assert.equal(again.lost,false);assert.equal(roomParams(again.hash).room,'amigossegredo7');assert.equal(again.shown,whole.shown);
+ assert.equal(roomParams(roomAddress(`#sala=amigos_${HIDDEN}`,local).hash).room,'amigossegredo7','case and accents of the shown part do not matter');
+ // The hidden address copied off a stream, on another browser: no room.
+ const viewer=roomAddress(whole.shown,{getItem:()=>null,setItem(){}});assert.equal(viewer.lost,true);
+ assert.equal(roomAddress(whole.shown,null).lost,true);assert.equal(roomAddress(whole.shown,{getItem(){throw new Error('blocked');}}).lost,true);
+ // No secret: the address stays as it is.
+ for(const h of ['#sala=amigos&carro=73','#sala=amigos_','#carro=73','']){const a=roomAddress(h,local);assert.equal(a.lost,false);assert.equal(a.hash,h);assert.equal(a.shown,h);}
+ report.segredo={sala:p.room,mostra:p.label,endereco:whole.shown};
 }
 
 // --- A car on the wire: packed, read back, anything malformed refused.

@@ -77,14 +77,40 @@ blender --background --factory-startup --python-exit-code 2 --python modelo_3d/s
 ```
 
 - Resolução de jogo: 170 × 112 seções na carroceria (o estúdio usa 300 × 192), peças torneadas com até 36 segmentos,
-  frisos mais simples. Cerca de 146 mil triângulos e 2,7 MB, sem texturas.
+  frisos mais simples. Cerca de 188 mil triângulos e 3,7 MB, sem texturas (as faces que o jogo pinta têm UV).
 - Referencial do Opala: frente +X, esquerda −Z, pneus em y = 0; o entre-eixos de 2,40 m centrado no do Opala
-  (eixos em x +1,417 e −0,983). Quatro pivôs `Roda_*_PIVO`, pintura `Pintura_fusca`, painel `Fusca_painel`, lanterna
-  `Lanterna_fusca` (luz de freio), vidros `Vidro_fusca` e o volante `Volante_Fusca` (escondido: o piloto do jogo traz o dele).
-- Diferenças do modelo de estúdio: o painel vai até a base do para-brisa, com a face pintada na cor da equipe e um
-  velocímetro (a caixa original deixava ver o porta-malas vazio pela câmera interna); o para-brisa e o vidro traseiro são
-  recortados de novo por inteiro (o recorte original deixava 40% do vidro traseiro fechado atrás do vidro, e o exportador
-  confere todas as janelas); placa amarela; faróis e setas apagados de dia; sem o piloto do `.blend`.
+  (eixos em x +1,417 e −0,983). Quatro pivôs `Roda_*_PIVO`, pintura `Pintura_fusca`, painel `Fusca_painel`, metal
+  pintado por dentro `Pintura_interna_fusca` (os três na cor da equipe), lanterna `Lanterna_fusca` (luz de freio), vidros
+  `Vidro_fusca`, retrovisores `Espelho_fusca` (nós próprios `..._Retrovisores`), espelho interno `Espelho_interno_fusca`,
+  mostradores `Mostrador_velocimetro`/`Mostrador_contagiros`, placa `Placa` e o volante `Volante_Fusca` (o de dois raios
+  do Fusca, que aparece na tela de carros; correndo, o piloto do jogo traz o dele). Nós com o extra `interno` são só do
+  carro do jogador: os rivais os tiram (`fusca.js` `rivalCabin`).
+- **Cabine de Fusca de corrida** (`modelo_3d/scripts/fusca_cabine.py`, desde 03/10/2026): painel de metal na cor do carro
+  com o velocímetro VDO atrás do volante, grade do rádio, porta-luvas, alça e botões, sob o acolchoado preto; conta-giros
+  Auto Meter no acolchoado; painel de chaves sob o painel; forros de porta em vinil preto (friso cromado, bolso, puxador,
+  manivela, maçaneta e pino), laterais traseiras; forro do teto claro com as costuras, envolvendo as colunas, quebra-sóis
+  e luz de teto; gaiola (arco atrás dos bancos, colunas A até o assoalho, travessa do para-brisa, barras baixas nas portas,
+  diagonal, escoras e barra do cinto); banco concha com cinto vermelho; túnel, tapetes de borracha, torre do câmbio, freio
+  de mão, extintor no lugar do banco do carona, base do banco traseiro e bagageiro em preto com a bateria. A cabine é
+  montada em volta do lugar do piloto do jogo (`SEAT` = `fusca.js` `FUSCA_SEAT`, 6 cm para dentro do banco do Opala: o
+  cotovelo esquerdo saía pela porta) e confere que nenhuma peça atravessa a lataria (`poking_out`).
+- **Bico arredondado** (`fusca_acabamento.py` `RoundNose`, a carroceria do exportador): o V2 fecha a frente com uma tampa
+  plana (só 3 cm de filete), que aparecia como uma face lisa entre os faróis sobre o para-choque. No jogo o capô vai 2 cm
+  mais à frente e desce arredondado (raio de 9 cm) até o avental, a frente é curva em planta e os para-lamas viram bojos
+  em volta dos faróis com um vale suave até o capô (vales mais fundos dobram a superfície: cada seção do V2 é amostrada
+  por raios a partir do centro).
+- **Acabamento externo** (`modelo_3d/scripts/fusca_acabamento.py`): retrovisores cromados nas duas portas (no lugar dos
+  ovinhos do capô; a haste entra por baixo da cabeça, sem cruzar o vidro), no ponto mais à frente em que a câmera interna vê o vidro inteiro pela janela (cerca de 50° do centro,
+  dentro de uma tela 16:9); borrachas internas nas janelas; junta da tampa do motor e duas grades de nove venezianas em
+  relevo (no lugar das vinte linhas pretas); faróis com refletor cromado (o disco creme brilhava de dia); placa com UV.
+  O exportador recorta de novo o para-brisa e o vidro traseiro por inteiro (o recorte do V2 deixava 40% do vidro traseiro
+  fechado) e as janelas laterais com prismas retos (deixava dentes da pele interna), e confere todas as janelas.
+- No jogo (`pista_interlagos/teste/fusca-cockpit.js`): o espelho interno e os retrovisores mostram a pista atrás (o passe
+  do espelho do Opala, `side-mirrors.js` com o vidro próprio do Fusca), o velocímetro VDO (0–140 km/h, marcador de
+  gasolina) e o conta-giros têm ponteiros ao vivo e luz de troca; a placa amarela diz "SÃO PAULO · FUS-K" e o número do
+  carro (FUS-K99 no 99). Os retrovisores vivos ficam no plano do próprio vidro. Câmera interna: `FUSCA_EYE` (5 cm mais para trás que antes, para os retrovisores caberem na tela).
+- Prévias: `blender --background --factory-startup --python modelo_3d/scripts/renderizar_fusca_jogo.py -- [glb] [pasta]`
+  renderiza as vistas da câmera interna e de fora (padrão em `previas/jogo/blender`, fora do git).
 - No Modo Corrida, a aba Fusca da tela de carros põe o grid inteiro de Fusca, cada um nas cores e com o número do seu carro
   (`pista_interlagos/teste/fusca.js`, `immersive-visuals.js` `fuscaRival`), com a mecânica do Opala. Validação no
   navegador: `pista_interlagos/scripts/verificar_fusca.py`.

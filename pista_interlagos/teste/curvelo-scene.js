@@ -8,14 +8,16 @@ export function createCurveloScene(data,roadSurface,{groundMaterial=null,gravelM
  const mat=(color,extras={})=>new THREE.MeshStandardMaterial({color,roughness:.95,...extras});
  const grass=mat(0xffffff,{vertexColors:true}),concrete=mat(0x8f918b,{name:'Concreto'}),white=mat(0xe9e2cb,{polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}),dark=mat(0x292e30),roof=mat(0x667477,{name:'Boxes_azul',metalness:.35,roughness:.6});
  function mesh(g,m,name){g.computeVertexNormals();const o=new THREE.Mesh(g,m);o.name=name;o.receiveShadow=true;root.add(o);return o;}
- function strip(start,end,material,name,from=0,to=1250){
-  const positions=[],uv=[],indices=[];
+ // step: widest gap between vertices across the strip. Off the asphalt the ground curves
+ // down into the hills, and a strip spanning it in one quad sinks under the terrain mid-way.
+ function strip(start,end,material,name,from=0,to=1250,step=Infinity){
+  const positions=[],uv=[],indices=[],[lo,hi]=[start,end].sort((a,b)=>a-b),n=Math.max(1,Math.ceil((hi-lo)/step));
   for(let i=0;i<=a.length;i++){
    const p=a[i%a.length];car.index=i%a.length;
-   for(const d of [start,end].sort((a,b)=>a-b)){
-    const x=p[1]+p[9]*d,y=p[2]+p[10]*d;positions.push(x,car.sample(x,y).z+.008,-y);uv.push(d/2,(i===a.length?1250:p[0])/2);
+   for(let k=0;k<=n;k++){
+    const d=lo+(hi-lo)*k/n,x=p[1]+p[9]*d,y=p[2]+p[10]*d;positions.push(x,car.sample(x,y).z+.008,-y);uv.push(d/2,(i===a.length?1250:p[0])/2);
    }
-   if(i&&a[i-1][0]>=from&&a[i-1][0]<=to){const k=(i-1)*2;indices.push(k,k+2,k+1,k+1,k+2,k+3);}
+   if(i&&a[i-1][0]>=from&&a[i-1][0]<=to)for(let k=0;k<n;k++){const v=(i-1)*(n+1)+k,w=v+n+1;indices.push(v,w,v+1,v+1,w,w+1);}
   }
   const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));g.setAttribute('uv',new THREE.Float32BufferAttribute(uv,2));g.setIndex(indices);g.computeVertexNormals();
   return mesh(material===roadSurface.material?roadSurface.geometry(g):g,material,name);
@@ -45,8 +47,8 @@ export function createCurveloScene(data,roadSurface,{groundMaterial=null,gravelM
  strip(-7,7,roadSurface.material,'Asfalto_Curvelo');
  for(const side of [-1,1])strip(side*6.75,side*6.89,white,'Linha_borda');
  // Flat turn: external asphalt apron followed by a broad gravel trap.
- strip(-11.5,-8.4,mat(0x66686a),'Escape_asfaltado',880,1100);
- const gravel=strip(-30,-11.5,mat(gravelMap?0xd6ccb6:0xb09c71,{vertexColors:true,map:gravelMap}),'Caixa_de_brita',890,1085);
+ strip(-11.5,-8.4,mat(0x66686a),'Escape_asfaltado',880,1100,1.5);
+ const gravel=strip(-30,-11.5,mat(gravelMap?0xd6ccb6:0xb09c71,{vertexColors:true,map:gravelMap}),'Caixa_de_brita',890,1085,1.5);
  const gravelColors=[];for(let i=0;i<gravel.geometry.attributes.position.count;i++){const c=.75+.2*Math.sin(i*5.1)**2;gravelColors.push(c,c,c);}gravel.geometry.setAttribute('color',new THREE.Float32BufferAttribute(gravelColors,3));
  function box(x,y,z,w,h,d,m,name,heading=0){const o=mesh(new THREE.BoxGeometry(w,h,d),m,name);o.position.set(x,y,z);o.rotation.y=heading;o.castShadow=true;return o;}
  const p=a[0],heading=Math.atan2(p[8],p[7]);

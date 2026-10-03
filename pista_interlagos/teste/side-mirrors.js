@@ -31,26 +31,51 @@ export class SideMirrors {
  // The player's car model (its doors shut) in the sprung body `body`, and the driver's eye
  // there (car frame: +X forward, +Y up, -Z the driver's side). The glasses are flagged
  // "interno", so the rivals cloned from the model drop them; they show only while live.
- attach(model,body,eye){
+ // glass: a model whose mirrors' own glass faces the driver (the Fusca's, material named so, both
+ // doors' in one mesh): each side's glass is drawn in the plane of its own, over its outline, a
+ // millimetre or two ahead (turned to the eye instead, half of it went behind the tilted glass).
+ attach(model,body,eye,{glass=null,ahead=.0015}={}){
   this.show(false);for(const g of this.glasses)g.mesh.removeFromParent();this.glasses=[];if(!model)return 0;
   model.updateMatrixWorld(true);const inverse=body.matrixWorld.clone().invert(),found=[];
-  model.traverse(o=>{if(o.isMesh&&!Array.isArray(o.material)&&o.material.name==='Espelho')found.push(o);});
-  const v=new THREE.Vector3(),w=new THREE.Vector3();
+  model.traverse(o=>{if(o.isMesh&&!Array.isArray(o.material)&&o.material.name===(glass??'Espelho'))found.push(o);});
+  const v=new THREE.Vector3(),w=new THREE.Vector3(),spots=[];
   for(const o of found){
+   if(glass){
+    // Each door's glass: its own vertices, split by side.
+    const toCar=new THREE.Matrix4().multiplyMatrices(inverse,o.matrixWorld),pos=o.geometry.attributes.position;
+    const turn=new THREE.Matrix3().getNormalMatrix(toCar),normals=o.geometry.attributes.normal;
+    for(const side of [-1,1]){const points=[],normal=new THREE.Vector3();
+     for(let i=0;i<pos.count;i++){v.fromBufferAttribute(pos,i).applyMatrix4(toCar);if(Math.sign(v.z)!==side)continue;points.push(v.clone());if(normals)normal.add(w.fromBufferAttribute(normals,i).applyMatrix3(turn));}
+     if(points.length<3)continue;
+     // Its plane: the normal toward the eye, x level across it, the outline's half sizes along x and y.
+     const c=points.reduce((a,p)=>a.add(p),new THREE.Vector3()).divideScalar(points.length);
+     if(normal.lengthSq()<1e-12)normal.subVectors(eye,c);normal.normalize();if(normal.dot(w.subVectors(eye,c))<0)normal.negate();
+     const xAxis=new THREE.Vector3(0,1,0).cross(normal).normalize(),yAxis=new THREE.Vector3().crossVectors(normal,xAxis);
+     let rx=0,ry=0;for(const p of points){w.subVectors(p,c);rx=Math.max(rx,Math.abs(w.dot(xAxis)));ry=Math.max(ry,Math.abs(w.dot(yAxis)));}
+     spots.push({o,side,c,plane:{normal,xAxis,yAxis,rx,ry},ahead});}
+    continue;
+   }
    const housing=o.parent?.children.find(s=>s.isMesh&&!Array.isArray(s.material)&&s.material.name==='Pintura_preta');if(!housing)continue;
    o.geometry.computeBoundingBox();const c=o.geometry.boundingBox.getCenter(new THREE.Vector3()).applyMatrix4(o.matrixWorld).applyMatrix4(inverse),side=Math.sign(c.z)||1;
    // The housing's outline from the eye, in angles about the line to the buried glass
    // (its shell only: the arm to the door runs on inboard).
-   const toCar=new THREE.Matrix4().multiplyMatrices(inverse,housing.matrixWorld),pos=housing.geometry.attributes.position;
+   const toCar=new THREE.Matrix4().multiplyMatrices(inverse,housing.matrixWorld),pos=housing.geometry.attributes.position,points=[];
+   for(let i=0;i<pos.count;i++){v.fromBufferAttribute(pos,i).applyMatrix4(toCar);w.subVectors(v,c);if(Math.abs(w.x)>.16||Math.abs(w.y)>.07||Math.abs(w.z)>.065)continue;points.push(v.clone());}
+   spots.push({o,side,c,points,fill:this.look.fill,ahead:this.look.ahead});
+  }
+  for(const {o,side,c,points,fill,plane,ahead:forward} of spots){
+   let inCar;
+   if(plane){const {normal,xAxis,yAxis,rx,ry}=plane;inCar=new THREE.Matrix4().makeBasis(xAxis,yAxis,normal).setPosition(c.clone().addScaledVector(normal,forward)).scale(new THREE.Vector3(rx,ry,1));}
+   else{
    const f=c.clone().sub(eye).normalize(),r=new THREE.Vector3().crossVectors(f,new THREE.Vector3(0,1,0)).normalize(),u=new THREE.Vector3().crossVectors(r,f);
    let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
-   for(let i=0;i<pos.count;i++){v.fromBufferAttribute(pos,i).applyMatrix4(toCar);w.subVectors(v,c);if(Math.abs(w.x)>.16||Math.abs(w.y)>.07||Math.abs(w.z)>.065)continue;
-    w.subVectors(v,eye);const along=w.dot(f),a=Math.atan2(w.dot(r),along),b=Math.atan2(w.dot(u),along);x0=Math.min(x0,a);x1=Math.max(x1,a);y0=Math.min(y0,b);y1=Math.max(y1,b);}
+   for(const p of points){w.subVectors(p,eye);const along=w.dot(f),a=Math.atan2(w.dot(r),along),b=Math.atan2(w.dot(u),along);x0=Math.min(x0,a);x1=Math.max(x1,a);y0=Math.min(y0,b);y1=Math.max(y1,b);}
    if(!(x1>x0&&y1>y0))continue;
-   // The glass: in front of the shell by `ahead`, facing the eye, its size the same angles.
-   const d=c.distanceTo(eye)-this.look.ahead,ax=(x0+x1)/2,ay=(y0+y1)/2,dir=f.clone().add(r.clone().multiplyScalar(Math.tan(ax))).add(u.clone().multiplyScalar(Math.tan(ay))).normalize();
+   // The glass: in front of the shell (or the model's glass) by `ahead`, facing the eye, its size the same angles.
+   const d=c.distanceTo(eye)-forward,ax=(x0+x1)/2,ay=(y0+y1)/2,dir=f.clone().add(r.clone().multiplyScalar(Math.tan(ax))).add(u.clone().multiplyScalar(Math.tan(ay))).normalize();
    const place=eye.clone().addScaledVector(dir,d),normal=dir.clone().negate(),xAxis=new THREE.Vector3().crossVectors(new THREE.Vector3(0,1,0),normal).normalize(),yAxis=new THREE.Vector3().crossVectors(normal,xAxis);
-   const inCar=new THREE.Matrix4().makeBasis(xAxis,yAxis,normal).setPosition(place).scale(new THREE.Vector3(d*Math.tan((x1-x0)/2*this.look.fill),d*Math.tan((y1-y0)/2*this.look.fill),1));
+   inCar=new THREE.Matrix4().makeBasis(xAxis,yAxis,normal).setPosition(place).scale(new THREE.Vector3(d*Math.tan((x1-x0)/2*fill),d*Math.tan((y1-y0)/2*fill),1));
+   }
    const material=new THREE.ShaderMaterial({name:'Espelho_retrovisor_'+(side<0?'esquerdo':'direito'),vertexShader,fragmentShader,toneMapped:false,
     uniforms:{map:{value:this.texture},rearViewProjection:{value:new THREE.Matrix4()},glassNormal:{value:new THREE.Vector3(-1,0,0)},glassCenter:{value:new THREE.Vector3()},centerRay:{value:new THREE.Vector3(-1,0,0)},
      widen:{value:this.look.widen},distance:{value:this.look.distance},reflectance:{value:this.look.reflectance}}});
