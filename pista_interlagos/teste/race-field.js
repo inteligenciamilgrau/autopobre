@@ -1,9 +1,13 @@
-import {TestCar,clamp,wrap,steerLimit,WHEELBASE} from './physics.js?v=20260923-capotagem';
+import {TestCar,clamp,wrap,steerLimit,WHEELBASE,OPALA_BODY} from './physics.js?v=20260923-capotagem';
 import {RIVAL_ROSTER,ACE_NUMBER,AI_LEVELS,gridSlot,playerGridSlot} from './race-roster.js';
 import {pitGeometry,wallContact,pitLane,curveloPitFrame,CURVELO_PIT} from './pit-lane.js';
-const HALF_LENGTH=2.38,HALF_WIDTH=.93,MASS=1250,INERTIA=MASS*(4.76**2+1.86**2)/12;
+// Contacts between cars: each car's plan is its body's box (physics.js OPALA_BODY, FUSCA_BODY; a remote
+// car without one is an Opala). Mass and inertia are the Opala's for every body (the same mechanics).
+const MASS=1250,INERTIA=MASS*(4.76**2+1.86**2)/12;
+const plan=c=>c.body??OPALA_BODY;
 const axes=c=>[[Math.cos(c.heading),Math.sin(c.heading)],[-Math.sin(c.heading),Math.cos(c.heading)]];
-const center=c=>[c.x+.08*Math.cos(c.heading),c.y+.08*Math.sin(c.heading)];
+const center=c=>{const ahead=plan(c).ahead;return [c.x+ahead*Math.cos(c.heading),c.y+ahead*Math.sin(c.heading)];};
+const reach=p=>Math.hypot(p.halfLength,p.halfWidth);
 const dot=(a,b)=>a[0]*b[0]+a[1]*b[1];
 const cross=(a,b)=>a[0]*b[1]-a[1]*b[0];
 // Sectors per lap of the split times behind an estimated finish (classification).
@@ -66,18 +70,18 @@ export const HERO_STYLE=Object.freeze({name:'Herói',maxSpeed:56,cornerGrip:10,b
 export const HERO_RATING=.92;
 // Four separating axes describe the full, rotated body, including side contacts.
 export function bodyContact(a,b){
- const aa=axes(a),bb=axes(b),ac=center(a),bc=center(b),delta=[bc[0]-ac[0],bc[1]-ac[1]];
- if(Math.hypot(...delta)>5.2)return null;
+ const pa=plan(a),pb=plan(b),aa=axes(a),bb=axes(b),ac=center(a),bc=center(b),delta=[bc[0]-ac[0],bc[1]-ac[1]];
+ if(Math.hypot(...delta)>reach(pa)+reach(pb)+.09)return null;
  let depth=Infinity,normal;
  for(const axis of [...aa,...bb]){
-  const radius=x=>HALF_LENGTH*Math.abs(dot(axis,x[0]))+HALF_WIDTH*Math.abs(dot(axis,x[1]));
-  const overlap=radius(aa)+radius(bb)-Math.abs(dot(delta,axis));if(overlap<=0)return null;
+  const radius=(p,x)=>p.halfLength*Math.abs(dot(axis,x[0]))+p.halfWidth*Math.abs(dot(axis,x[1]));
+  const overlap=radius(pa,aa)+radius(pb,bb)-Math.abs(dot(delta,axis));if(overlap<=0)return null;
   if(overlap<depth){depth=overlap;const sign=dot(delta,axis)>=0?1:-1;normal=axis.map(v=>v*sign);}
  }
  // Average clipped corners gives a stable face contact, or a corner for glancing blows.
- const corners=(c,ax)=>[-1,1].flatMap(l=>[-1,1].map(w=>c.map((v,i)=>v+l*HALF_LENGTH*ax[0][i]+w*HALF_WIDTH*ax[1][i])));
- const inside=(p,c,ax)=>Math.abs(dot([p[0]-c[0],p[1]-c[1]],ax[0]))<=HALF_LENGTH+.001&&Math.abs(dot([p[0]-c[0],p[1]-c[1]],ax[1]))<=HALF_WIDTH+.001;
- const points=[...corners(ac,aa).filter(p=>inside(p,bc,bb)),...corners(bc,bb).filter(p=>inside(p,ac,aa))];
+ const corners=(p,c,ax)=>[-1,1].flatMap(l=>[-1,1].map(w=>c.map((v,i)=>v+l*p.halfLength*ax[0][i]+w*p.halfWidth*ax[1][i])));
+ const inside=(q,p,c,ax)=>Math.abs(dot([q[0]-c[0],q[1]-c[1]],ax[0]))<=p.halfLength+.001&&Math.abs(dot([q[0]-c[0],q[1]-c[1]],ax[1]))<=p.halfWidth+.001;
+ const points=[...corners(pa,ac,aa).filter(q=>inside(q,pb,bc,bb)),...corners(pb,bc,bb).filter(q=>inside(q,pa,ac,aa))];
  const point=points.length?[0,1].map(i=>points.reduce((sum,p)=>sum+p[i],0)/points.length):ac.map((v,i)=>(v+bc[i])/2);
  return {depth,normal,point};
 }
@@ -222,7 +226,8 @@ export class RaceField {
  // ace: Koyzinho drives as the ace from the next reset (the race option, main.js); level: the rivals'
  // level (AI_LEVELS), also taken at the next reset; retirements: one to four cars break down (the
  // race option "Abandonos", on in the game, off by default here so seeded checks race full fields).
- constructor(data,{onStep,onReset,seed,ace=false,level='facil',retirements=false,roster=RIVAL_ROSTER}={}){this.data=data;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.ace=ace;this.level=level;this.retirements=retirements;this.roster=roster;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
+ // body: the rivals' body (physics.js OPALA_BODY, FUSCA_BODY in a Fusca race), taken at the next reset.
+ constructor(data,{onStep,onReset,seed,ace=false,level='facil',retirements=false,roster=RIVAL_ROSTER,body=OPALA_BODY}={}){this.data=data;this.body=body;this.onStep=onStep;this.onReset=onReset;this.seed=seed;this.ace=ace;this.level=level;this.retirements=retirements;this.roster=roster;this.line=racingLine(data);this.route=pitRoute(data);this.time=0;this.collisions=0;this.cooldowns=new Map();this.reset();}
  // entrants: the roster numbers that race (null: all of them; [] a solo practice, [number] a 1x1). A
  // short field closes up to the front of the grid, the player in the next slot (playerGridSlot).
  // roster (taken here too): the drivers, RIVAL_ROSTER or, when the player races another team's car,
@@ -243,7 +248,7 @@ export class RaceField {
   this.rivals=roster.map((entry,i)=>{
    const slot=slots[i],style=ace(entry)?ACE_STYLE:styleForLevel(entry,level),progress=playerBack-gridSlot(slot).back;
    const L=this.data.meta.reconstructed_xy_m,s=((startS+progress)%L+L)%L;let index=this.data.samples.findIndex(p=>p[0]>=s);if(index<0)index=0;
-   const car=new TestCar(this.data);car.reset(index);car.awaitingStart=grid;car.engineScale=style.engineScale;if(style.heavy)car.contactMass=style.heavy;
+   const car=new TestCar(this.data).setBody(this.body);car.reset(index);car.awaitingStart=grid;car.engineScale=style.engineScale;if(style.heavy)car.contactMass=style.heavy;
    const lane=gridSlot(slot).lane;car.x+=car.surface.lx*lane;car.y+=car.surface.ly*lane;car.surface=car.sample(car.x,car.y);
    const rating=levelRating(entry,level);
    const rival={car,entry,rosterIndex:field.indexOf(entry),style,level,progress,start:progress,splits:[],lastS:car.surface.s,finished:false,finishTime:null,stun:0,

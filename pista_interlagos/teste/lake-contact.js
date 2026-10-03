@@ -8,7 +8,8 @@ import {SUSPENSION_WHEELS,HULL,CG_HEIGHT,clamp} from './physics.js';
 // spray aside, the tyres throw fans and rooster tails, and a body meeting the surface
 // fast throws a wall of water ahead of it.
 // Physics frame: x, y horizontal, z up; particles are written in three.js axes.
-const LOW_HULL=HULL.slice(0,9),GRAVITY=9.81,MASS=1250;
+// The underbody and sills: the first nine points of the car's shell (car.body.hull, the Opala's HULL by default).
+const LOW_HULL=9,GRAVITY=9.81,MASS=1250;
 // Quadratic water drag, .5*rho*Cd*A/mass, scaled down to ~25% so a car driven into
 // a lake stops within a few lengths instead of as if it hit a wall; the waves it
 // piles up (LakeWaves.hullPush) add their own resistance on top.
@@ -69,8 +70,9 @@ export class LakeContact {
   }
   // Hull: how deep the underbody and sills sit below the surface, on average.
   let hull=0;
-  if(level!==null)for(const [px,py,pz] of LOW_HULL){const z=car.z+f[2]*px+l[2]*py+u[2]*pz;hull+=clamp(level-z,0,1.3);}
-  hull/=LOW_HULL.length;
+  const shell=car.body?.hull??HULL;
+  if(level!==null)for(let k=0;k<LOW_HULL;k++){const [px,py,pz]=shell[k],z=car.z+f[2]*px+l[2]*py+u[2]*pz;hull+=clamp(level-z,0,1.3);}
+  hull/=LOW_HULL;
   car.wet=this.wheels.map(w=>w.depth);car.wetHull=hull;
   const entering=!this.inWater&&wet>0,hullEntry=this.hull<.03&&hull>=.03;
   this.inWater=wet>0;

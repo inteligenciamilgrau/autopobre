@@ -135,15 +135,18 @@ export function pitFrameAt(pit,x,y){
  return {s:mix(c.s)+ex*tx+ey*ty,d:-ex*ty+ey*tx,front:mix(c.hi)+.35};
 }
 // Deepest overlap between the car footprint and the pit walls, if any.
-export function wallContact(geo,x,y,heading){
- const list=geo.wallGrid.get(key(Math.floor(x/CELL),Math.floor(y/CELL)));if(!list)return null;
- const fx=Math.cos(heading),fy=Math.sin(heading);let best=null;
+// body: the car's plan (physics.js OPALA_BODY, FUSCA_BODY): its box, halfLength by halfWidth, sits wallAhead
+// forward of (x, y); the default is the Opala's.
+const OPALA_PLAN={halfLength:2.38,halfWidth:.93,wallAhead:0};
+export function wallContact(geo,x,y,heading,body=OPALA_PLAN){
+ const fx=Math.cos(heading),fy=Math.sin(heading);x+=fx*body.wallAhead;y+=fy*body.wallAhead;
+ const list=geo.wallGrid.get(key(Math.floor(x/CELL),Math.floor(y/CELL)));if(!list)return null;let best=null;
  for(const w of list){
   const dx=w.x2-w.x1,dy=w.y2-w.y1,len2=dx*dx+dy*dy||1e-9;let u=((x-w.x1)*dx+(y-w.y1)*dy)/len2;u=u<0?0:u>1?1:u;
   const cx=w.x1+u*dx,cy=w.y1+u*dy;let nx=x-cx,ny=y-cy;const dist=Math.hypot(nx,ny);if(dist>3.5+w.half)continue;
   if(dist<1e-6){nx=-dy;ny=dx;}const nl=Math.hypot(nx,ny);nx/=nl;ny/=nl;
-  // Footprint half-extent of the car (2.38 x 0.93 m) along the contact normal.
-  const extent=2.38*Math.abs(nx*fx+ny*fy)+.93*Math.abs(-nx*fy+ny*fx),depth=extent+w.half-dist;
+  // Footprint half-extent of the car's box along the contact normal.
+  const extent=body.halfLength*Math.abs(nx*fx+ny*fy)+body.halfWidth*Math.abs(-nx*fy+ny*fx),depth=extent+w.half-dist;
   if(depth>0&&(!best||depth>best.depth))best={depth,nx,ny,name:w.name};
  }
  return best;

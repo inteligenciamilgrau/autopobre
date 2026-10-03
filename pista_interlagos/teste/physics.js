@@ -50,6 +50,21 @@ export const SUSPENSION_WHEELS=Object.freeze([[FRONT_AXLE,HALF_TRACK],[FRONT_AXL
 // shoulders, beltline and roof touch only when the car is upset.
 export const HULL=[[2.25,.75,-.28],[2.25,-.75,-.28],[-2.05,.8,-.27],[-2.05,-.8,-.27],[.2,.93,-.34],[.2,-.93,-.34],[1,0,-.36],[0,0,-.36],[-1.4,0,-.41],
  [2.42,.7,0],[2.42,-.7,0],[-2.35,.8,-.1],[-2.35,-.8,-.1],[2.3,.85,.28],[2.3,-.85,.28],[-2.3,.85,.28],[-2.3,-.85,.28],[.2,.95,.4],[.2,-.95,.4],[.35,.66,.86],[.35,-.66,.86],[-1.05,.66,.86],[-1.05,-.66,.86]];
+// The Fusca's shell (fusca.js, modelo_3d/fusca_v2), measured on its game model as HULL on the Opala's, in the
+// same order: the low nine (the bumper guards' feet front and rear, the running boards, the floor and the
+// exhaust's tips, 25 to 37 cm off the ground), then the bumpers, the fenders' tops by the lamps, the
+// beltline, the roof's edges and the top of its dome.
+export const FUSCA_HULL=[[2.15,.45,-.16],[2.15,-.45,-.16],[-1.86,.45,-.15],[-1.86,-.45,-.15],[.1,.74,-.25],[.1,-.74,-.25],[1,0,-.27],[0,0,-.27],[-1.82,0,-.25],
+ [2.1,.55,0],[2.1,-.55,0],[-1.8,.55,-.05],[-1.8,-.55,-.05],[1.85,.55,.25],[1.85,-.55,.25],[-1.5,.58,.2],[-1.5,-.58,.2],[.2,.7,.38],[.2,-.7,.38],[.45,.5,.87],[.45,-.5,.87],[-.75,.5,.87],[-.75,-.5,.87],[-.1,0,1.01]];
+// The body a car meets the world with; the mechanics (mass, engine, tyres, suspension) are the Opala's for
+// both. Its plan, round the centre of mass: halfLength, halfWidth and `ahead` (the plan's centre ahead of the
+// centre of mass) between cars (race-field.js); the same box with `wallAhead` against the guardrails and the
+// pit walls; front, rear and halfWidth against tree trunks and people. Its shell (hull) meets the ground and
+// the water. The Opala's numbers are the ones its contacts always used: between cars the box sat 8 cm ahead,
+// against the walls round the centre of mass, and trunks and people met its measured ends. The Fusca's plan
+// runs from the rear bumper guards to the front ones (-1.86 to 2.164 m) and across its fenders (0.77 m).
+export const OPALA_BODY=Object.freeze({name:'opala',halfLength:2.38,halfWidth:.93,ahead:.08,wallAhead:0,front:2.42,rear:2.35,hull:HULL});
+export const FUSCA_BODY=Object.freeze({name:'fusca',halfLength:2.012,halfWidth:.77,ahead:.152,wallAhead:.152,front:2.164,rear:1.86,hull:FUSCA_HULL});
 // The underbody skids over grass and soil; bodywork and roof scrape harder.
 const LOW_HULL=9,UNDERBODY_FRICTION=.3,HULL_FRICTION=.5;
 // Handling balance: the front reaches the limit first; the rear keeps a reserve
@@ -107,7 +122,9 @@ function bodyAxes(heading,pitch,roll,axes){
 }
 const renderAxes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};
 export class TestCar {
- constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.pitGeo=pitGeometry(data);this.axes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};this.reset();}
+ constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.pitGeo=pitGeometry(data);this.axes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};this.body=OPALA_BODY;this.reset();}
+ // The body it meets the world with (OPALA_BODY, FUSCA_BODY); the next reset or settle seats it on its own shell.
+ setBody(body){if(body!==this.body){this.body=body;this.shell=null;}return this;}
  // The grid spot: back metres before the line, lane metres across (race-roster.js playerGridSlot).
  resetGrid({back=GRID_START_BACK,lane=0}={}){const target=this.data.meta.reconstructed_xy_m-back;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));if(lane){this.x+=this.surface.lx*lane;this.y+=this.surface.ly*lane;this.settle();}this.awaitingStart=true;}
  reset(index=0){this.awaitingStart=false;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.shifts=0;this.rightings=0;this.rightedAt=null;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.beforeCross=null;this.recover(index);}
@@ -124,7 +141,7 @@ export class TestCar {
   this.pitch=-Math.atan(along);this.roll=Math.atan(across);
   this.z=(fl+fr+rl+rr)/4-along*(FRONT_AXLE-REAR_AXLE)/2+CG_HEIGHT*Math.sqrt(1+along*along+across*across);
   const {f,l,u}=this.updateAxes();let lift=0;
-  for(const [px,py,pz] of [...SUSPENSION_WHEELS.map(w=>[w.x,w.y,-CG_HEIGHT]),...HULL.slice(0,LOW_HULL)]){
+  for(const [px,py,pz] of [...SUSPENSION_WHEELS.map(w=>[w.x,w.y,-CG_HEIGHT]),...this.body.hull.slice(0,LOW_HULL)]){
    const rx=f[0]*px+l[0]*py+u[0]*pz,ry=f[1]*px+l[1]*py+u[1]*pz,rz=f[2]*px+l[2]*py+u[2]*pz;
    lift=Math.max(lift,this.sample(this.x+rx,this.y+ry,this.index).z-this.z-rz);
   }
@@ -306,7 +323,8 @@ export class TestCar {
   this.surface=this.sample(this.x,this.y);this.index=this.surface.i;
   // Visible sections and collision share the same openings and shoulder clearance.
   const r=this.surface,side=Math.sign(r.d),angle=wrap(this.heading-Math.atan2(r.ty,r.tx));
-  const extent=.93*Math.abs(Math.cos(angle))+2.38*Math.abs(Math.sin(angle));
+  // How far the body's plan reaches toward the rail beside the centre of mass (its box sits wallAhead forward).
+  const b=this.body,extent=b.halfWidth*Math.abs(Math.cos(angle))+b.halfLength*Math.abs(Math.sin(angle))+side*b.wallAhead*Math.sin(angle);
   const wall=r.width/2+guardrailClearance(this.data,r.s,side)-.12-extent;
   const crossed=Math.abs(p.d)<=p.width/2+guardrailClearance(this.data,p.s,side)-.12-extent;
   if(guardrailPresent(this.data,r.s,side)&&Math.abs(r.d)>wall&&(crossed||Math.abs(r.d)<wall+5)){
@@ -322,7 +340,7 @@ export class TestCar {
   }
   // Pit wall, garage fronts and the walls along the pit exit.
   for(let pass=0;this.pitGeo&&pass<2;pass++){
-   const hit=wallContact(this.pitGeo,this.x,this.y,this.heading);if(!hit)break;
+   const hit=wallContact(this.pitGeo,this.x,this.y,this.heading,this.body);if(!hit)break;
    this.x+=hit.nx*hit.depth;this.y+=hit.ny*hit.depth;
    const into=-(this.vx*hit.nx+this.vy*hit.ny);
    if(into>0){
@@ -441,10 +459,10 @@ export class TestCar {
   const damping=Math.exp(-h*.4);this.pitchRate*=damping;this.rollRate*=damping;
  }
  contactShell(h,F,L,U){
-  const count=this.wheelsDown<4||U[2]<.9||this.hullContact?HULL.length:LOW_HULL,contacts=this.shell??=HULL.map(()=>({r:[0,0,0],n:[0,0,1],depth:0,normal:0,friction:0}));
+  const hull=this.body.hull,count=this.wheelsDown<4||U[2]<.9||this.hullContact?hull.length:LOW_HULL,contacts=this.shell??=hull.map(()=>({r:[0,0,0],n:[0,0,1],depth:0,normal:0,friction:0}));
   const v=[0,0,0];let any=false;
   for(let k=0;k<count;k++){
-   const [px,py,pz]=HULL[k],q=contacts[k],r=q.r;
+   const [px,py,pz]=hull[k],q=contacts[k],r=q.r;
    r[0]=F[0]*px+L[0]*py+U[0]*pz;r[1]=F[1]*px+L[1]*py+U[1]*pz;r[2]=F[2]*px+L[2]*py+U[2]*pz;
    const g=this.ground(this.x+r[0],this.y+r[1]),gx=g.gx??0,gy=g.gy??0,nz=1/Math.sqrt(1+gx*gx+gy*gy);
    q.n[0]=-gx*nz;q.n[1]=-gy*nz;q.n[2]=nz;q.depth=(g.z-this.z-r[2])*nz;q.normal=q.friction=0;

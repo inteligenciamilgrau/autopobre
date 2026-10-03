@@ -469,14 +469,16 @@ function throwFrom(car,side){
 }
 // Once a frame (main.js) with the player's car: anyone standing in its path, on the same
 // level and hit faster than a walk, goes flying. Returns how many were hit.
-// CAR_GROUND: the centre of mass above the ground (physics.js CG_HEIGHT).
+// CAR_GROUND: the centre of mass above the ground (physics.js CG_HEIGHT). The car's plan is its body's
+// (car.body front, rear and halfWidth: the Opala's or the Fusca's), the Opala's by default.
 const CAR_FRONT=2.42,CAR_REAR=2.35,CAR_SIDE=.93,BODY=.3,HIT_SPEED=2,CAR_GROUND=.52;
 export function hitPeople(car){
  const speed=Math.hypot(car.vx,car.vy);if(speed<HIT_SPEED)return 0;
+ const front=car.body?.front??CAR_FRONT,rear=car.body?.rear??CAR_REAR,side=car.body?.halfWidth??CAR_SIDE;
  const c=Math.cos(car.heading),s=Math.sin(car.heading),ground=car.z-CAR_GROUND,where=new THREE.Vector3(car.x,ground,-car.y);let hits=0;
  // Body frame of the car: along (forward) and across (left); true when (x, y) is inside the plan.
  const inside=(x,y,z)=>{if(Math.abs(z-ground)>1.3)return 0;const dx=x-car.x,dy=y-car.y,b=dx*c+dy*s,l=-dx*s+dy*c;
-  return b>-CAR_REAR-BODY&&b<CAR_FRONT+BODY&&Math.abs(l)<CAR_SIDE+BODY?(Math.sign(l)||1):0;};
+  return b>-rear-BODY&&b<front+BODY&&Math.abs(l)<side+BODY?(Math.sign(l)||1):0;};
  for(const crowd of LIVE){
   if(!crowd.attached||!shown(crowd.mesh))continue;
   CENTRE.copy(crowd.centre).applyMatrix4(crowd.mesh.matrixWorld);if(Math.hypot(CENTRE.x-car.x,-CENTRE.z-car.y)>crowd.radius+4)continue;

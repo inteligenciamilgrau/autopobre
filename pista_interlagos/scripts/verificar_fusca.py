@@ -2,7 +2,7 @@
 black with the yellow stripe), the studio turning the chosen one in its colours, the choice kept, and on
 track a field of Fuscas: the player's (the Opala's body, cockpit and brake lamps hidden, the driver in the
 Fusca's seat) and every rival's, each driver on the Fusca's seat, with Stevan Gaipo's Fusca 99 in the seat
-of the team taken. Back on the menu the Opala returns; the Opala tab and Modo História stay Opalas.
+of the team taken; all of them collide with the Fusca's own body (physics.js FUSCA_BODY). Back on the menu the Opala returns; the Opala tab and Modo História stay Opalas.
 Usage: verificar_fusca.py [porta]
 Screens in renders/: fusca_99.png, fusca_73.png, fusca_19.png, fusca_opala_aba.png, fusca_grid.png,
 fusca_corrida_*.png, fusca_99_corrida.png, fusca_celular.png."""
@@ -18,7 +18,7 @@ ROOT=Path(__file__).resolve().parents[1]
 RENDERS=ROOT/'renders';RENDERS.mkdir(exist_ok=True)
 HOOK="""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();return true;}"""
 FIELD="""()=>{interlagos.immersiveInfo();const f=fixture,v=f.visual;return {rivals:f.rivals.map(r=>r.entry.number),seats:v.rivals.map(o=>o.userData.entry.number),
- models:v.rivals.map(o=>o.userData.fusca?'fusca':'opala'),seat:v.rivals.map(o=>o.userData.driver?.root.position.toArray().map(c=>+c.toFixed(4))??null),
+ models:v.rivals.map(o=>o.userData.fusca?'fusca':'opala'),bodies:f.rivals.map(r=>r.car.body.name),fieldBody:f.field.body.name,playerBody:interlagos.car.body.name,seat:v.rivals.map(o=>o.userData.driver?.root.position.toArray().map(c=>+c.toFixed(4))??null),
  opala99Shown:!!v.opala99?.visible,fuscasShown:v.root.children.filter(o=>o.visible&&o.userData.fusca).length,me:f.playerEntry?.number??'99'}}"""
 CARS="()=>interlagosCarros.info()"
 PREFS="()=>JSON.parse(localStorage.getItem('opala99-preferences-v1'))"
@@ -70,6 +70,8 @@ with sync_playwright() as p:
  assert '73' not in field['rivals'] and field['seats'][field['rivals'].index('99')]=='99' and field['me']=='73',field
  # The whole field in Fuscas, each rival's driver on the Fusca's seat (rival-driver.js CABIN_DROP plus fusca.js FUSCA_SEAT).
  assert field['models']==['fusca']*14 and field['fuscasShown']==14 and not field['opala99Shown'],field
+ # And each meets the others, the walls and the ground with the Fusca's body (physics.js FUSCA_BODY).
+ assert field['bodies']==['fusca']*14 and field['playerBody']=='fusca',field
  assert all(s==[.257,.02,0] for s in field['seat']),field['seat']
  shot(page,'fusca_grid.png')
  wait_race_start(page)
@@ -93,7 +95,7 @@ with sync_playwright() as p:
  page.click('#tracksBack');wait_js(page,"interlagosCarros.info().live");page.click('#carsBack');page.click('#storyStart')
  page.click('#singleRace');wait_js(page,"interlagos.ready&&!interlagos.state.paused",timeout=240000);page.wait_for_timeout(600)
  story=page.evaluate(CARS);assert story['raceCar']=='99' and story['raceModel']=='opala' and story['fusca'] is None and story['opalaShown'],story
- storyField=page.evaluate(FIELD);assert storyField['models']==['opala']*14 and storyField['fuscasShown']==0,storyField
+ storyField=page.evaluate(FIELD);assert storyField['models']==['opala']*14 and storyField['fuscasShown']==0 and storyField['fieldBody']=='opala' and storyField['playerBody']=='opala',storyField
  result['historia']={'model':story['raceModel'],'raceCar':story['raceCar']}
  page.evaluate('interlagos.immersiveInfo();fixture.onMainMenu();true');wait_js(page,"!document.querySelector('#tracks').classList.contains('hidden')")
 

@@ -1,7 +1,8 @@
 import * as THREE from 'three';
 
 // Tree trunks as posts the car can hit. TestCar.step calls collide() after its walls:
-// the body's plan (a box round the centre of mass) meets each trunk's circle, the car is
+// the body's plan (a box round the centre of mass: car.body front, rear and halfWidth, the
+// Opala's measured ends by default) meets each trunk's circle, the car is
 // pushed out and an impulse at the contact point stops it (a glancing blow on a corner
 // spins it). The tree shakes and drops leaves. Physics frame: x, y horizontal, z up.
 const CELL=8,FRONT=2.42,REAR=2.35,HALF=.93,BUMPER=-.1,RESTITUTION=.15,FRICTION=.5;
@@ -40,17 +41,18 @@ export class TreeField {
  }
  // Called by TestCar.step: returns the speed the car hit a trunk with (0 if none).
  collide(car){
-  let impact=0;const posts=this.near(car.x,car.y,FRONT+.6);if(!posts.length)return 0;
+  const body=car.body??{front:FRONT,rear:REAR,halfWidth:HALF},front=body.front,rear=body.rear,half=body.halfWidth;
+  let impact=0;const posts=this.near(car.x,car.y,front+.6);if(!posts.length)return 0;
   const {f,l,u}=car.updateAxes(),c=Math.cos(car.heading),s=Math.sin(car.heading),r=[0,0,0],v=[0,0,0];
   for(const post of posts){
    const dx=post.x-car.x,dy=post.y-car.y,bx=dx*c+dy*s,by=-dx*s+dy*c;
-   const qx=Math.max(-REAR,Math.min(FRONT,bx)),qy=Math.max(-HALF,Math.min(HALF,by));
+   const qx=Math.max(-rear,Math.min(front,bx)),qy=Math.max(-half,Math.min(half,by));
    let nx=qx-bx,ny=qy-by,d=Math.hypot(nx,ny),depth;
    if(d>=post.r)continue;
    if(d>1e-6){depth=post.r-d;nx/=d;ny/=d;}
    else{
     // The trunk's centre got inside the body: out through the nearest side.
-    const exits=[[FRONT-bx,-1,0],[bx+REAR,1,0],[HALF-by,0,-1],[by+HALF,0,1]].sort((a,b)=>a[0]-b[0])[0];
+    const exits=[[front-bx,-1,0],[bx+rear,1,0],[half-by,0,-1],[by+half,0,1]].sort((a,b)=>a[0]-b[0])[0];
     depth=exits[0]+post.r;nx=exits[1];ny=exits[2];
    }
    // Normal in the world, from the trunk toward the car; contact at bumper height.

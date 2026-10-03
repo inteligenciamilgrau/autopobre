@@ -16,7 +16,7 @@ import * as THREE from 'three';
 import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
-import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v=20260923-capotagem';
+import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY,OPALA_BODY,FUSCA_BODY} from './physics.js?v=20260923-capotagem';
 import {PLAYER_ENTRY,ACE_NUMBER,playerGridSlot,carEntry,fieldRoster,duelRivalFor,cssColor,MODEL_NAMES} from './race-roster.js';
 import {CarSelect} from './car-select.js';
 import {CarLivery} from './car-livery.js';
@@ -1152,10 +1152,12 @@ function chooseMode(mode){if(sessionStarted||loading||!pilotPicker.commit())retu
 // The chosen car on track: the field with the 99 in its seat (RaceField's roster, the rivals' models)
 // and the player's result rows under its number; set before the grid. The model goes back to the 99
 // first, since the 99 that Stevan Gaipo races is cloned from it. In a Fusca race the whole field races
-// Fuscas (raceModel). A multiplayer guest's field is the host's (gridCar: the host's car sits out of it);
-// the guest's own car takes its seat (multiplayer.js).
+// Fuscas (raceModel), each meeting the others, the walls and the ground with the Fusca's body
+// (physics.js FUSCA_BODY; the rivals take it at the grid's reset). A multiplayer guest's field is the
+// host's (gridCar: the host's car sits out of it); the guest's own car takes its seat (multiplayer.js).
 function seatCar(){
  carLivery.clear();showFusca(null);const entry=raceCar==='99'?null:carEntry(raceCar),grid=raceGrid=multiplayer?.gridCar()??raceCar;
+ const body=raceModel==='fusca'?FUSCA_BODY:OPALA_BODY;car.setBody(body);immersive.field.body=body;
  immersive.field.roster=fieldRoster(grid);immersive.visual.seatOpala99(model,grid,raceModel==='fusca'?fuscaTemplate:null);
  immersive.playerEntry=entry?{...entry,name:immersive.pilotName,shortName:immersive.pilotName}:undefined;
 }
