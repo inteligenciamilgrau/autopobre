@@ -13,7 +13,7 @@ export const BUTTON_KEYS=Object.freeze({
  8:['KeyR'],           // View / Share: reposition, or call the tow
  10:['ShiftLeft'],     // LS / L3: run on foot, held
  11:['KeyB'],          // RS / R3: look back, held
- 12:['Digit2'],13:['KeyN'],14:['Digit1'],15:['Digit3'] // D-pad: answers 1 2 3 on foot; ↓ the next driver in the recon lap
+ 12:['Digit2','KeyG'],13:['KeyN'],14:['Digit1'],15:['Digit3'] // D-pad: answers 1 2 3 on foot; ↑ in the car the ghost lap; ↓ the next driver in the recon lap
 });
 export const MENU_BUTTON=9; // Menu / Options: the pause menu, and back to the race
 export const STEERING_CURVES=Object.freeze({suave:2.2,normal:1.6,direta:1});

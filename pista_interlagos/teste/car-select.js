@@ -1,23 +1,31 @@
 import * as THREE from 'three';
-import {CAR_CHOICES,carEntry,luminance,cssColor as css} from './race-roster.js';
+import {CAR_CHOICES,carEntry,MODEL_NAMES,CAR_MODELS,CAR_MODEL_DEFAULT,luminance,cssColor as css} from './race-roster.js';
 import {carWorkshop,FAR_PROFILE} from './immersive-visuals.js';
-// Modo Corrida's car screen (#cars, between the opening and the track screen): the grid's 15 Opalas
-// as cards and the chosen one turning in a small studio. The studio is drawn by the game's own
-// renderer on the page's canvas, which shows through the screen's open middle (carros.css); the car
-// is the race model, painted as the rivals are (ImmersiveVisuals.rivalCar), so it is what races.
-// Card icon: the side view of the distant rivals' model (immersive-visuals.js FAR_PROFILE), metres to a
-// 100×34 box, nose to the right; the stripe along the waist, the number on the door. The windows sit
-// a little inside the body's outline (the 3D ones are wider than the body instead).
+import {fuscaCar,fuscaDispose,FUSCA_PROFILE} from './fusca.js';
+// Modo Corrida's car screen (#cars, between the opening and the track screen): two tabs, the Opala and the
+// Fusca (fusca.js), each with the grid's 15 cars (the Fusca in their colours) as cards and the chosen one
+// turning in a small studio. The studio is drawn by the game's own renderer on the page's canvas, which
+// shows through the screen's open middle (carros.css); the car is the race model, painted as the rivals
+// are (ImmersiveVisuals.rivalCar, fuscaCar), so it is what races.
+// Card icon: the car's side view (the distant rivals' model, immersive-visuals.js FAR_PROFILE, or the
+// Fusca's, FUSCA_PROFILE), metres to a 100×34 box, nose to the right; the stripe along the waist, the
+// number on the door. The Opala's windows sit a little inside the body's outline (the 3D ones are wider
+// than the body instead).
 const P=pts=>pts.map(([x,y])=>`${((x+2.5)*20).toFixed(1)},${((1.55-y)*20).toFixed(1)}`).join(' ');
-const BODY=P(FAR_PROFILE.body);
-const GLASS=P([[.86,.9],[.08,1.34],[-.95,1.34],[-1.62,.98]]);
-const STRIPE=P([[-2.38,.56],[2.46,.56],[2.46,.67],[-2.37,.67]]);
-const WHEELS=FAR_PROFILE.axles.map(x=>[(x+2.5)*20,(1.55-FAR_PROFILE.wheel)*20]);
-function carIcon(entry){
- const shade=luminance(entry.color),ink=shade>.55?'#141716':'#f4f3ee';
- return `<svg viewBox="0 0 100 34" aria-hidden="true"><polygon points="${BODY}" fill="${css(entry.color)}"/><polygon points="${STRIPE}" fill="${css(entry.stripe)}"/><polygon points="${GLASS}" fill="#17232a"/>`+
-  WHEELS.map(([x,y])=>`<circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="7.4" fill="#0d0f0f"/><circle cx="${x.toFixed(1)}" cy="${y.toFixed(1)}" r="3.1" fill="#8d9396"/>`).join('')+
-  `<text x="57" y="22" text-anchor="middle" font-family="Arial,sans-serif" font-size="10.5" font-weight="900" font-style="italic" fill="${ink}" stroke="${shade>.55?'#f4f3ee':'#141716'}" stroke-width=".7" paint-order="stroke">${entry.number}</text></svg>`;
+const wheelSpots=profile=>profile.axles.map(x=>[(x+2.5)*20,(1.55-profile.wheel)*20,profile.wheel*23.4]);
+const ICONS={
+ opala:{body:P(FAR_PROFILE.body),glass:P([[.86,.9],[.08,1.34],[-.95,1.34],[-1.62,.98]]),stripe:P([[-2.38,.56],[2.46,.56],[2.46,.67],[-2.37,.67]]),wheels:wheelSpots(FAR_PROFILE),number:[57,22]},
+ fusca:{body:P(FUSCA_PROFILE.body),glass:P(FUSCA_PROFILE.glass),stripe:P(FUSCA_PROFILE.stripe),wheels:wheelSpots(FUSCA_PROFILE),number:[(FUSCA_PROFILE.number[0]+2.5)*20,(1.55-FUSCA_PROFILE.number[1])*20+3.5]}};
+// Built as elements, not markup: the number goes in as text and the colours as attributes, whatever
+// the entry holds.
+const svgNode=(tag,attrs)=>{const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);return n;};
+function carIcon(entry,model){
+ const dark=luminance(entry.color)>.55,icon=ICONS[model],f=v=>v.toFixed(1);
+ const svg=svgNode('svg',{viewBox:'0 0 100 34','aria-hidden':'true'});
+ svg.append(svgNode('polygon',{points:icon.body,fill:css(entry.color)}),svgNode('polygon',{points:icon.stripe,fill:css(entry.stripe)}),svgNode('polygon',{points:icon.glass,fill:'#17232a'}));
+ for(const [x,y,r] of icon.wheels)svg.append(svgNode('circle',{cx:f(x),cy:f(y),r:f(r),fill:'#0d0f0f'}),svgNode('circle',{cx:f(x),cy:f(y),r:f(r*.42),fill:'#8d9396'}));
+ const number=svgNode('text',{x:f(icon.number[0]),y:f(icon.number[1]),'text-anchor':'middle','font-family':'Arial,sans-serif','font-size':'10.5','font-weight':'900','font-style':'italic',fill:dark?'#141716':'#f4f3ee',stroke:dark?'#f4f3ee':'#141716','stroke-width':'.7','paint-order':'stroke'});
+ number.textContent=entry.number;svg.append(number);return svg;
 }
 function gradient(stops,size=256,radial=false){
  const c=document.createElement('canvas');c.width=c.height=size;const ctx=c.getContext('2d'),g=radial?ctx.createRadialGradient(size/2,size/2,0,size/2,size/2,size/2):ctx.createLinearGradient(0,0,0,size);
@@ -36,7 +44,8 @@ class Studio {
   const shadow=new THREE.Mesh(new THREE.PlaneGeometry(5.6,2.5).rotateX(-Math.PI/2),new THREE.MeshBasicMaterial({map:gradient([[0,'rgba(0,0,0,.85)'],[.6,'rgba(0,0,0,.45)'],[1,'rgba(0,0,0,0)']],128,true),transparent:true,depthWrite:false}));
   shadow.position.y=.004;this.turntable.add(shadow);
   const key=new THREE.DirectionalLight(0xfff1dc,1.6);key.position.set(4,7,5);this.scene.add(key,new THREE.HemisphereLight(0xcfe3ff,0x1b1a14,.35));
-  this.yaw=-.55;this.handUntil=0;this.time=0;this.car=null;this.number=null;this.wanted=null;this.template=null;this.environment=null;
+  // wanted/shown: 'model:number' of the car asked for and of the one built; template: the Opala's model, fusca the Fusca's.
+  this.yaw=-.55;this.handUntil=0;this.time=0;this.car=null;this.shown=null;this.wanted=null;this.template=null;this.fusca=null;this.environment=null;
  }
  // The room that lights the paint: a ceiling soft box, two side panels and a dim back wall.
  bake(renderer){
@@ -47,17 +56,18 @@ class Studio {
   room.traverse(o=>{o.geometry?.dispose();o.material?.dispose();});this.scene.environment=this.environment;
  }
  // Throws away the car shown (what was made for it; the race car's own stay).
- drop(){if(!this.car)return;this.car.removeFromParent();this.workshop.disposeCar(this.car,this.template);this.car=null;}
+ drop(){if(!this.car)return;this.car.removeFromParent();if(this.car.userData.own)fuscaDispose(this.car);else this.workshop.disposeCar(this.car,this.template);this.car=null;this.shown=null;}
+ ready(model){return !!(model==='fusca'?this.fusca:this.template);}
  build(){
-  const entry=carEntry(this.wanted);if(!this.template||!entry||entry.number===this.number)return;
+  const [model,number]=this.wanted.split(':'),entry=carEntry(number);if(!this.ready(model)||!entry||this.wanted===this.shown)return;
   this.drop();
-  this.car=this.workshop.rivalCar(this.template,entry.color,entry.number,'',{stripe:entry.stripe,finish:entry.finish,livery99:entry.number==='99'});
-  this.turntable.add(this.car);this.number=entry.number;
+  this.car=model==='fusca'?fuscaCar(this.fusca,entry):this.workshop.rivalCar(this.template,entry.color,entry.number,'',{stripe:entry.stripe,finish:entry.finish,livery99:entry.number==='99'});
+  this.turntable.add(this.car);this.shown=this.wanted;
  }
  // rect: where the stage shows on the page (CSS pixels); the car is framed there.
  render(renderer,dt,rect){
   this.time+=dt;if(this.time>this.handUntil)this.yaw+=dt*.32;this.turntable.rotation.y=this.yaw;
-  if(!this.environment)this.bake(renderer);if(this.wanted!==this.number)this.build();
+  if(!this.environment)this.bake(renderer);if(this.wanted!==this.shown)this.build();
   const size=renderer.getSize(new THREE.Vector2()),W=size.x,H=size.y,c=this.camera,half=Math.tan(THREE.MathUtils.degToRad(c.fov/2));
   // Far enough for the car (about 5 m seen three-quarters on, 1.6 m high) to fill most of the stage.
   const d=THREE.MathUtils.clamp(Math.max(5*H/(2*half*.9*Math.max(1,rect.width)),1.7*H/(2*half*.66*Math.max(1,rect.height))),6,40);
@@ -70,27 +80,28 @@ class Studio {
  }
  turn(dx){this.yaw+=dx*.009;this.handUntil=this.time+2.5;}
 }
-// root: the #cars screen. value: the chosen car's number. onPick(number), onNext(), onBack().
-// In a multiplayer room (setRoom) the cars other pilots have show their names and cannot be taken.
+// root: the #cars screen. value: the chosen car's number; model: its model ('opala' or 'fusca', the
+// tabs). onPick(number), onModel(model) (main.js then loads the Fusca's model: setFusca), onNext(), onBack().
+// In a multiplayer room (setRoom) the cars other pilots have show their names and cannot be taken, and
+// everyone races the Opala (the tabs hide).
 export class CarSelect {
- constructor({root,value,carRoot,onPick,onNext,onBack}){
-  this.root=root;this.value=carEntry(value)?value:CAR_CHOICES[0].number;this.onPick=onPick;this.studio=new Studio(carRoot);this.studio.wanted=this.value;this.live=false;
-  this.room=null;this.taken=new Map();this.asked=null;this.guest=null;this.tell('');
-  const $=id=>root.querySelector('#'+id);this.stage=$('carStage');this.status=$('carStageStatus');
-  this.cards=$('carCards');this.cards.replaceChildren(...CAR_CHOICES.map(entry=>{
-   const b=document.createElement('button');b.type='button';b.dataset.car=entry.number;b.setAttribute('role','radio');
-   b.innerHTML=carIcon(entry);const label=document.createElement('span');label.textContent=entry.shortName;b.append(label);
-   b.title=`#${entry.number} · ${entry.name}`;b.onclick=()=>this.pick(entry.number);return b;
-  }));
+ constructor({root,value,model=CAR_MODEL_DEFAULT,carRoot,onPick,onModel,onNext,onBack}){
+  this.root=root;this.model=CAR_MODELS.includes(model)?model:CAR_MODEL_DEFAULT;this.value=carEntry(value)?value:CAR_CHOICES[0].number;this.onPick=onPick;this.onModel=onModel;this.studio=new Studio(carRoot);this.live=false;
+  this.room=null;this.taken=new Map();this.asked=null;this.guest=null;this.failure=null;this.tell('');
+  const $=id=>root.querySelector('#'+id);this.stage=$('carStage');this.status=$('carStageStatus');this.tabs=$('carModels');this.note=root.querySelector('.car-note');
+  for(const tab of this.tabs.querySelectorAll('[data-model]'))tab.onclick=()=>this.setModel(tab.dataset.model);
+  this.tabs.addEventListener('keydown',e=>{const step={ArrowLeft:-1,ArrowRight:1}[e.key];if(!step)return;e.preventDefault();
+   const next=CAR_MODELS[(CAR_MODELS.indexOf(this.model)+step+CAR_MODELS.length)%CAR_MODELS.length];this.setModel(next);this.tabs.querySelector(`[data-model="${next}"]`).focus();});
+  this.cards=$('carCards');this.fillCards();
   // Arrows walk the cards (up and down a row of the grid), Enter goes on to the tracks.
   this.cards.addEventListener('keydown',e=>{
    if(e.key==='Enter'){e.preventDefault();onNext();return;}
    const keys={ArrowLeft:-1,ArrowRight:1,ArrowUp:-this.columns(),ArrowDown:this.columns()},step=keys[e.key];if(!step)return;e.preventDefault();
    // Past the cars other pilots have in a room; a step past the ends stops at the first or last free card.
-   const cur=CAR_CHOICES.findIndex(c=>c.number===this.value),last=CAR_CHOICES.length-1,free=i=>!this.taken.has(CAR_CHOICES[i].number);
+   const choices=CAR_CHOICES,cur=choices.findIndex(c=>c.number===this.value),last=choices.length-1,free=i=>!this.taken.has(choices[i].number);
    let i=cur+step;while(i>=0&&i<=last&&!free(i))i+=step;
    if(i<0||i>last){i=Math.max(0,Math.min(last,i));while(i!==cur&&!free(i))i-=Math.sign(step);}
-   if(i===cur)return;const next=CAR_CHOICES[i];
+   if(i===cur)return;const next=choices[i];
    this.pick(next.number);this.cards.querySelector(`[data-car="${next.number}"]`).focus();
   });
   $('carsNext').onclick=()=>onNext();$('carsBack').onclick=()=>onBack();
@@ -102,11 +113,27 @@ export class CarSelect {
   this.show();
  }
  columns(){return getComputedStyle(this.cards).gridTemplateColumns.split(' ').length||1;}
+ // The cards in the tab's model.
+ fillCards(){
+  this.cards.replaceChildren(...CAR_CHOICES.map(entry=>{
+   const b=document.createElement('button');b.type='button';b.dataset.car=entry.number;b.setAttribute('role','radio');
+   const label=document.createElement('span');label.textContent=entry.shortName;b.append(carIcon(entry,this.model),label);
+   b.title=`#${entry.number} · ${entry.name}`;b.onclick=()=>this.pick(entry.number);return b;
+  }));
+  this.cards.setAttribute('aria-label',this.model==='fusca'?'Fuscas nas cores das equipes':'Carros do grid');
+ }
  pick(number){
   if(!carEntry(number))return;
   if(this.taken.has(number)){this.tell(`O #${number} está com ${this.taken.get(number)}. Escolha outro carro.`,number);this.show();return;}
-  this.tell('');this.value=number;this.studio.wanted=number;this.show();this.onPick?.(number);
+  this.tell('');this.value=number;this.show();this.onPick?.(number);
  }
+ // The tabs: the Opala or the Fusca, the same car chosen in either.
+ setModel(model,{silent=false}={}){
+  if(!CAR_MODELS.includes(model)||model===this.model)return;
+  this.model=model;this.fillCards();this.show();if(!silent)this.onModel?.(model);
+ }
+ // The Fusca's model arrived (main.js loads it when its tab is chosen).
+ setFusca(template){const s=this.studio;if(s.fusca===template)return;if(s.car?.userData.own)s.drop();s.fusca=template;this.show();}
  // The room's note; one about a car someone else has goes when that car changes hands (setRoom).
  tell(text,car=null){this.notice=text;this.noticeCar=car;this.noticeHolder=car&&this.taken.get(car);}
  // A multiplayer room (multiplayer.js, through main.js): taken, the cars other pilots have (number ->
@@ -115,27 +142,34 @@ export class CarSelect {
  // guest, for a pilot who does not host: whether the host has let it in and whether it waits for the
  // start (its button then waits for the host's race instead of leading to the tracks).
  setRoom({taken,mine,asking,guest=null}){
-  this.room??=this.root.querySelector('.car-note');this.taken=taken;this.guest=guest;
+  this.room??=this.note;this.taken=taken;this.guest=guest;this.tabs.hidden=true;this.setModel('opala',{silent:true});
   if(this.noticeCar&&taken.get(this.noticeCar)!==this.noticeHolder)this.tell('');
   if(this.asked&&!asking&&mine&&mine!==this.asked)this.tell(`O #${this.asked} já estava com outro piloto: você segue no #${mine}.`,this.asked);
   this.asked=asking;
-  if(mine&&mine!==this.value){this.value=mine;this.studio.wanted=mine;}
+  if(mine&&mine!==this.value)this.value=mine;
   this.show();
  }
  // The model arrived (main.js loads it for the screen): the studio can build the car.
- setTemplate(template){const s=this.studio;s.drop();s.template=template;s.number=null;this.show();}
- failed(){this.status.textContent='Não foi possível carregar o Opala. A escolha vale mesmo assim.';this.status.hidden=false;}
+ setTemplate(template){const s=this.studio;if(!s.car?.userData.own)s.drop();s.template=template;this.show();}
+ failed(model='opala'){this.failure=model;if(model!==this.model)return;this.status.textContent=`Não foi possível carregar o ${MODEL_NAMES[model]}. A escolha vale mesmo assim.`;this.status.hidden=false;}
  show(){
-  const entry=carEntry(this.value),$=id=>this.root.querySelector('#'+id),own=entry.number==='99';
+  const entry=carEntry(this.value),$=id=>this.root.querySelector('#'+id),own=entry.number==='99',fusca=this.model==='fusca',name=MODEL_NAMES[this.model];
+  this.studio.wanted=`${this.model}:${entry.number}`;
+  for(const tab of this.tabs.querySelectorAll('[data-model]')){const on=tab.dataset.model===this.model;tab.setAttribute('aria-selected',String(on));tab.tabIndex=on?0:-1;}
+  $('carsTitle').textContent=`Com qual ${name} você vai correr?`;$('carsKicker').textContent=fusca?'O GRID · 15 FUSCAS':'O GRID · 15 OPALAS';
   for(const b of this.cards.children){
    const on=b.dataset.car===entry.number,holder=this.taken.get(b.dataset.car),label=b.querySelector('span');b.setAttribute('aria-checked',String(on));b.tabIndex=on?0:-1;
    b.classList.toggle('taken',!!holder);b.setAttribute('aria-disabled',String(!!holder));label.textContent=holder??carEntry(b.dataset.car).shortName;
    b.title=holder?`#${b.dataset.car} · com ${holder}`:`#${b.dataset.car} · ${carEntry(b.dataset.car).name}`;
   }
   $('carNumber').textContent='#'+entry.number;$('carNumber').style.setProperty('--body',css(entry.color));$('carNumber').style.setProperty('--stripe',css(entry.stripe));
-  $('carName').textContent=own?'Opala 99 · Auto-Pobre Racing':`Opala ${entry.number} · ${entry.shortName}`;
-  $('carDetail').textContent=own?`O carro do Stevan Gaipo e do Edu Neves, da vaquinha ao grid. ${entry.rank}º no campeonato (${entry.points} pts).`
+  $('carName').textContent=own?`${name} 99 · Auto-Pobre Racing`:`${name} ${entry.number} · ${entry.shortName}`;
+  $('carDetail').textContent=own&&fusca?`O Fusca do Stevan Gaipo: preto com a faixa amarela do 99, sem os patrocinadores do Opala. ${entry.rank}º no campeonato (${entry.points} pts).`
+   :own?`O carro do Stevan Gaipo e do Edu Neves, da vaquinha ao grid. ${entry.rank}º no campeonato (${entry.points} pts).`
+   :fusca?`Nas cores do carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele; o Stevan Gaipo vai de Fusca 99.`
    :`Carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele${this.room?'':'; o Stevan Gaipo vai de Opala 99'}.`;
+  if(!this.room)this.note.textContent=fusca?'De Fusca, o grid inteiro corre de Fusca, cada um com as cores e o número do seu carro e a mesma mecânica dos Opalas. O piloto do carro escolhido fica de fora e o Stevan Gaipo corre com o Fusca 99.'
+   :'Todos correm com o mesmo Opala: muda a pintura e o número. O piloto do carro escolhido fica de fora e o Stevan Gaipo corre com o 99.';
   // In a room the note says how the cars are shared, and what became of the last choice.
   if(this.room)this.room.textContent=this.notice||(this.asked?`Pedindo o #${this.asked} ao anfitrião… Vale a partir da próxima largada.`:
    `${this.guest?'Escolha o carro e clique em Aguardar início da corrida: o anfitrião escolhe a pista e dá a largada. ':''}Na sala, cada piloto corre com o carro que escolher, se ninguém estiver com ele; os outros carros correm com a IA. O anfitrião larga em último.`);
@@ -147,13 +181,13 @@ export class CarSelect {
    const hint=g?.admitted&&g.waiting?'O anfitrião escolhe a pista e dá a largada · clique para cancelar':'';
    if(next.dataset.label!==label+hint){next.dataset.label=label+hint;const small=document.createElement('small');small.textContent=hint;next.replaceChildren(label,...hint?[small]:[]);}
   }
-  this.status.hidden=!!this.studio.template;if(!this.studio.template)this.status.textContent='Carregando o Opala…';
+  const loaded=this.studio.ready(this.model);this.status.hidden=loaded;if(!loaded&&this.failure!==this.model)this.status.textContent=`Carregando o ${name}…`;
  }
  // Every frame while the screen shows (main.js): the studio on the page's canvas.
  render(renderer,dt){
-  const live=!!this.studio.template;if(live!==this.live){this.live=live;this.root.classList.toggle('live',live);}
+  const live=this.studio.ready(this.model);if(live!==this.live){this.live=live;this.root.classList.toggle('live',live);}
   if(!live)return;
   const rect=this.stage.getBoundingClientRect();this.studio.render(renderer,Math.min(dt,.05),rect);
  }
- info(){return {value:this.value,live:this.live,taken:Object.fromEntries(this.taken),asked:this.asked,guest:this.guest,built:this.studio.number,yaw:this.studio.yaw,meshes:(()=>{let n=0;this.studio.car?.traverse(o=>{if(o.isMesh&&o.visible)n++;});return n;})()};}
+ info(){return {value:this.value,model:this.model,live:this.live,taken:Object.fromEntries(this.taken),asked:this.asked,guest:this.guest,built:this.studio.shown?.split(':')[1]??null,builtModel:this.studio.shown?.split(':')[0]??null,cards:this.cards.children.length,yaw:this.studio.yaw,meshes:(()=>{let n=0;this.studio.car?.traverse(o=>{if(o.isMesh&&o.visible)n++;});return n;})()};}
 }

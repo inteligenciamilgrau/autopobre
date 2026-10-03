@@ -9,6 +9,7 @@ import {shutOpenings,CarOpenings,carSpot,SPOT_OPENING} from './car-openings.js';
 import {createRivalDriver,CABIN_DROP,sharedDriverMaterials} from './rival-driver.js';
 import {createBrakeLights,sharedBrakeLights} from './brake-lights.js';
 import {podiumBanner,podiumPlate,podiumRibbon,signBoard} from './pit-textures.js';
+import {fuscaCar,FUSCA_PROFILE,FUSCA_SEAT} from './fusca.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
 const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
@@ -26,10 +27,13 @@ export const teamPaint=(cache,{color,stripe,finish=null})=>m=>{
 // The number plates in numberPlates' order: both rear quarters, the roof, the tail.
 export const PLATE_NAMES=Object.freeze(['Numero_lateral_','Numero_lateral_','Numero_teto_','Numero_traseiro_']);
 // The distant rivals' side profile (farProxy; the car screen's card icons, car-select.js): metres in the
-// car frame, nose to +x: the body, the side windows, the axles along the car and the wheels' radius.
+// car frame, nose to +x: the body, the side windows, the axles along the car and the wheels' radius; the
+// body's width, the wheels' track (half), the tail and head lamps (x, y, z either side, width across, height)
+// and the bumpers (x, y; bumperWidth across). The Fusca's: fusca.js FUSCA_PROFILE.
 export const FAR_PROFILE=Object.freeze({
  body:[[-2.35,.2],[2.42,.2],[2.46,.32],[2.46,.62],[2.35,.8],[.85,.9],[.05,1.4],[-.95,1.4],[-1.65,1],[-2.3,.97],[-2.39,.4]],
- glass:[[.9,.92],[.08,1.37],[-.97,1.37],[-1.7,.99]],axles:[1.55,-1.117],wheel:.316});
+ glass:[[.9,.92],[.08,1.37],[-.97,1.37],[-1.7,.99]],axles:[1.55,-1.117],wheel:.316,
+ width:1.84,track:.8,tail:{x:-2.37,y:.95,z:.55,w:.35,h:.08},head:{x:2.45,y:.63,z:.605,w:.25,h:.1},bumpers:[[2.47,.42],[-2.41,.45]],bumperWidth:1.8});
 const up=new THREE.Vector3(0,1,0);
 // A car's number as the rivals carry it where the Opala 99 has its 99: white italic numerals outlined in
 // black, so they read on every paint (rivalCar; the player's car in another team's colours, car-livery.js).
@@ -48,7 +52,7 @@ function shownBody(root){
 // range keeps the faces a raycaster would hit (front ones only unless the material is double-sided,
 // turned for a back-sided material or a mirrored mesh). Skinned and instanced meshes (drivers) are
 // left out: their geometry is not where they show.
-function bodyTriangles(detail,body){
+export function bodyTriangles(detail,body){
  const toCar=detail.matrixWorld.clone().invert(),m=new THREE.Matrix4(),v=new THREE.Vector3();
  return body.filter(o=>!o.isSkinnedMesh&&!o.isInstancedMesh).map(o=>{
   const g=o.geometry,p=g.attributes.position,count=g.index?g.index.count:p.count,range=g.drawRange,mats=[o.material].flat(),pos=new Float32Array(p.count*3);
@@ -63,7 +67,7 @@ function bodyTriangles(detail,body){
 // the face it lands on. A vertex whose ray misses the body takes its row's hits: in between them over
 // a gap, the nearest past the body's edge, so the sticker ends on the paint, not on a flap in the air.
 const stickerRay=new THREE.Ray(),stickerHit=new THREE.Vector3(),stickerOffset=new THREE.Vector3();
-function bendOnBody(body,center,right,up,w,h,nx=12,ny=6){
+export function bendOnBody(body,center,right,up,w,h,nx=12,ny=6){
  const normal=right.clone().cross(up),lift=1.5,reach=1.8,slack=1e-4,near=[],d=new THREE.Vector3(),points=[],hits=[],uv=[],index=[];
  // The triangles under the sticker within the rays' reach, with their extent across it: each vertex
  // is placed across the sticker once, and only the triangles kept get a box and corners.
@@ -316,17 +320,18 @@ export class ImmersiveVisuals {
   if(number==='BLAZER'){this.box(root,[-.55,1.22,0],[3.25,.69,1.52],0x22363e);this.box(root,[-.55,1.59,0],[3.29,.07,1.56],color);for(const x of [-1.5,-.55,.5])this.box(root,[x,1.23,0],[.075,.67,1.57],color);}
   this.tag(root,number,[0,number==='BLAZER'?1.83:1.45,0],number==='BLAZER'?1.3:.7,.35,'#fff','#223234');return root;
  }
- // ~250-triangle Opala silhouette in the rival's colours, for distant cars.
- farProxy(color){
+ // ~250-triangle silhouette in the rival's colours, for distant cars: the Opala's, or another profile's
+ // (FAR_PROFILE's fields; the Fusca's, fusca.js FUSCA_PROFILE).
+ farProxy(color,p=FAR_PROFILE){
   const paint=new THREE.Color().setHex(color),parts=[];
   const add=(geometry,rgb)=>{let g=geometry.index?geometry.toNonIndexed():geometry;for(const key of Object.keys(g.attributes))if(key!=='position'&&key!=='normal')g.deleteAttribute(key);const c=new Float32Array(g.attributes.position.count*3);for(let i=0;i<c.length;i+=3){c[i]=rgb.r;c[i+1]=rgb.g;c[i+2]=rgb.b;}g.setAttribute('color',new THREE.BufferAttribute(c,3));parts.push(g);};
   const profile=(points,width,rgb)=>{const shape=new THREE.Shape(points.map(([x,y])=>new THREE.Vector2(x,y)));add(new THREE.ExtrudeGeometry(shape,{depth:width,bevelEnabled:false}).translate(0,0,-width/2),rgb);};
-  profile(FAR_PROFILE.body,1.84,paint);
-  profile(FAR_PROFILE.glass,1.86,new THREE.Color(.02,.025,.03));
-  const tyre=new THREE.Color(.025,.025,.025),trim=new THREE.Color(.05,.05,.05),r=FAR_PROFILE.wheel;
-  for(const x of FAR_PROFILE.axles)for(const z of [-.8,.8])add(new THREE.CylinderGeometry(r,r,.26,8).rotateX(Math.PI/2).translate(x,r,z),tyre);
-  for(const z of [-.55,.55]){add(new THREE.BoxGeometry(.05,.08,.35).translate(-2.37,.95,z),new THREE.Color(.5,.02,.02));add(new THREE.BoxGeometry(.04,.1,.25).translate(2.45,.63,z*1.1),new THREE.Color(.8,.78,.6));}
-  add(new THREE.BoxGeometry(.06,.14,1.8).translate(2.47,.42,0),trim);add(new THREE.BoxGeometry(.06,.14,1.8).translate(-2.41,.45,0),trim);
+  profile(p.body,p.width,paint);
+  profile(p.glass,p.width+.02,new THREE.Color(.02,.025,.03));
+  const tyre=new THREE.Color(.025,.025,.025),trim=new THREE.Color(.05,.05,.05),r=p.wheel,{tail,head}=p;
+  for(const x of p.axles)for(const z of [-p.track,p.track])add(new THREE.CylinderGeometry(r,r,.26,8).rotateX(Math.PI/2).translate(x,r,z),tyre);
+  for(const side of [-1,1]){add(new THREE.BoxGeometry(.05,tail.h,tail.w).translate(tail.x,tail.y,side*tail.z),new THREE.Color(.5,.02,.02));add(new THREE.BoxGeometry(.04,head.h,head.w).translate(head.x,head.y,side*head.z),new THREE.Color(.8,.78,.6));}
+  for(const [x,y] of p.bumpers)add(new THREE.BoxGeometry(.06,.14,p.bumperWidth).translate(x,y,0),trim);
   const geometry=mergeGeometries(parts,false);parts.forEach(g=>g.dispose());
   this.materials.farCar??=new THREE.MeshStandardMaterial({name:'Rival_distante',vertexColors:true,roughness:.4,metalness:.1});
   const mesh=new THREE.Mesh(geometry,this.materials.farCar);mesh.name='Rival_distante';mesh.castShadow=mesh.receiveShadow=true;mesh.visible=false;return mesh;
@@ -341,13 +346,34 @@ export class ImmersiveVisuals {
  // its place among the rivals' models is the Opala 99's, driven, in its own livery (built on first use,
  // from the template as loaded: main.js paints the player's car only after). '99' puts them all back
  // and hides it: the story's update() only shows or hides the cars in this.rivals. A new model (the
- // 99's other paint, main.js setLivery) builds it again.
- seatOpala99(template,number){
-  this.rosterCars??=[...this.rivals];this.rivals.splice(0,this.rivals.length,...this.rosterCars);if(this.opala99)this.opala99.visible=false;
+ // 99's other paint, main.js setLivery) builds it again. fusca: the Fusca's model when the race is in Fuscas
+ // (the car screen's Fusca tab): the whole field races one, Stevan Gaipo the 99's (fuscaRival).
+ seatOpala99(template,number,fusca=null){
+  this.rosterCars??=[...this.rivals];if(fusca&&!this.fuscaCars)this.buildFuscas(fusca);
+  const field=fusca?this.fuscaCars:this.rosterCars;this.rivals.splice(0,this.rivals.length,...field);
+  for(const o of [this.opala99,this.fusca99,...(this.fuscaCars??[])])if(o&&!field.includes(o))o.visible=false;
   const i=RIVAL_ROSTER.findIndex(e=>e.number===number);if(i<0)return null;
+  if(fusca){this.rivals[i]=this.fusca99;return this.fusca99;}
   if(this.opala99&&this.opala99Template!==template){this.opala99.removeFromParent();this.disposeCar(this.opala99,this.opala99Template);this.opala99=null;}
   if(!this.opala99){const e=OPALA_99_RIVAL;this.opala99=this.rivalCar(template,e.color,e.number,e.shortName,{driven:true,stripe:e.stripe,livery99:true});this.opala99.name='Opala_99_rival';this.opala99.userData.entry=e;this.opala99Template=template;this.root.add(this.opala99);}
   this.rivals[i]=this.opala99;return this.opala99;
+ }
+ // The field in Fuscas, built for the first Fusca race and kept: the grid's 14 and the 99.
+ buildFuscas(template){
+  const build=e=>{const o=this.fuscaRival(template,e,e.shortName);o.userData.entry=e;o.visible=false;this.root.add(o);return o;};
+  this.fuscaCars=RIVAL_ROSTER.map(build);this.fusca99=build(OPALA_99_RIVAL);
+ }
+ // A rival in a Fusca (fusca.js): the team's colours as the player's Fusca wears them, its driver moved
+ // onto the Fusca's seat (the Fusca's own steering wheel hides behind his), and a distant model and brake
+ // lights on both levels of detail as rivalCar gives an Opala.
+ fuscaRival(template,entry,name=''){
+  const car=fuscaCar(template,entry),root=new THREE.Group(),detail=new THREE.Group();root.name=car.name+'_rival';detail.name='Rival_detalhe';detail.add(car);root.add(detail);
+  const own=car.getObjectByName('Volante_Fusca');if(own)own.visible=false;
+  const driver=createRivalDriver({color:entry.color,number:entry.number});driver.root.position.add(new THREE.Vector3(...FUSCA_SEAT));detail.add(driver.root);
+  const far=this.farProxy(entry.color,FUSCA_PROFILE),lamps=createBrakeLights({far:FUSCA_PROFILE.lamps});far.add(lamps);root.add(far);
+  Object.assign(root.userData,{detail,far,driver,fusca:car,wheels:car.userData.wheels.map(obj=>({obj,base:obj.quaternion.clone()})),
+   brake:v=>{car.userData.brake(v);lamps.userData.set(v);},nameLabel:name?this.tag(root,name,[0,2.2,0],2.7,.30,'#fff','#172a2ddb'):null});
+  return root;
  }
  // Frees what rivalCar made for one car (merged bodywork, distant model, interior, driver, labels,
  // stickers), keeping what it shares: the template's geometries and materials and its number plates,

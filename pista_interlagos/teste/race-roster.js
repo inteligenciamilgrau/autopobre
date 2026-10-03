@@ -68,6 +68,12 @@ export const rivalEntry=number=>RIVAL_ROSTER.find(e=>e.number===number)??null;
 export const PLAYER_CAR_DEFAULT='99';
 export const CAR_CHOICES=Object.freeze([OPALA_99_RIVAL,...RIVAL_ROSTER]);
 export const carEntry=number=>CAR_CHOICES.find(e=>e.number===number)??null;
+// The model the player races in Modo Corrida (the car screen's tabs): the Opala, or a Fusca (fusca.js) in
+// the colours of one of the same 15 cars. The Fusca 99 is Stevan Gaipo's black one with the yellow stripe,
+// without the Opala 99's sponsors.
+export const CAR_MODELS=Object.freeze(['opala','fusca']);
+export const CAR_MODEL_DEFAULT='opala';
+export const MODEL_NAMES=Object.freeze({opala:'Opala',fusca:'Fusca'});
 // The rivals when the player races `car`: the roster, that car's seat taken by the Opala 99 (same
 // index, so the grid's cars and their models keep their places).
 export const fieldRoster=(car=PLAYER_CAR_DEFAULT)=>car===PLAYER_CAR_DEFAULT||!rivalEntry(car)?RIVAL_ROSTER:Object.freeze(RIVAL_ROSTER.map(e=>e.number===car?OPALA_99_RIVAL:e));

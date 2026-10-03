@@ -47,3 +47,5 @@ html:has(body.touch-device),.touch-device,.touch-device *{touch-action:pan-x pan
 .touch-device #immersivePanel.leo-dialogue .social-choices button{margin:5px 0}
 /* The Tia's menu in the paddock: as the team's panel, taller and without the speech bubble or the notes under the items (the prompt says what is in hand). */
 .touch-device #immersivePanel.cafe-dialogue{top:36px;max-height:calc(100dvh - 100px)}.touch-device #immersivePanel.cafe-dialogue .speech-bubble{display:none}.touch-device #immersivePanel.cafe-dialogue .social-person{margin-bottom:8px}.touch-device #immersivePanel.cafe-dialogue .social-prompt{margin:6px 0}.touch-device #immersivePanel.cafe-dialogue .social-choices button{margin:5px 0}.touch-device #immersivePanel.cafe-dialogue .social-choices small{display:none}
+/* The ghost line on a phone: one short row (its lap on the right, the gap beside it), so the timing panel keeps clear of the fuel gauge. */
+.touch-device #ghostInfo{margin-top:5px;font-size:7px;letter-spacing:1px}.touch-device #ghostInfo b{font-size:8px}.touch-device #ghostGap{float:right;clear:none;display:inline;margin:-1px 5px 0 0;font-size:9px;line-height:1}

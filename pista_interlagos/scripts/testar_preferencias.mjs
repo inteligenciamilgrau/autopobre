@@ -2,10 +2,10 @@ import assert from 'node:assert/strict';
 import {PlayerPreferences,PREFERENCES_KEY} from '../teste/player-preferences.js';
 const data=new Map(),storage={getItem:key=>data.get(key),setItem:(key,value)=>data.set(key,value)};
 let preferences=new PlayerPreferences(storage);
-assert.deepEqual(preferences.values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,classicInterior:false,graphics:{level:'auto',overrides:{}},debugOverlay:'off',debugCorner:'auto',duelRival:'73',car:'99',laps:3,padSteering:'normal',padRumble:true});
+assert.deepEqual(preferences.values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,classicInterior:false,graphics:{level:'auto',overrides:{}},debugOverlay:'off',debugCorner:'auto',duelRival:'73',car:'99',carModel:'opala',laps:3,ghost:false,padSteering:'normal',padRumble:true});
 preferences.update({immersive:false,livery:'seiva_danilo',camera:'cockpit'});
 preferences=new PlayerPreferences(storage);
-assert.deepEqual(preferences.values,{immersive:false,livery:'seiva_danilo',camera:'cockpit',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,classicInterior:false,graphics:{level:'auto',overrides:{}},debugOverlay:'off',debugCorner:'auto',duelRival:'73',car:'99',laps:3,padSteering:'normal',padRumble:true});
+assert.deepEqual(preferences.values,{immersive:false,livery:'seiva_danilo',camera:'cockpit',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,classicInterior:false,graphics:{level:'auto',overrides:{}},debugOverlay:'off',debugCorner:'auto',duelRival:'73',car:'99',carModel:'opala',laps:3,ghost:false,padSteering:'normal',padRumble:true});
 preferences.update({circuit:'curvelo'});
 assert.equal(new PlayerPreferences(storage).values.circuit,'curvelo');
 preferences.update({circuit:'../../private'});
@@ -47,7 +47,7 @@ preferences.update({classicInterior:true});assert.equal(new PlayerPreferences(st
 preferences.update({classicInterior:'yes'});assert.equal(new PlayerPreferences(storage).values.classicInterior,false);
 for(const corrupted of ['{"damage":1}','{"realisticWater":1}','{"graphics":["ultra"]}','not json','null','[]','42','{"immersive":"false","livery":"../../private","camera":"bad"}','{"circuit":{"toString":42}}']){
  data.set(PREFERENCES_KEY,corrupted);
- assert.deepEqual(new PlayerPreferences(storage).values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,classicInterior:false,graphics:{level:'auto',overrides:{}},debugOverlay:'off',debugCorner:'auto',duelRival:'73',car:'99',laps:3,padSteering:'normal',padRumble:true});
+ assert.deepEqual(new PlayerPreferences(storage).values,{immersive:true,livery:'assinaturas_omp',camera:'chase',circuit:'interlagos',damage:false,aceKoyzinho:false,aiLevel:'facil',retirements:true,classicInterior:false,graphics:{level:'auto',overrides:{}},debugOverlay:'off',debugCorner:'auto',duelRival:'73',car:'99',carModel:'opala',laps:3,ghost:false,padSteering:'normal',padRumble:true});
 }
 const denied=new PlayerPreferences({getItem(){throw Error('blocked')},setItem(){throw Error('blocked')}});
 assert.doesNotThrow(()=>denied.update({immersive:false,camera:'orbit'}));
@@ -67,6 +67,9 @@ preferences.update({duelRival:19});assert.equal(new PlayerPreferences(storage).v
 // Modo Corrida's car (the car screen): the 99 unless the player picks another car of the grid.
 for(const car of ['73','2','19','99']){preferences.update({car});assert.equal(new PlayerPreferences(storage).values.car,car);}
 for(const bad of ['98','',73,null,'../99'])assert.equal((preferences.update({car:bad}),new PlayerPreferences(storage).values.car),'99',`car ${bad} falls back to 99`);
+// Its model (the car screen's tabs): the Opala unless the player picks the Fusca.
+preferences.update({carModel:'fusca'});assert.equal(new PlayerPreferences(storage).values.carModel,'fusca');
+for(const bad of ['kombi','',1,null])assert.equal((preferences.update({carModel:bad}),new PlayerPreferences(storage).values.carModel),'opala',`carModel ${bad} falls back to opala`);
 // The controller: Normal steering and rumble on unless the player picks otherwise.
 for(const padSteering of ['suave','direta','normal']){preferences.update({padSteering});assert.equal(new PlayerPreferences(storage).values.padSteering,padSteering);}
 for(const bad of ['forte','',1,null])assert.equal((preferences.update({padSteering:bad}),new PlayerPreferences(storage).values.padSteering),'normal',`padSteering ${bad} falls back to normal`);

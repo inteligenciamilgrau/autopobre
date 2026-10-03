@@ -5,7 +5,7 @@ import fs from 'node:fs';
 import assert from 'node:assert/strict';
 import {TestCar} from '../teste/physics.js';
 import {RaceField,styleForLevel,levelRating} from '../teste/race-field.js';
-import {RIVAL_ROSTER,OPALA_99_RIVAL,CAR_CHOICES,carEntry,fieldRoster,duelRivalFor,playerGridSlot,AI_LEVELS,DUEL_DEFAULT} from '../teste/race-roster.js';
+import {RIVAL_ROSTER,OPALA_99_RIVAL,CAR_CHOICES,CAR_MODELS,carEntry,fieldRoster,duelRivalFor,playerGridSlot,AI_LEVELS,DUEL_DEFAULT} from '../teste/race-roster.js';
 import {Championship,championshipStandings} from '../teste/championship.js';
 import * as THREE from '../teste/node_modules/three/build/three.module.js';
 import {CinematicIntro} from '../teste/intro-cinematic.js';
@@ -17,6 +17,8 @@ const report={};
 assert.equal(CAR_CHOICES.length,15);assert.equal(CAR_CHOICES[0],OPALA_99_RIVAL);
 assert.equal(new Set(CAR_CHOICES.map(e=>e.number)).size,15);
 assert.equal(carEntry('99'),OPALA_99_RIVAL);assert.equal(carEntry('73').shortName,'Konrad Viehmann');assert.equal(carEntry('98'),null);
+// The tabs: the Opala and the Fusca, the same 15 cars (the Fusca 99 in the 99's black and yellow).
+assert.deepEqual(CAR_MODELS,['opala','fusca']);
 // The 99 as a rival: its own colours, a rating and a style at every level.
 assert.equal(OPALA_99_RIVAL.color,0x17191b);assert.equal(OPALA_99_RIVAL.mark,OPALA_99_RIVAL.stripe,'a black car reads by its stripe on the map');
 assert(Number.isFinite(OPALA_99_RIVAL.rating)&&OPALA_99_RIVAL.rating>.2&&OPALA_99_RIVAL.rating<.6,`99 rating ${OPALA_99_RIVAL.rating}`);
@@ -93,6 +95,9 @@ assert.equal(duelRivalFor('73','73'),'99');assert.equal(duelRivalFor('73','99'),
  const duel=captions({number:'73',duel:carEntry(duelRivalFor('73','73'))});
  assert.equal(duel[1][1],'#73 × #99 Stevan Gaipo');assert.equal(duel[2][0],'OPALA #73');
  assert.equal(captions({number:'99',duel:carEntry('73')})[1][1],'#99 × #73 Konrad Viehmann');
+ // In a Fusca (the car screen's Fusca tab) the caption says so.
+ const carCaption=model=>captions({number:'73',model}).find(c=>c?.[0]?.endsWith('#73'))?.[0];
+ assert.equal(carCaption('fusca'),'FUSCA #73');assert.equal(carCaption('opala'),'OPALA #73');
  report.intro=duel.map(c=>c.slice(0,2).join(' · '));
 }
 console.log(JSON.stringify(report,null,1));

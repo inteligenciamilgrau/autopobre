@@ -29,12 +29,13 @@ function parts(){
 }
 // The geometries and materials every car's lamps share (kept when one car is thrown away).
 export const sharedBrakeLights=()=>shared?[shared.lens,shared.halo,shared.lensMaterial,shared.haloMaterial]:[];
-// A car's brake lights; far: placed for the distant rival's simple body. set(brake) shows them.
+// A car's brake lights; far: placed for the distant rival's simple body (true: the Opala's, or the
+// offset from the Opala's lamps for another body, fusca.js FUSCA_PROFILE.lamps). set(brake) shows them.
 export function createBrakeLights({far=false}={}){
  const {lens,halo,lensMaterial,haloMaterial}=parts(),group=new THREE.Group();group.name='Luz_de_freio';
  const a=new THREE.Mesh(lens,lensMaterial),b=new THREE.Mesh(halo,haloMaterial);b.renderOrder=3;
  for(const m of [a,b]){m.castShadow=m.receiveShadow=false;group.add(m);}
- if(far)group.position.set(...FAR_OFFSET);
+ if(far)group.position.set(...(far===true?FAR_OFFSET:far));
  group.visible=false;group.userData.set=brake=>{group.visible=brake>BRAKE_ON;};
  return group;
 }

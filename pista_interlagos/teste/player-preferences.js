@@ -1,5 +1,5 @@
 import {circuitId} from './circuits.js';
-import {DUEL_DEFAULT,carEntry,AI_LEVELS,PLAYER_CAR_DEFAULT} from './race-roster.js';
+import {DUEL_DEFAULT,carEntry,AI_LEVELS,PLAYER_CAR_DEFAULT,CAR_MODELS,CAR_MODEL_DEFAULT} from './race-roster.js';
 import {normalizeGraphics,DEBUG_OVERLAY_MODES,DEBUG_OVERLAY_CORNERS} from './graphics-settings.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
 // 'tv' films from the trackside towers and verge cameras (tv-camera.js).
@@ -34,8 +34,12 @@ export function normalizePreferences(value){
   duelRival:typeof source.duelRival==='string'&&carEntry(source.duelRival)?source.duelRival:DUEL_DEFAULT,
   // The car the player races in Modo Corrida (the car screen, car-select.js), by number; the story is the 99's.
   car:typeof source.car==='string'&&carEntry(source.car)?source.car:PLAYER_CAR_DEFAULT,
+  // Its model (the car screen's tabs): the Opala unless the player picks the Fusca.
+  carModel:CAR_MODELS.includes(source.carModel)?source.carModel:CAR_MODEL_DEFAULT,
   // Laps of every race (Modo Corrida and Modo História): 3 unless the player picks more or fewer.
   laps:Number.isInteger(source.laps)&&source.laps>=LAPS.min&&source.laps<=LAPS.max?source.laps:LAPS.standard,
+  // The ghost of the pilot's best lap on the circuit (G, ghost-lap.js): off unless turned on.
+  ghost:typeof source.ghost==='boolean'?source.ghost:false,
   // Xbox / PlayStation controller (gamepad-controls.js): how the left stick steers, and the shake on impacts.
   padSteering:['suave','normal','direta'].includes(source.padSteering)?source.padSteering:'normal',
   padRumble:typeof source.padRumble==='boolean'?source.padRumble:true

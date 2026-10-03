@@ -88,6 +88,15 @@ desktop.ini
 !/modelo_3d/scripts/exportar_interior_jogo.py
 !/modelo_3d/scripts/verificar_opala_v06.py
 !/modelo_3d/scripts/renderizar_opala_v06.py
+!/modelo_3d/scripts/exportar_fusca_jogo.py
+# The Fusca V2 (modelo_3d/fusca_v2), modelled from the Type 1's measurements: README, build and check scripts,
+# measurement tables and JPEG renders are versioned; its two .blend files (rebuilt by criar_fusca_v2.py) and the
+# previews stay on this machine. (The V3 it replaced adapted a BlenderKit model and left the repo on 2026-10-03.)
+!/modelo_3d/fusca_v2/
+/modelo_3d/fusca_v2/*
+!/modelo_3d/fusca_v2/README.md
+!/modelo_3d/fusca_v2/*.py
+!/modelo_3d/fusca_v2/renders/
 /pista_interlagos/teste/assets/piloto/referencia_capacete.jpg
 
 # Servidor das salas (sala-cloudflare): segredos locais e cache do wrangler

@@ -17,9 +17,10 @@ import {GLTFLoader} from 'three/addons/loaders/GLTFLoader.js';
 import {OrbitControls} from 'three/addons/controls/OrbitControls.js';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY} from './physics.js?v=20260923-capotagem';
-import {PLAYER_ENTRY,ACE_NUMBER,playerGridSlot,carEntry,fieldRoster,duelRivalFor,cssColor} from './race-roster.js';
+import {PLAYER_ENTRY,ACE_NUMBER,playerGridSlot,carEntry,fieldRoster,duelRivalFor,cssColor,MODEL_NAMES} from './race-roster.js';
 import {CarSelect} from './car-select.js';
 import {CarLivery} from './car-livery.js';
+import {FuscaBody,prepareFusca,FUSCA_URL,FUSCA_SEAT,FUSCA_EYE,FUSCA_HOOD_EYE} from './fusca.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260927-omp-retrovisores';
 import {CarOpenings} from './car-openings.js';
@@ -49,6 +50,8 @@ import {CinematicIntro} from './intro-cinematic.js';
 import {resolveGraphics,FrameLimiter,SHADOW_LEVELS,VIEW_DISTANCES,SCENERY_LEVELS,MIRROR_SIZES,GRAPHICS_LEVEL_NAMES,GRAPHICS_OPTIONS,DEBUG_OVERLAY_MODES,DEBUG_OVERLAY_CORNERS} from './graphics-settings.js';
 import {GraphicsPanel} from './graphics-panel.js';
 import {DebugOverlay} from './debug-overlay.js';
+import {GhostRecorder,loadGhost,saveGhost} from './ghost-lap.js';
+import {GhostCar} from './ghost-car.js';
 const $=id=>document.getElementById(id);
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;let mobile;
 const preferences=new PlayerPreferences();
@@ -88,6 +91,8 @@ $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked})
 // The car of the next race: Modo Corrida's choice (in a multiplayer room, the car the room gave this
 // window, multiplayer.js car); the story races the 99, so it skips the car screen.
 const menuCar=()=>menuMode==='historia'?'99':multiplayer?.car()??preferences.values.car;
+// Its model: Modo Corrida's Fusca tab (fusca.js) or the Opala; the story and a room's race are Opalas.
+const menuModel=()=>menuMode==='historia'||roomWanted?'opala':preferences.values.carModel;
 const carScreen=()=>menuMode==='corrida';
 // The settings' grid list: the field racing now or, between races, the next one. Rebuilt each time
 // the settings open (openSettings).
@@ -141,7 +146,7 @@ orbit.enabled=false;orbit.enablePan=false;orbit.minDistance=3.2;orbit.maxDistanc
 orbit.minPolarAngle=.015;orbit.maxPolarAngle=Math.PI/2;
 orbit.rotateSpeed=.8;orbit.zoomSpeed=.8;
 const orbitTarget=new THREE.Vector3(),orbitDelta=new THREE.Vector3();
-const hoodEye=new THREE.Vector3(1.1,1.25,0),followOffset=new THREE.Vector3();let followInitialized=false;
+const hoodEye=new THREE.Vector3(1.1,1.25,0),fuscaHoodEye=new THREE.Vector3(...FUSCA_HOOD_EYE),followOffset=new THREE.Vector3();let followInitialized=false;
 const cameraObstacles=[],cameraRay=new THREE.Raycaster(),cameraRayDirection=new THREE.Vector3();
 const obstacleMaterial=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});
 const cameraModes=CAMERA_MODES;
@@ -192,14 +197,19 @@ const openings=new CarOpenings();
 function cabinVisibility(){
  // The opening films the car from outside, whatever view the race then starts in.
  const inside=mode==='cockpit'&&!gridPreview()&&!watchedRival()&&!intro.active,classic=preferences.values.classicInterior;
- if(cockpit){cockpit.root.visible=inside||!!model;cockpit.setView({inside,classic});if(driver)driver.root.position.y=cockpit.drop();}
+ // A Fusca (fusca.js) has no room for the Opala's cockpit: its own interior shows, and the driver with the
+ // controls he works sits in its seat (seatShift, showFusca).
+ if(cockpit){cockpit.root.visible=!fuscaBody.active&&(inside||!!model);cockpit.setView({inside,classic});if(driver)driver.root.position.set(seatShift.x,cockpit.drop()+seatShift.y,seatShift.z);}
  if(model){model.visible=!inside||!classic;carStructure.visible=!(inside&&classic);}
 }
 const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
 function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
 let cockpit,skidMarks,tyreSmoke,sideMirrors;
-// The Opala 99's brake lights (brake-lights.js), on the sprung body with the model.
-const brakeLamps=createBrakeLights();carBody.add(brakeLamps);
+// The player's Opala on the sprung body: its model, cabin structure (setLivery) and brake lights
+// (brake-lights.js), hidden together while the player races a Fusca (fuscaBody, showFusca).
+const opalaShell=new THREE.Group();opalaShell.name='Opala_do_jogador';carBody.add(opalaShell);
+const brakeLamps=createBrakeLights();opalaShell.add(brakeLamps);
+const fuscaBody=new FuscaBody(carBody),seatShift=new THREE.Vector3(),eyeShift=new THREE.Vector3(),noShift=new THREE.Vector3();
 // The two TVs in Box 99's garage and the team stand's monitors show this track's records (the mode
 // being played, and the other mode's best laps on the stand); they are
 // checked every 1.5 s and redrawn only when the lists change (a new record, the other mode).
@@ -209,6 +219,56 @@ function updateRecordTvs(now){
  const kind=immersive?.active?'immersive':'normal',otherKind=kind==='immersive'?'normal':'immersive',read=m=>trackRecords(pilotStorage(),circuit.id,m,immersive?.pilotName);
  const lists=read(kind),other={mode:otherKind,lap:read(otherKind).lap},key=JSON.stringify([circuit.id,kind,lists,other]);
  if(key!==recordTvsKey){recordTvsKey=key;recordTvs.showRecords({title:`RECORDES · ${circuit.name.toUpperCase()}`,mode:kind,laps:LAPS.standard,...lists,other});}
+}
+// Ghost lap (G): the pilot's best lap on this circuit, in the mode being played (as the records),
+// recorded while he drives (ghost-lap.js) and replayed as a see-through Opala over the race
+// (ghost-car.js). ghostSavedAt: the crossing that saved a new one (the lap banner says so).
+const ghostRecorder=new GhostRecorder(),ghostCar=new GhostCar(),ghostPose={};scene.add(ghostCar.root);
+let ghostLap=null,ghostKey='',ghostSavedAt=null,ghostOnTrack=false;
+const ghostOwner=()=>immersive&&data?{circuit:circuit.id,mode:immersive.active?'immersive':'normal',pilot:immersive.pilotName||''}:null;
+// The saved lap for the pilot, circuit and mode on track now (read again when any of them changes).
+function currentGhost(){
+ const key=ghostOwner(),id=key?JSON.stringify(key):'';
+ if(id!==ghostKey){ghostKey=id;ghostLap=key?.pilot?loadGhost(pilotStorage(),key):null;}
+ return ghostLap;
+}
+// After each physics step: a lap that counts, driven whole by the pilot (not the recon lap's autopilot
+// nor the coast after the flag), becomes his ghost when it beats the one saved; the next lap races it.
+function recordGhost(){
+ const driving=sessionStarted&&!automatic&&!immersive.recordAssisted&&!immersive.finishing&&(immersive.active?immersive.state.phase==='race':!immersive.freeFinished);
+ const lap=ghostRecorder.step(car,driving),key=lap&&ghostOwner();
+ if(key?.pilot&&saveGhost(pilotStorage(),{...key,lap})){ghostKey='';ghostSavedAt=car.lapStart;}
+}
+// Each frame: the ghost where its lap was at this point of the lap being driven. It waits at its
+// start until the clock runs, fades out once its lap is over, and fades near the camera and the
+// Opala (in the cockpit it would fill the windscreen). Hidden off the track: menus, box, podium.
+function updateGhost(dt){
+ const lap=preferences.values.ghost?currentGhost():null;
+ const racing=!!lap&&sessionStarted&&!intro.active&&!pitstop?.opened&&raceResults.root.hidden&&(immersive.active?['starting','grid','race'].includes(immersive.state.phase):!immersive.freeResultReady);
+ ghostOnTrack=racing;if(!racing){ghostCar.setOpacity(0);return;}
+ const t=car.clock-car.lapStart+renderAhead();ghostOnTrack=t<lap.time+.8;lap.poseAt(t,ghostPose);ghostCar.place(ghostPose);ghostCar.update(paused?0:dt);
+ const near=camera.position.distanceTo(ghostCar.body.position),apart=Math.hypot(ghostPose.x-car.x,ghostPose.y-car.y);ghostCar.detail(near);
+ ghostCar.setOpacity(clamp(1-(t-lap.time)/.8,0,1)*clamp((near-2.5)/4,0,1)*(.3+.7*clamp((apart-1.5)/4,0,1)));
+ ghostCar.setLabel(`FANTASMA · ${fmt(lap.time)}`);ghostCar.label.visible=mode!=='tv'&&near<60;
+}
+// The timing panel's ghost line: its lap, and the gap to it at this point of the track (minus: ahead).
+function ghostHud(){
+ const on=preferences.values.ghost,lap=on?currentGhost():null;$('ghostInfo').hidden=!on;
+ for(const id of ['ghostButton','touchGhost']){$(id).classList.toggle('active',on);$(id).setAttribute('aria-pressed',String(on));}
+ if(!on)return;
+ const t=car.clock-car.lapStart,gap=lap&&ghostRecorder.lapStart===car.lapStart&&t>.5?t-lap.timeAt(ghostRecorder.progress):null;
+ $('ghostTime').textContent=lap?fmt(lap.time):'sem volta';
+ $('ghostGap').textContent=gap===null?'':`${gap<0?'−':'+'}${Math.abs(gap).toFixed(2).replace('.',',')}`;$('ghostGap').className=gap===null?'':gap<0?'ahead':'behind';
+}
+// G (the Fantasma buttons, the controller's ↑): the ghost on or off. With no lap saved yet for the
+// pilot here, it only says so. The saved laps are read again (another tab may have raced here).
+function toggleGhost(){
+ if(!ready||!sessionStarted)return;
+ ghostKey='';const lap=currentGhost(),owner=ghostOwner();let text;
+ if(preferences.values.ghost){preferences.update({ghost:false});text='Fantasma desligado · G liga de novo';}
+ else if(!lap)text=`Ainda não há volta gravada para o fantasma de ${owner.pilot||'você'} em ${circuit.name} (${immersive.active?'Modo História':'Modo Corrida'}). Complete uma volta válida pilotando e ela fica gravada.`;
+ else{preferences.update({ghost:true});text=`Fantasma ligado · sua melhor volta, ${fmt(lap.time)} · G desliga`;}
+ status(text);setTimeout(()=>{if($('status').textContent===text)status('');},4500);ghostHud();
 }
 function initializeRenderer(){
  if(renderer)return;
@@ -292,7 +352,7 @@ let pitstop,immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,p
 // The car raced now ('99', or Modo Corrida's choice), the car at the back of its grid whose driver
 // sits out (the same, or a multiplayer host's: seatCar), whether it is the recon lap, its paint on
 // the player's model, and the track branding's Old Stock ads that car 70 carries on its doors.
-let raceCar='99',raceGrid='99',reconLap=false,oldStockMaterial=null,modelLoading=null;const carLivery=new CarLivery();
+let raceCar='99',raceModel='opala',raceGrid='99',reconLap=false,oldStockMaterial=null,modelLoading=null;const carLivery=new CarLivery();
 // clone(model) with the player's model as loaded: the paint it may wear (car-livery.js) comes off for
 // the clone and goes back on after it.
 function withCleanModel(clone){
@@ -340,7 +400,7 @@ async function setLivery(value){
  try{
  const gltf=await loader.loadAsync(`./assets/opala99_${value}.glb?v=06-pecas-separadas`);
  if(token!==loadToken)return;
- carLivery.clear();if(model)carBody.remove(model);model=gltf.scene;wheels=[];
+ carLivery.clear();if(model)opalaShell.remove(model);model=gltf.scene;wheels=[];
  // Meshes inside the shut body (engine bay, trunk, hinges: glTF extra "interno") cast no shadow.
  model.traverse(o=>{if(o.isMesh){o.castShadow=!o.userData.interno;o.receiveShadow=true;
   for(const m of Array.isArray(o.material)?o.material:[o.material]){if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
@@ -352,12 +412,12 @@ async function setLivery(value){
  // These solid Blender panels close the cabin seen from outside. The detailed
  // cockpit has its own floor, walls and rear cabin, so they hide with the body
  // (their belt-high sheet over the rear seat would cover the interior).
- if(carStructure)carBody.remove(carStructure);
+ if(carStructure)opalaShell.remove(carStructure);
  carStructure=new THREE.Group();carStructure.name='Estrutura_cabine_V04';
  model.updateMatrixWorld(true);const structuralParts=[];
  model.traverse(o=>{if(o.isMesh&&(Array.isArray(o.material)?o.material:[o.material]).some(m=>m.name==='Chapa_fechamento_V04'))structuralParts.push(o);});
  for(const part of structuralParts){const local=part.matrixWorld.clone();carStructure.add(part);local.decompose(part.position,part.quaternion,part.scale);}
- carBody.add(model,carStructure);sideMirrors.attach(model,carBody,cockpit.eye);cabinVisibility();activeLivery=value;status('');if(sessionStarted&&immersive)paintCar();
+ opalaShell.add(model,carStructure);sideMirrors.attach(model,carBody,cockpit.eye);cabinVisibility();activeLivery=value;status('');if(sessionStarted&&immersive)paintCar();
  preferences.update({livery:value});if(ready)carAudio.effect('paint');
  }finally{
   if(token===loadToken){
@@ -368,6 +428,23 @@ async function setLivery(value){
   }
  }
 }
+// The Fusca's model (fusca.js): loaded the first time its tab or a race in it asks; null if it failed.
+let fuscaTemplate=null,fuscaLoading=null;
+function ensureFusca(){
+ if(fuscaTemplate)return Promise.resolve(fuscaTemplate);
+ return fuscaLoading??=loader.loadAsync(FUSCA_URL).then(gltf=>fuscaTemplate=prepareFusca(gltf.scene)).catch(err=>{console.error(err);return null;}).finally(()=>{fuscaLoading=null;});
+}
+// A race in the Fusca loads it with the circuit, and the ghost of the best lap gets its shell (ghost-car.js).
+async function fuscaWanted(){
+ if(preferences.values.carModel!=='fusca'||roomWanted)return;
+ if(await ensureFusca()&&!ghostCar.has('fusca'))ghostCar.build(fuscaTemplate,null,'fusca');
+}
+// The player's car as a Fusca in entry's colours (the 99's: black, the yellow stripe; null: back to the Opala). Meanwhile the Opala's body,
+// cockpit and brake lamps hide, and the driver and the cockpit camera move to the Fusca's seat.
+function showFusca(entry){
+ const on=!!entry&&fuscaBody.apply(fuscaTemplate,entry);if(!on)fuscaBody.clear();
+ opalaShell.visible=!on;seatShift.fromArray(on?FUSCA_SEAT:[0,0,0]);eyeShift.fromArray(on?FUSCA_EYE:[0,0,0]);cabinVisibility();return on;
+}
 // The Opala's model in the chosen paint: the car screen and the circuit load share one download.
 function ensureCarModel(){
  if(model&&activeLivery===$('livery').value)return Promise.resolve();
@@ -376,7 +453,7 @@ function ensureCarModel(){
 // The 99's two paints (V): another team's car has only its own (the settings' Pintura then only
 // saves the choice, loaded when the next race in the 99, or the car screen, needs it).
 async function cycleLivery(){
- if(!ready||$('skinButton').disabled||raceCar!=='99')return;
+ if(!ready||$('skinButton').disabled||raceCar!=='99'||raceModel==='fusca')return;
  try{await setLivery(activeLivery==='assinaturas_omp'?'seiva_danilo':'assinaturas_omp');}
  catch(err){status('Não foi possível trocar a pintura. Tente novamente.');console.error(err);}
 }
@@ -384,7 +461,7 @@ async function cycleLivery(){
 // hand shuts as the car moves off.
 function updateOpenings(dt){if(Math.hypot(car.vx,car.vy)>1.5)openings.release('manual');openings.update(dt);}
 // nearest (R key): only the player's car goes back on track; rivals, laps and fuel carry on.
-function reset(nearest=false){mobile?.setHandbrake(false);openings.closeAll(true);if(nearest)car.recover();else{car.resetGrid(playerGridSlot(immersive?.lineup?.length));if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
+function reset(nearest=false){mobile?.setHandbrake(false);openings.closeAll(true);if(nearest)car.recover();else{ghostRecorder.reset();car.resetGrid(playerGridSlot(immersive?.lineup?.length));if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
 function location(s){const sections=data.meta.sections||names;let name=sections[0][1];for(const [d,n] of sections)if(s>=d)name=n;return name;}
 const fmt=t=>{if(t===null)return '—';const m=Math.floor(t/60),s=t%60;return `${String(m).padStart(2,'0')}:${s.toFixed(3).padStart(6,'0')}`;};
@@ -396,6 +473,7 @@ function drawMap(){
  if(pitstop){ctx.beginPath();let started=false;const nodes=data.samples.filter(p=>pitLane(data,p[0])).sort((a,b)=>pitLane(data,a[0]).u-pitLane(data,b[0]).u);for(const p of nodes){const d=pitLane(data,p[0]).offset,[x,y]=projectMap(p[1]-p[8]*d,p[2]+p[7]*d);if(!started){ctx.moveTo(x,y);started=true;}else ctx.lineTo(x,y);}ctx.strokeStyle='#55e0db';ctx.lineWidth=2;ctx.stroke();const [px,py]=projectMap(pitstop.anchor.x,-pitstop.anchor.z);ctx.fillStyle='#114e43';ctx.fillRect(px-9,py-21,18,16);ctx.fillStyle='#fff5a1';ctx.font='bold 13px sans-serif';ctx.textAlign='center';ctx.fillText('P',px,py-9);}
  if(data.pit){const c=data.pit.columns,x=c.indexOf('x'),y=c.indexOf('y');ctx.beginPath();data.pit.samples.forEach((p,i)=>{const [px,py]=projectMap(p[x],p[y]);i?ctx.lineTo(px,py):ctx.moveTo(px,py);});ctx.lineWidth=1.5;ctx.strokeStyle=car.surface.pit?'#55e0db':'#7fa7a0';ctx.stroke();}
  const [sx,sy]=xy(data.samples[0]);ctx.fillStyle='#ffffff';ctx.fillRect(sx-3,sy-3,6,6);
+ if(ghostOnTrack){const [gx,gy]=projectMap(ghostPose.x,ghostPose.y);ctx.beginPath();ctx.arc(gx,gy,4,0,Math.PI*2);ctx.fillStyle='#7fdcff66';ctx.fill();ctx.strokeStyle='#c8f6ff';ctx.lineWidth=1.5;ctx.stroke();}
  const [x,y]=projectMap(car.x,car.y);ctx.save();ctx.translate(x,y);ctx.rotate(-car.heading);ctx.beginPath();ctx.moveTo(7,0);ctx.lineTo(-5,-4);ctx.lineTo(-3,0);ctx.lineTo(-5,4);ctx.closePath();ctx.fillStyle='#e2fb57';ctx.shadowBlur=10;ctx.shadowColor='#d6fa4b';ctx.fill();ctx.restore();
 }
 const roughRotation=new THREE.Quaternion(),roughEuler=new THREE.Euler(),chaseForward=new THREE.Vector3(1,0,0),chaseTarget=new THREE.Vector3(1,0,0);let roughRide=0;
@@ -425,7 +503,7 @@ function updateCar(dt){
  const tumbling=car.upright<.6;
  if(!tumbling)chaseTarget.copy(forward);else if(speed>2)chaseTarget.set(car.vx,0,-car.vy).normalize();
  chaseForward.lerp(chaseTarget,dt>=1?1:1-Math.exp(-dt*(tumbling?2.5:30))).normalize();
- for(const w of wheels){
+ for(const w of fuscaBody.active?fuscaBody.wheels:wheels){
   // Fisica: angulo positivo aponta para a esquerda. No GLB: frente +X,
   // cima +Y e esquerda -Z. Construir o eixo de rodagem evita inverter
   // esquerda/direita ao converter os eixos Blender -> glTF.
@@ -601,7 +679,7 @@ function updateCamera(dt){
   neckTwist(mode==='cockpit'&&!photo?headView.yaw:0,twist);
   // A watched rival carries both cameras at the same places in its own body, beside its driver.
   const mount=rival?rival.obj.matrixWorld:carBody.matrixWorld;
-  const view=photo??headView,eye=photo?photoEye:mode==='hood'?hoodEye:headEye.fromArray(twist).add(cockpit.eye),drop=photo?0:.20;
+  const view=photo??headView,eye=photo?photoEye:mode==='hood'?(fuscaBody.active&&!rival?fuscaHoodEye:hoodEye):headEye.fromArray(twist).add(cockpit.eye).add(rival?noShift:eyeShift),drop=photo?0:.20;
   carRoot.updateMatrixWorld(true);camera.position.copy(eye).applyMatrix4(mount);
   look.set(Math.cos(view.pitch)*Math.cos(view.yaw)*20,Math.sin(view.pitch)*20-drop,Math.cos(view.pitch)*Math.sin(view.yaw)*20).add(eye).applyMatrix4(mount);
   camera.position.y+=Math.sin(shakeTime*41)*shake*.35;look.y+=Math.sin(shakeTime*29+1.3)*shake*2;
@@ -673,6 +751,7 @@ function hud(){
  // Jumps and crashes take over the surface line while they last.
  const crash=car.upright<.45?(car.overturned>0?`CAPOTADO · FISCAIS DESVIRAM EM ${Math.max(1,Math.ceil(RIGHTING_DELAY-car.overturned))} s`:'CAPOTANDO!'):car.rightedAt!==null&&car.clock-car.rightedAt<3?'FISCAIS DESVIRARAM O CARRO':car.airTime>.25?'NO AR!':car.pitPenalty&&car.clock-car.pitPenalty.clock<3?'EXCESSO DE VELOCIDADE NOS BOXES · VOLTA INVÁLIDA':'';if(crash)$('surface').textContent=crash;
  else if(mobile.handbrake)$('surface').textContent=touchDevice?'FREIO DE MÃO PUXADO':'FREIO DE MÃO PUXADO · ESPAÇO SOLTA';
+ ghostHud();
 }
 // Automated browsers (the checks) skip it unless the page asks with ?intro=1; ?intro=0 turns it off.
 // A multiplayer room skips it: every window must reach the 3-2-1 together.
@@ -683,7 +762,7 @@ function introContext(){
  // Track centre line k metres ahead of the car, on the road surface.
  const center=k=>{const t=((s+k)%L+L)%L,i=Math.max(0,a.findIndex(q=>q[0]>=t)),p=a[i];probe.index=i;return new THREE.Vector3(p[1],probe.sample(p[1],p[2]).z,-p[2]);};
  const here=center(0),position=immersive.active?immersive.state.position:immersive.freePosition;
- return {car:carRoot.position.clone(),number:raceCar,forward:forward.clone(),inward:here.sub(carRoot.position),center,pilot:immersive.pilotName||'Stevan',position,grid:immersive.fieldSize,laps:immersive.active?immersive.storyLaps:immersive.freeTotalLaps,practice:immersive.practice,duel:!immersive.active&&immersive.freeLineup?.length===1?carEntry(immersive.freeLineup[0]):null,
+ return {car:carRoot.position.clone(),number:raceCar,model:raceModel,forward:forward.clone(),inward:here.sub(carRoot.position),center,pilot:immersive.pilotName||'Stevan',position,grid:immersive.fieldSize,laps:immersive.active?immersive.storyLaps:immersive.freeTotalLaps,practice:immersive.practice,duel:!immersive.active&&immersive.freeLineup?.length===1?carEntry(immersive.freeLineup[0]):null,
   circuit:circuit.name,venue:circuit.id==='interlagos'?'Autódromo José Carlos Pace':circuit.venue??circuit.label,weather:circuit.id==='interlagos'?'São Paulo · 16h40 · 27 °C · pista seca':circuit.weather??'Fim de tarde · 26 °C · pista seca',
   hero:immersive.visual?.hero?immersive.visual.hero.getWorldPosition(new THREE.Vector3()):carRoot.position.clone(),
   // People face their local +x.
@@ -727,7 +806,9 @@ function lapBanner(dt){
    const valid=car.lastLapValid,delta=valid&&bestBefore!==null?car.lastLap-bestBefore:null;
    $('lapBannerTime').textContent=fmt(car.lastLap);
    $('lapBannerDelta').textContent=delta===null?'':`${delta<0?'−':'+'}${Math.abs(delta).toFixed(3).replace('.',',')}`;
-   $('lapBannerNote').textContent=valid?'':car.lastInvalidReason==='pit'?'Não contou · velocidade nos boxes':'Não contou · trecho cortado';
+   // A lap that became the ghost says so (the first one tells where the ghost is).
+   const ghostSaved=valid&&ghostSavedAt===car.lapStart;banner.classList.toggle('ghost-saved',ghostSaved);
+   $('lapBannerNote').textContent=valid?ghostSaved?preferences.values.ghost?'Novo fantasma':'Fantasma gravado · G mostra':'':car.lastInvalidReason==='pit'?'Não contou · velocidade nos boxes':'Não contou · trecho cortado';
    banner.classList.toggle('faster',delta!==null&&delta<0);banner.classList.toggle('slower',delta!==null&&delta>=0);banner.classList.toggle('invalid',!valid);
    // Restart the entrance animation even when two crossings come close together.
    banner.hidden=true;void banner.offsetWidth;banner.hidden=false;lapShown=5;
@@ -750,7 +831,7 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  // The sound is heard from the rival the recon lap watches (N), otherwise from the player's car.
  const heard=watchedRival()?.car??car;
  if(automatic&&!paused&&(mobile?.throttle||mobile?.brake||mobile?.steering||gamepad.driving))takeWheel();
- if(!paused&&!frozen){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
+ if(!paused&&!frozen){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);recordGhost();accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
  tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[1.2,5.5]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused||frozen?0:dt,renderer.domElement.height);if(!paused&&!frozen)for(const r of immersive?.rivals??[])if(r.broken?.smokeLeft>0)tyreSmoke.plume(r.car,dt);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
@@ -758,14 +839,14 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  // The same command drives the engine sound and the driver's hands and feet.
  const driveCommand=pitstop?.opened?{throttle:0,brake:1,engineOff:true}:immersive?.audioCommand(automatic?pilot():input())??input();
  const rivalSound=heard!==car?immersive.rivalSound(heard):null;
- brakeLamps.userData.set(model?.visible&&!driveCommand.engineOff?driveCommand.brake:0);
+ const braking=driveCommand.engineOff?0:driveCommand.brake;brakeLamps.userData.set(model?.visible?braking:0);fuscaBody.brake(braking);
  carAudio.update(heard,rivalSound?.command??driveCommand,rivalSound?.skid??skid,paused||frozen,mode);
  carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
  // A watched rival is posed by immersive.update below: its camera follows after that.
  updateOpenings(paused?0:dt);updateCar(dt);if(!watchedRival())updateCamera(dt);const phoneArrived=cockpit.update(car,paused?0:dt,heard===car?carAudio.state:null).phoneArrived;if(phoneArrived)carAudio.notifyPhone();driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});gamepad.bump(Math.max(frameImpact,immersive?.takeKnock()??0));frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  if(immersive?.visual)immersive.visual.renderAhead=renderAhead();immersive?.update(paused?0:dt,camera);if(watchedRival())updateCamera(dt);
- pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);
+ pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);updateGhost(dt);
  // Marshals, cameramen, crews, the terrace and the café idle; passing cars catch their eye.
  // Anyone the Opala runs over goes flying (a cartoon, not a crash): the car barely notices.
  if(!paused&&hitPeople(car)){car.vx*=.97;car.vy*=.97;}for(const e of takePeopleEvents())carAudio.effect(e.sound,{strength:e.strength});
@@ -790,7 +871,8 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
  const watchedCar=watchedRival();
  // Mirrors switched off in the Gráficos tab skip this extra pass.
- if(mode==='cockpit'&&!gridPreview()&&!watchedCar&&MIRROR_SIZES[graphics.values.mirrors]){
+ // The Fusca hides the Opala's cockpit, mirror and all.
+ if(mode==='cockpit'&&!gridPreview()&&!watchedCar&&MIRROR_SIZES[graphics.values.mirrors]&&!fuscaBody.active){
   // The mirror sees the road behind, not the body round it (the classic view hides it anyway).
   const bodyShown=!!model?.visible;cockpit.root.visible=false;driver.root.visible=false;if(model)model.visible=false;
   cockpit.rearCamera.position.set(-.65,1.14,0).applyMatrix4(carBody.matrixWorld);
@@ -884,12 +966,16 @@ function updateScreens(){
 // A multiplayer guest back at the opening no longer waits for the host's race (multiplayer.js wait).
 function showScreen(name){screen=name;if(name==='opening')multiplayer?.wait(false);updateScreens();updateMenuLabels();if(name==='tracks')$('singleRace').focus({preventScroll:true});if(name==='cars')$('carCards').querySelector('[aria-checked=true]')?.focus({preventScroll:true});}
 // Who races, as the track and car screens show it: the pilot and, in Modo Corrida, the car.
-const pilotLine=()=>[pilotPicker.profiles.selected&&`Piloto: ${pilotPicker.profiles.selected}`,menuMode==='corrida'&&`Opala #${menuCar()}`].filter(Boolean).join(' · ');
+const pilotLine=()=>[pilotPicker.profiles.selected&&`Piloto: ${pilotPicker.profiles.selected}`,menuMode==='corrida'&&`${MODEL_NAMES[menuModel()]} #${menuCar()}`].filter(Boolean).join(' · ');
 // Modo Corrida's car screen (car-select.js): the studio needs the renderer and the car's model, both
 // kept for the race. A multiplayer guest does not pick the track: its button waits for the host's race.
-const carSelect=new CarSelect({root:$('cars'),value:preferences.values.car,carRoot,
+const carSelect=new CarSelect({root:$('cars'),value:preferences.values.car,model:preferences.values.carModel,carRoot,
+ onModel:model=>{preferences.update({carModel:model});updateMenuLabels();if(model==='fusca')fuscaInStudio();},
  onPick:number=>{preferences.update({car:number});multiplayer?.choose(number);updateMenuLabels();if(ready)showRoster();},onNext:()=>{if(multiplayer?.guest())multiplayer.wait();else showScreen('tracks');},onBack:()=>showScreen('opening')});
+// The Fusca tab's studio needs the Fusca's model.
+function fuscaInStudio(){ensureFusca().then(template=>{if(template)carSelect.setFusca(template);else carSelect.failed('fusca');});}
 function openCarScreen(){
+ if(carSelect.model==='fusca')fuscaInStudio();
  $('carsPilot').textContent=pilotPicker.profiles.selected?`Piloto: ${pilotPicker.profiles.selected}`:'';if(model&&carSelect.studio.template===model&&activeLivery===$('livery').value)return;
  // No WebGL: the screen says so and the choice still counts.
  try{initializeRenderer();}catch(err){console.error(err);carSelect.failed();return;}
@@ -897,7 +983,9 @@ function openCarScreen(){
 }
 window.interlagosCarros={info:()=>({...carSelect.info(),raceCar,painted:carLivery.number,decals:carLivery.decals.length,hidden:carLivery.hidden.length,paint:carLivery.materials.find(m=>m.name==='Pintura_preta')?.color.getHex()??null,skin:!$('skinButton').hidden,touchSkin:!$('touchSkin').hidden,screen,livery:activeLivery,
  // Stevan's Opala 99 built from the model as loaded now (null: not built on this circuit).
- stevanCurrent:immersive?.visual?.opala99?immersive.visual.opala99Template===model:null})};
+ stevanCurrent:immersive?.visual?.opala99?immersive.visual.opala99Template===model:null,
+ // The model raced, the player's Fusca (fusca.js) and whether the Opala's body shows.
+ raceModel,fusca:fuscaBody.info(),fuscaLoaded:!!fuscaTemplate,opalaShown:opalaShell.visible,seatShift:seatShift.toArray()})};
 // The track screen: the pilot, each circuit's best lap and the championship panel.
 function renderTracks(){
  const pilot=pilotPicker.profiles.selected||'';$('tracksPilot').textContent=pilotLine();
@@ -972,6 +1060,8 @@ document.addEventListener('keydown',e=>{
  if(e.code==='KeyR'&&!immersive.finishing)reset(true);
  if(e.code==='KeyM'){carAudio.toggleMute();audioControls();}
  if(e.code==='KeyV')cycleLivery();
+ // The controller's ↑ (a synthetic G) answers 2 on foot: there it leaves the ghost alone.
+ if(e.code==='KeyG'&&(e.isTrusted||!immersive.onFoot()))toggleGhost();
  // P pauses on the track (from the menu it resumes, as before); Escape opens the menu.
  if(e.code==='KeyP'){if(held||!paused)hold(!held);else menu(false);}
  if(e.code==='Escape')menu(true);
@@ -983,6 +1073,7 @@ $('orbitButton').onclick=()=>{if(ready)setCameraMode(mode==='orbit'?'chase':'orb
 $('cockpitButton').onclick=()=>{if(ready)setCameraMode(mode==='cockpit'?'chase':'cockpit',true);};
 $('skinButton').onclick=cycleLivery;
 $('watchButton').onclick=()=>watchNext(1);
+$('ghostButton').onclick=$('touchGhost').onclick=toggleGhost;
 async function beginRace(restart=false,tour=false,story=preferences.values.immersive){
  if(loading)return;
  // The race the track screen asked for (a championship round or a room's race is a single race); a
@@ -994,12 +1085,14 @@ async function beginRace(restart=false,tour=false,story=preferences.values.immer
  if(!await loadCircuit())return;
  const same=sessionStarted&&preferences.values.immersive===immersive.active&&!(!immersive.active&&immersive.freeResultReady);
  if(same&&!restart&&!tour){menu(false);return;}
- automaticRecords.start(pilot);immersive.pilotName=pilot;immersive.recordSaveError='';
+ automaticRecords.start(pilot);immersive.pilotName=pilot;immersive.recordSaveError='';ghostKey='';
  // A championship round races the championship's laps; everything else the chosen ones.
  if(tour)championshipRace=null;storyRound=null;raceResults.championship=null;
  immersive.laps=championshipRace?championshipRace.championship.laps:preferences.values.laps;
  // The car: Modo Corrida's choice, or the room's (multiplayer.js); the story and the recon lap race the 99.
  raceCar=preferences.values.immersive||tour?'99':multiplayer?.car()??preferences.values.car;reconLap=tour;
+ // In a Fusca (the car screen's tab) when it loaded; the story and the recon lap race the Opala 99.
+ raceModel=!preferences.values.immersive&&!tour&&!roomWanted&&preferences.values.carModel==='fusca'&&fuscaTemplate?'fusca':'opala';ghostCar.use(raceModel);
  immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[duelRivalFor(raceCar,preferences.values.duelRival)];
  seatCar();
  document.querySelector('.session').childNodes[1].textContent=championshipRace?` ${championshipRace.championship.info.label} · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total} `:immersive.lineup?.length===0?' TREINO SOLO ':immersive.lineup?` 1x1 · #${immersive.lineup[0]} `:' PISTA LIVRE ';
@@ -1018,7 +1111,7 @@ function returnToMainMenu(){
  multiplayer?.leaving();
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);
  pitstop?.reset();
- carLivery.clear();if(ready){immersive.disable();reset();}
+ carLivery.clear();showFusca(null);if(ready){immersive.disable();reset();}
  // A multiplayer guest has no track to pick: Modo Corrida brings it back to the car screen, where it
  // waits for the host's next race (or, having left this one early, picks again).
  sessionStarted=false;automatic=false;watched=0;championshipRace=storyRound=null;raceResults.root.hidden=true;screen=multiplayer?.guest()&&carScreen()?'cars':'tracks';menu(true);showCircuitSelection();
@@ -1058,18 +1151,19 @@ function nextStoryRound(){
 function chooseMode(mode){if(sessionStarted||loading||!pilotPicker.commit())return;menuMode=mode;showScreen(carScreen()?'cars':'tracks');}
 // The chosen car on track: the field with the 99 in its seat (RaceField's roster, the rivals' models)
 // and the player's result rows under its number; set before the grid. The model goes back to the 99
-// first, since the 99 that Stevan Gaipo races is cloned from it. A multiplayer guest's field is the
-// host's (gridCar: the host's car sits out of it); the guest's own car takes its seat (multiplayer.js).
+// first, since the 99 that Stevan Gaipo races is cloned from it. In a Fusca race the whole field races
+// Fuscas (raceModel). A multiplayer guest's field is the host's (gridCar: the host's car sits out of it);
+// the guest's own car takes its seat (multiplayer.js).
 function seatCar(){
- carLivery.clear();const entry=raceCar==='99'?null:carEntry(raceCar),grid=raceGrid=multiplayer?.gridCar()??raceCar;
- immersive.field.roster=fieldRoster(grid);immersive.visual.seatOpala99(model,grid);
+ carLivery.clear();showFusca(null);const entry=raceCar==='99'?null:carEntry(raceCar),grid=raceGrid=multiplayer?.gridCar()??raceCar;
+ immersive.field.roster=fieldRoster(grid);immersive.visual.seatOpala99(model,grid,raceModel==='fusca'?fuscaTemplate:null);
  immersive.playerEntry=entry?{...entry,name:immersive.pilotName,shortName:immersive.pilotName}:undefined;
 }
 // Once the grid is set: the player's Opala in that car's colours (car-livery.js), the map's legend, and
 // the paint button only for the 99's two liveries.
 function paintCar(){
- carLivery.apply(model,raceCar==='99'?null:carEntry(raceCar),immersive.visual,{doorAds:oldStockMaterial});
- $('skinButton').hidden=$('touchSkin').hidden=raceCar!=='99';document.querySelector('.map-legend').childNodes[1].textContent=` ${raceCar} · VOCÊ `;
+ if(!(raceModel==='fusca'&&showFusca(carEntry(raceCar))))carLivery.apply(model,raceCar==='99'?null:carEntry(raceCar),immersive.visual,{doorAds:oldStockMaterial});
+ $('skinButton').hidden=$('touchSkin').hidden=raceCar!=='99'||raceModel==='fusca';document.querySelector('.map-legend').childNodes[1].textContent=` ${raceCar} · VOCÊ `;
 }
 $('start').onclick=()=>chooseMode('corrida');
 $('storyStart').onclick=()=>chooseMode('historia');
@@ -1096,7 +1190,7 @@ $('championshipTabs').onkeydown=e=>{
 $('championshipReset').onclick=()=>{const b=$('championshipReset');if(b.dataset.armed){championshipFor().reset();delete b.dataset.armed;renderTracks();return;}b.dataset.armed='1';b.textContent='Apagar pontos? Clique de novo';setTimeout(()=>{delete b.dataset.armed;b.textContent='Recomeçar campeonato';},4000);};
 $('restartRace').onclick=()=>beginRace(true);
 $('settingsRestart').onclick=()=>{$('settings').close();beginRace(true);};
-$('tour').onclick=()=>{$('settings').close();beginRace(true,true,false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value,true);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted||raceCar!=='99')return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
+$('tour').onclick=()=>{$('settings').close();beginRace(true,true,false);};$('menuButton').onclick=openSettings;$('camera').onchange=e=>setCameraMode(e.target.value,true);$('livery').onchange=async e=>{preferences.update({livery:e.target.value});if(!ready||!sessionStarted||raceCar!=='99'||raceModel==='fusca')return;try{await setLivery(e.target.value);}catch(err){status('Não foi possível carregar a pintura. Tente novamente.');console.error(err);}};
 // Keep the car and audio session; release the previous circuit before loading another.
 function clearCircuit(){
  intro.stop();const retired=[];
@@ -1104,7 +1198,7 @@ function clearCircuit(){
  camera.clearViewOffset();
  if(immersive){immersive.dispose();immersive.visual.damage.removeFromParent();retired.push(immersive.visual.damage);immersive=null;}
  if(car)delete car.condition;
- const keepRoots=new Set([carRoot,skidMarks?.mesh,tyreSmoke?.mesh,sun,sun.target,sky?.dome]);
+ const keepRoots=new Set([carRoot,ghostCar.root,skidMarks?.mesh,tyreSmoke?.mesh,sun,sun.target,sky?.dome]);
  for(const root of [...scene.children])if(!root.isLight&&!keepRoots.has(root)){scene.remove(root);retired.push(root);}
  const collect=roots=>{const geometries=new Set(),materials=new Set(),textures=new Set();for(const root of roots)root?.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){materials.add(m);for(const value of Object.values(m))if(value?.isTexture)textures.add(value);}});return {geometries,materials,textures};};
  const keep=collect([...keepRoots]),old=collect(retired);
@@ -1124,13 +1218,13 @@ async function loadCircuit(){
  for(const button of document.querySelectorAll('[data-circuit]'))button.disabled=true;
  updateMenuLabels();
  try{
- if(reuse){if(activeLivery!==$('livery').value)await setLivery($('livery').value);ready=true;window.interlagos.ready=true;$('skinButton').disabled=false;return true;}
+ if(reuse){if(activeLivery!==$('livery').value)await setLivery($('livery').value);await fuscaWanted();ready=true;window.interlagos.ready=true;$('skinButton').disabled=false;return true;}
  initializeRenderer();clearCircuit();showCircuitSelection();
  // The Gráficos tab's scenery level (graphics-settings.js): taken now, a change waits for the next start.
  const sceneryLevel=graphics.values.scenery,scenery=SCENERY_LEVELS[sceneryLevel];
 
  // Track files live in dados/, beside teste/ here and beside index.html once published (preparar_publicacao.py).
- data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/'+(circuit.data??'pista.json'))).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);
+ data=circuit.id==='curvelo'?createCurveloData():await (await fetch('../dados/'+(circuit.data??'pista.json'))).json();data.meta.id=circuit.id;data.meta.name=circuit.name;projectMap=mapProjection(data.samples);car=new TestCar(data);ghostRecorder.reset();
  roadSurface=await createTrackSurface(renderer,data);
  if(!driver){driver=await createDriver(cockpit);carBody.add(driver.root);}
  terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];
@@ -1163,7 +1257,7 @@ async function loadCircuit(){
   Object.assign(landscape.stats,{ground:groundFit.stats,stands:stands.stats,legacyStands});
  }
  scene.add(landscape.root);
- const crowd=createCrowd(standTops,{mobile:scenery.mobile});scene.add(crowd.root);landscape.stats.fans=crowd.count;await ensureCarModel();
+ const crowd=createCrowd(standTops,{mobile:scenery.mobile});scene.add(crowd.root);landscape.stats.fans=crowd.count;await ensureCarModel();await fuscaWanted();
  const guardrails=createGuardrails(data);scene.add(guardrails.root);cameraObstacles.push(guardrails.rails);
  scene.add(createCurbs(data));
  // Surveyed pit lane: entry after the Cafe, garages, exit around the S do Senna.
@@ -1184,6 +1278,9 @@ async function loadCircuit(){
  carLivery.clear();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
  immersive.onMainMenu=returnToMainMenu;
+ // The ghost's shell is the same for every paint and car colour: built once, from the first model (at
+ // rest, as the rivals were just cloned), with the distant rivals' profile beyond 45 m.
+ if(!ghostCar.has('opala'))ghostCar.build(model,immersive.visual.farProxy(0xffffff).geometry,'opala');
  // In a Modo História championship the story's own restarts lead to the next round (after this frame).
  {const storyStart=immersive.start.bind(immersive);immersive.start=()=>{if(storyRound){queueMicrotask(()=>{if(storyRound)nextStoryRound();});return;}storyStart();};}immersive.laps=preferences.values.laps;immersive.field.ace=preferences.values.aceKoyzinho;immersive.field.level=preferences.values.aiLevel;immersive.field.retirements=preferences.values.retirements;immersive.visual.viewCamera=camera;
  // Sessions started from the menu open with the cinematic intro (the 3-2-1 waits for it).
@@ -1215,6 +1312,10 @@ async function loadCircuit(){
   // materials: those shown on the rival (whatever its distance detail), numbers: its own number decals.
   rivalParts:()=>{const rival=immersive.visual.rivals[0],names=[],shown=new Set();let meshes=0;rival?.traverse(o=>{names.push(o.name);if(!o.isMesh)return;meshes++;let seen=true;for(let q=o;q&&q!==rival;q=q.parent)if(!q.visible&&q!==rival.userData.detail)seen=false;if(seen)for(const m of [o.material].flat())shown.add(m.name);});return {motor:names.includes('Motor_CONJUNTO'),tanque:names.includes('Tanque_combustivel_CONJUNTO'),meshes,materials:[...shown],numbers:names.filter(n=>n.startsWith('Numero_')).length};},
   driverInfo:()=>driver.info(),
+  // The ghost (G): the lap it replays, where it is drawn and how see-through, and the lap being recorded.
+  ghostInfo:()=>{const lap=currentGhost();return {enabled:preferences.values.ghost,lap:lap?{time:lap.time,samples:lap.n,pilot:lap.pilot}:null,onTrack:ghostOnTrack,visible:ghostCar.root.visible,opacity:ghostCar.opacity,
+   position:ghostCar.body.position.toArray(),pose:{...ghostPose},label:ghostCar.labelText,triangles:ghostCar.triangles,savedAt:ghostSavedAt,gap:$('ghostGap').textContent,time:$('ghostTime').textContent,
+   recorder:{lapStart:ghostRecorder.lapStart,clean:ghostRecorder.clean,samples:ghostRecorder.values.length/7,progress:ghostRecorder.progress}};},
   rivalDrivers:()=>immersive.visual.rivals.map(o=>o.userData.driver?{...o.userData.driver.info(),shown:o.userData.detail.visible&&o.visible}:null),
   watchInfo:()=>{const r=watchedRival();return {watched,number:r?.entry.number??null,camera:camera.position.toArray(),target:r?r.obj.position.toArray():carRoot.position.toArray(),rpm:(r?.car??car).rpm};},
   surfaceInfo:()=>({...roadSurface.stats,material:roadSurface.material.name,drawCalls:renderer.info.render.calls}),
