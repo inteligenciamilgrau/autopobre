@@ -1,4 +1,4 @@
-/* Multiplayer room card (multiplayer.js): only in a window opened with #sala=NOME. */
+/* Multiplayer room card (multiplayer.js): only in a window opened with #corrida=NOME. */
 #mpRoom{position:absolute;right:24px;bottom:78px;z-index:40;width:250px;padding:12px 14px;background:var(--glass);border:1px solid #fff3;border-radius:10px;font:12px/1.35 Inter,"Segoe UI",Arial,sans-serif;color:#f5f6ed;box-shadow:0 8px 30px #0006}
 #mpRoom .mp-head{display:flex;align-items:baseline;gap:7px;font-size:11px;letter-spacing:1.5px}
 #mpRoom .mp-head b{color:var(--lime)}

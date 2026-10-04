@@ -347,10 +347,11 @@ document.addEventListener('click',e=>{if(e.target.closest('button')&&!e.target.c
 $('volume').oninput=e=>{carAudio.setVolume(Number(e.target.value)/100);audioControls();};
 $('mute').onclick=()=>{carAudio.toggleMute();carAudio.unlock();audioControls();};
 let sessionStarted=false,loading=false,loadedCircuit=null;
-// Multiplayer test room (multiplayer.js): loaded only for an address with #sala=NOME; no menu leads there.
+// Multiplayer test room (multiplayer.js): loaded only for an address with #corrida=NOME (or the old
+// #sala=NOME, net-room.js roomAddress); no menu leads there.
 // Only /dev/ publishes it: the main link's build (preparar_publicacao.py without --multiplayer) turns this off.
 const MULTIPLAYER=true;
-const roomWanted=MULTIPLAYER&&new URLSearchParams(window.location.hash.slice(1)).has('sala');let multiplayer=null;
+const roomWanted=MULTIPLAYER&&['corrida','sala'].some(key=>new URLSearchParams(window.location.hash.slice(1)).has(key));let multiplayer=null;
 let pitstop,immersive,car,data,roadSurface,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
 // The car raced now ('99', or Modo Corrida's choice), the car at the back of its grid whose driver
 // sits out (the same, or a multiplayer host's: seatCar), whether it is the recon lap, its paint on

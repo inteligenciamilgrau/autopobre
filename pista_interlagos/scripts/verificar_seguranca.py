@@ -125,7 +125,7 @@ def main():
             page.screenshot(path=str(ROOT / '.audit-local/security_release.png'))
             if not multiplayer:
                 # A room address on the main link opens the plain game and asks for no multiplayer file.
-                page.goto(base + 'index.html#sala=verificacao', wait_until='networkidle')
+                page.goto(base + 'index.html#corrida=verificacao', wait_until='networkidle')
                 page.wait_for_selector('#start:not([disabled])')
                 check('room_address_ignored_without_multiplayer', page.locator('#mpRoom').count() == 0
                       and not any('/multiplayer.' in url or '/net-' in url for url in requests))

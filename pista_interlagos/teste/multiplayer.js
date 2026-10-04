@@ -2,15 +2,15 @@
 // (net-link.js, sala-cloudflare), or windows of one browser through a BroadcastChannel (&local=1)
 // (net-room.js, net-cars.js). Nothing in the menus leads here; main.js loads this module only when
 // the address asks for a room:
-//   index.html#sala=NOME     the first in a room hosts it; every pilot races the car chosen on
+//   index.html#corrida=NOME  the first in a room hosts it; every pilot races the car chosen on
 //                            Modo Corrida's car screen (or the one in &carro=73) if nobody else has
 //                            it, else the first free one. Online, the group key opens the door and
-//                            the host lets each guest in
+//                            the host lets each guest in. The old #sala=NOME still opens the room
 //   &local=1                 this browser's windows only, no server; &servidor=local: wrangler dev
 //   &auto=1                  the automatic pilot drives this window's car from the start
 //   &fantasmas=1             (host) humans pass through each other instead of colliding
 //   &lag=150&perda=5         simulate 150 ms of network delay and 5% of lost car messages
-//   #sala=NOME_SEGREDO       what follows the "_" is never on screen (the card and the address bar
+//   #corrida=NOME_SEGREDO    what follows the "_" is never on screen (the card and the address bar
 //                            read NOME_***): a pilot streaming his screen does not give the room away
 // A guest the host lets in goes to Modo Corrida's car screen, picks its car and presses "Aguardar
 // início da corrida". The host lets pilots in until the start (on the car screen, the track screen and
@@ -30,7 +30,7 @@
 // a car that reached the flag with nobody at the wheel is AB, its race over. The host out of reach
 // (its line down, its window gone) stands the race still in every window until it is back.
 import * as THREE from 'three';
-import {Room,roomParams,roomAddress,roomLabel} from './net-room.js';
+import {Room,roomParams,roomAddress,roomLabel,roomIn} from './net-room.js';
 import {ServerLink,ROOM_SERVER,LOCAL_SERVER} from './net-link.js';
 import {RemoteCar,packCar,readCar} from './net-cars.js';
 import {GuestRaceState} from './net-verify.js';
@@ -80,7 +80,7 @@ export function startMultiplayer(game,hash=location.hash){
  // The room's secret leaves the address bar at once (net-room.js roomAddress); an address that came
  // with it hidden and unknown here opens no room, only the card saying so.
  const address=roomAddress(hash,localStore());
- if(address.lost){roomCard(roomLabel(new URLSearchParams(hash.replace(/^#/,'')).get('sala')),HIDDEN_LOST);return null;}
+ if(address.lost){roomCard(roomLabel(roomIn(hash)),HIDDEN_LOST);return null;}
  if(address.shown!==hash)try{history.replaceState(history.state,'',address.shown);}catch{}
  const params=roomParams(address.hash);return params?new Multiplayer(game,params):null;
 }

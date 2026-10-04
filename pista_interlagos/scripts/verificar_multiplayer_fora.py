@@ -51,14 +51,14 @@ def wait_for_start(page):
 
 def check(context, host):
     report = {}
-    host.goto(f'{URL}?intro=0&cinema=off#sala={ROOM}&local=1', wait_until='load', timeout=120000)
+    host.goto(f'{URL}?intro=0&cinema=off#corrida={ROOM}&local=1', wait_until='load', timeout=120000)
     wait_js(host, "window.interlagosSala?.info().role==='host'&&" + OPENING, timeout=60000)
     host.fill('#pilotName', 'Ana Anfitriã')
     # The guest is another window (a background tab would race in slow motion), noopener so it has its
     # own room identity, with its pilot saved as the last one used.
     host.evaluate("name=>localStorage.setItem('autopobre-pilots-v1',JSON.stringify({selected:name,names:[name]}))", 'Bia Convidada')
     with context.expect_page() as popup:
-        host.evaluate("url=>{window.open(url,'_blank','popup,noopener,width=800,height=450');}", f'{URL}?intro=0&cinema=off#sala={ROOM}&local=1&carro=64')
+        host.evaluate("url=>{window.open(url,'_blank','popup,noopener,width=800,height=450');}", f'{URL}?intro=0&cinema=off#corrida={ROOM}&local=1&carro=64')
     guest = popup.value
     watch(guest, 'guest')
     guest.wait_for_load_state('load', timeout=120000)

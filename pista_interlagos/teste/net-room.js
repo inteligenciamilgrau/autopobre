@@ -52,7 +52,14 @@ export function roomName(value){
  const name=String(value??'').trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g,'').replace(/[^a-z0-9-]/g,'').slice(0,24);
  return name||null;
 }
-// A room name may end in a secret: whatever follows its first "_" (#sala=amigos_xyz7). The screen
+// The address names the room in #corrida=NOME. #sala=NOME is the old link: it still opens the room,
+// and roomAddress rewrites it as #corrida= (main.js checks both keys before loading multiplayer.js).
+const ROOM_KEY='corrida',OLD_ROOM_KEY='sala';
+const query=hash=>new URLSearchParams(String(hash??'').replace(/^#/,''));
+const nameIn=q=>q.get(ROOM_KEY)??q.get(OLD_ROOM_KEY);
+// The room's name as the address writes it (null: no room).
+export const roomIn=hash=>nameIn(query(hash));
+// A room name may end in a secret: whatever follows its first "_" (#corrida=amigos_xyz7). The screen
 // never shows it, so a pilot can share his screen on a live stream without handing the room to the
 // viewers: the room card and the address bar read amigos_*** (roomAddress keeps the address). The room is still
 // the whole name, as before ("_" is not kept: amigos_xyz7 is the room amigosxyz7).
@@ -67,8 +74,11 @@ export function roomLabel(value){
 // that comes in whole is kept in this browser (store: localStorage), by the part shown, so the
 // address with it hidden still opens the room after F5 or in another tab here. lost: the address came
 // with the secret hidden and this browser never saw it (copied off someone's stream): no room.
+// An old #sala= address comes back as #corrida=, the room first and the other options after it.
 export function roomAddress(hash,store){
- const q=new URLSearchParams(String(hash??'').replace(/^#/,'')),value=q.get('sala')??'',cut=value.indexOf('_'),plain={hash,shown:hash,lost:false};
+ const q=query(hash),value=nameIn(q)??'',cut=value.indexOf('_');
+ const as=v=>{const out=new URLSearchParams({[ROOM_KEY]:v});for(const [k,x] of q)if(k!==ROOM_KEY&&k!==OLD_ROOM_KEY)out.append(k,x);return '#'+out.toString();};
+ const plain=q.has(ROOM_KEY)||!q.has(OLD_ROOM_KEY)?{hash,shown:hash,lost:false}:{hash:as(value),shown:as(value),lost:false};
  if(cut<0)return plain;
  const head=value.slice(0,cut),tail=value.slice(cut+1),key=SECRETS+(roomName(head)??'');let full=value;
  if(tail===HIDDEN){
@@ -76,21 +86,20 @@ export function roomAddress(hash,store){
   const at=full.indexOf('_');if(at<0||!roomName(full.slice(at+1)))return {...plain,lost:true};
  }else if(!roomName(tail))return plain;
  else try{store?.setItem(key,value);}catch{}
- const as=v=>{q.set('sala',v);return '#'+q.toString();};
  return {hash:as(full),shown:as(`${head}_${HIDDEN}`),lost:false};
 }
 // A pilot's name as the others see it: plain text without control or format characters (bidi
 // overrides, zero-width), at most 24 characters. It is only ever shown as text.
 export function playerName(value){return String(value??'').replace(/\p{C}/gu,'').replace(/\s+/g,' ').trim().slice(0,24);}
-// index.html#sala=NOME[&carro=73][&auto=1][&fantasmas=1][&local=1][&servidor=local][&lag=150][&perda=5];
+// index.html#corrida=NOME[&carro=73][&auto=1][&fantasmas=1][&local=1][&servidor=local][&lag=150][&perda=5];
 // null without a room. label: the room's name as shown (roomLabel: NOME_SEGREDO shows NOME_***; the
 // hidden address is read by roomAddress first). carro: the car asked for, instead of the car screen's choice. fantasmas: the
 // host's races let humans pass through each other (by default they collide). local: this browser's
 // windows only, no server. servidor=local: wrangler dev here.
 export function roomParams(hash){
- const q=new URLSearchParams(String(hash??'').replace(/^#/,'')),room=roomName(q.get('sala'));if(!room)return null;
+ const q=query(hash),room=roomName(nameIn(q));if(!room)return null;
  const num=(key,hi)=>{const v=Number(q.get(key));return Number.isFinite(v)?clamp(v,0,hi):0;},car=q.get('carro');
- return {room,label:roomLabel(q.get('sala')),car:SEATS.includes(car)?car:null,auto:q.get('auto')==='1',ghosts:q.get('fantasmas')==='1',local:q.get('local')==='1',server:q.get('servidor')==='local'?'local':null,lag:num('lag',1000),loss:num('perda',50)/100};
+ return {room,label:roomLabel(nameIn(q)),car:SEATS.includes(car)?car:null,auto:q.get('auto')==='1',ghosts:q.get('fantasmas')==='1',local:q.get('local')==='1',server:q.get('servidor')==='local'?'local':null,lag:num('lag',1000),loss:num('perda',50)/100};
 }
 const validSeat=s=>s&&typeof s==='object'&&isId(s.id)&&typeof s.name==='string'&&s.name.length<=64&&SEATS.includes(s.number);
 const validSeats=v=>Array.isArray(v)&&v.length<=SEATS.length&&v.every(validSeat);
