@@ -9,27 +9,36 @@ import * as THREE from 'three';
 // lens (bloom, sun glare, depth of field) of 'full', the speed smear and the multisampling.
 export const CINEMATIC_LEVELS=['full','lite','off'];
 export const CINEMATIC_FEATURES=Object.freeze({ao:true,lens:true,motionBlur:true,samples:4});
+// Expensive effects scale independently of the drawing buffer. Alto keeps the HDR
+// picture crisp while its soft bloom runs at quarter resolution; Ultra spends more
+// on contact shadows and the lens. No temporal history or frame-rate cap is needed.
+export const CINEMATIC_QUALITY=Object.freeze({
+ baixo:Object.freeze({aoSamples:8,bloomScale:4,bloomLevels:3,clarity:0}),
+ medio:Object.freeze({aoSamples:10,bloomScale:4,bloomLevels:4,clarity:.08}),
+ alto:Object.freeze({aoSamples:12,bloomScale:4,bloomLevels:4,clarity:.12}),
+ ultra:Object.freeze({aoSamples:20,bloomScale:2,bloomLevels:5,clarity:.15})
+});
 
 // Colour grade and lens, in one place so the look can be tuned without touching the shaders.
 export const LOOK={
  exposure:1.0,
  // Eye adaptation: the mean scene brightness it aims for, how far it may push the exposure
  // (dark cockpit, garages) and how fast it follows, per second.
- adaptKey:.125,adaptRange:[.8,1.9],adaptSpeed:1.5,
+ adaptKey:.14,adaptRange:[.85,1.65],adaptSpeed:1.35,
  // Afternoon white balance: a warm key light, slightly cooler shadows.
- whiteBalance:[1.035,1.0,.955],
- saturation:.9,greenSaturation:.72,contrast:1.12,
- shadowTint:[.978,1.0,1.028],highlightTint:[1.03,1.0,.955],
- vignette:.3,grain:.03,aberration:.0011,
- bloom:.075,bloomThreshold:1.05,bloomKnee:.7,
+ whiteBalance:[1.025,1.0,.975],
+ saturation:.96,greenSaturation:.9,contrast:1.075,
+ shadowTint:[.975,.995,1.03],highlightTint:[1.025,1.0,.965],
+ vignette:.18,grain:.007,aberration:.00035,
+ bloom:.12,bloomThreshold:1.25,bloomKnee:.65,
  // Ambient occlusion: radius in metres, strength and the distance it fades out. A surface
  // drawn with alpha -1 (the door mirrors' glass) shows light from elsewhere and takes no
  // occlusion; materials write 0..1 there (foliage and lake water their cut-out alpha).
- aoRadius:1.2,aoIntensity:2.2,aoBias:.2,aoFade:[70,160],
+ aoRadius:1.35,aoIntensity:2.4,aoBias:.18,aoFade:[85,180],
  // Aerial perspective: metres of clear air, density of the haze and how fast it thins with height.
- hazeDensity:.00032,hazeFalloff:.012,hazeStart:40,hazeColor:[.62,.69,.76],hazeSun:[1.0,.8,.58],
+ hazeDensity:.00023,hazeFalloff:.012,hazeStart:70,hazeColor:[.59,.67,.77],hazeSun:[1.0,.83,.63],
  // Sun through the lens: players lost the road to it, so the glow and streak stay modest.
- flare:.6,streak:.28,
+ flare:.34,streak:.14,
  // 0 picture, 1 occlusion only (for tuning).
  debug:0
 };
@@ -48,7 +57,6 @@ float ign(vec2 p){return fract(52.9829189*fract(dot(p,vec2(.06711056,.00583715))
 const aoShader=`${depthCommon}
 uniform vec2 fullTexel;uniform float radius,intensity,bias,frame;uniform vec2 fade;
 varying vec2 vUv;
-#define SAMPLES 14
 void main(){
  float d=texture2D(tDepth,vUv).x;
  if(d>=1.0){gl_FragColor=vec4(1.0,1e5,0.0,1.0);return;}
@@ -99,7 +107,8 @@ const upShader=`uniform sampler2D tInput,tBase;uniform vec2 texel;varying vec2 v
 void main(){vec3 c=vec3(0.0);
  c+=texture2D(tInput,vUv+vec2(-texel.x*2.0,0.0)).rgb+texture2D(tInput,vUv+vec2(texel.x*2.0,0.0)).rgb+texture2D(tInput,vUv+vec2(0.0,-texel.y*2.0)).rgb+texture2D(tInput,vUv+vec2(0.0,texel.y*2.0)).rgb;
  c+=(texture2D(tInput,vUv+texel).rgb+texture2D(tInput,vUv-texel).rgb+texture2D(tInput,vUv+vec2(texel.x,-texel.y)).rgb+texture2D(tInput,vUv-vec2(texel.x,-texel.y)).rgb)*2.0;
- gl_FragColor=vec4(c/12.0+texture2D(tBase,vUv).rgb,1.0);}`;
+ // Energy stays bounded across pyramid levels, avoiding a grey veil over the road.
+ gl_FragColor=vec4(mix(texture2D(tBase,vUv).rgb,c/12.0,.65),1.0);}`;
 // Depth of field: a quarter-resolution copy of the picture, spread back to half resolution.
 const tentShader=`uniform sampler2D tInput;uniform vec2 texel;varying vec2 vUv;
 void main(){vec3 c=texture2D(tInput,vUv).rgb*4.0;
@@ -107,10 +116,12 @@ void main(){vec3 c=texture2D(tInput,vUv).rgb*4.0;
  c+=texture2D(tInput,vUv+texel).rgb+texture2D(tInput,vUv-texel).rgb+texture2D(tInput,vUv+vec2(texel.x,-texel.y)).rgb+texture2D(tInput,vUv-vec2(texel.x,-texel.y)).rgb;
  gl_FragColor=vec4(c/16.0,1.0);}`;
 // How much of the sun disc is unobstructed (sky pixels around its screen position).
-const sunShader=`uniform sampler2D tDepth;uniform vec2 sunUV,aspect;varying vec2 vUv;
+const sunShader=`uniform sampler2D tDepth,tColor;uniform vec2 sunUV,aspect;varying vec2 vUv;
 void main(){float seen=0.0;
  for(int j=-4;j<=4;j++)for(int i=-4;i<=4;i++){vec2 uv=sunUV+vec2(float(i),float(j))*.0028*aspect;
-  seen+=(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)?.35:step(1.0,texture2D(tDepth,uv).x);}
+  // Clouds occupy the sky's depth, so depth alone cannot hide their lens flare.
+  float disc=smoothstep(1.6,5.0,dot(texture2D(tColor,uv).rgb,vec3(.2126,.7152,.0722)));
+  seen+=(uv.x<0.0||uv.y<0.0||uv.x>1.0||uv.y>1.0)?0.0:step(1.0,texture2D(tDepth,uv).x)*disc;}
  gl_FragColor=vec4(seen/81.0,0.0,0.0,1.0);}`;
 
 // Mean log luminance of 16x16 screen cells (4x4 samples each).
@@ -128,7 +139,7 @@ void main(){float sum=0.0,wsum=0.0;
 const compositeShader=`${depthCommon}
 uniform sampler2D tColor,tAO,tBloom,tSun,tExposure,tDof;uniform float dofFocus,dofAmount;uniform float adaptKey;uniform vec2 adaptRange;
 uniform vec2 resolution,aoSize;uniform mat4 cameraWorld;uniform vec3 camPos,sunDir;uniform vec2 sunUV;uniform float sunFront;
-uniform float debugView,exposure,time,speedBlur,aoStrength,bloomStrength,vignette,grain,aberration,saturation,greenSaturation,contrast,flare,streak;
+uniform float debugView,exposure,time,speedBlur,aoStrength,bloomStrength,vignette,grain,aberration,saturation,greenSaturation,contrast,flare,streak,clarity;
 uniform vec3 whiteBalance,shadowTint,highlightTint,hazeColor,hazeSun;uniform float hazeDensity,hazeFalloff,hazeStart,hazeBase;
 varying vec2 vUv;
 vec3 RRTAndODTFit(vec3 v){vec3 a=v*(v+.0245786)-.000090537,b=v*(.983729*v+.432951)+.238081;return a/b;}
@@ -142,16 +153,34 @@ void main(){
  vec2 uv=vUv,fromCenter=uv-.5;float edge=dot(fromCenter,fromCenter);
  // Lens: slight colour fringing toward the frame edges.
  vec2 ca=fromCenter*edge*aberration*4.0;
- vec3 color=vec3(texture2D(tColor,uv+ca).r,texture2D(tColor,uv).g,texture2D(tColor,uv-ca).b);
- // Speed: radial smear at the edges of the frame.
- if(speedBlur>.001){
-  vec3 acc=color;float w=1.0;
-  for(int i=1;i<=6;i++){float k=float(i)/6.0;vec2 o=fromCenter*k*speedBlur*.03*smoothstep(.04,.25,edge);acc+=texture2D(tColor,uv-o).rgb*(1.0-k*.5);w+=1.0-k*.5;}
-  color=acc/w;
- }
+ vec4 center=texture2D(tColor,uv);
+ vec3 color=vec3(texture2D(tColor,uv+ca).r,center.g,texture2D(tColor,uv-ca).b);
  float d=texture2D(tDepth,uv).x;
  vec3 viewPos=viewPosAt(uv);vec3 ray=normalize(mat3(cameraWorld)*viewPos);
  float dist=d>=1.0?1e5:length(viewPos);
+ #ifdef DETAIL
+ // Bounded local contrast recovers fine asphalt/foliage at reduced resolution.
+ // Avoid sharpening the sky, glass and nearby cockpit, or generating edge halos.
+ if(d<1.0&&dist>3.5&&center.a>=0.0){
+  vec2 px=1.0/resolution;
+  vec3 n=texture2D(tColor,uv+vec2(0.0,px.y)).rgb,s=texture2D(tColor,uv-vec2(0.0,px.y)).rgb;
+  vec3 e=texture2D(tColor,uv+vec2(px.x,0.0)).rgb,w=texture2D(tColor,uv-vec2(px.x,0.0)).rgb;
+  vec3 low=min(color,min(min(n,s),min(e,w))),high=max(color,max(max(n,s),max(e,w)));
+  vec3 detail=clamp(color-(n+s+e+w)*.25,-vec3(.08),vec3(.08));
+  color=clamp(color+detail*clarity,low,high);
+ }
+ #endif
+ // Peripheral speed cues preserve the bonnet, cockpit and the distant racing line.
+ if(speedBlur>.001&&dist>3.5&&dist<240.0&&edge>.06&&center.a>=0.0){
+  vec3 acc=color;float w=1.0;
+  float smear=speedBlur*.024*smoothstep(.06,.28,edge)*smoothstep(3.5,9.0,dist)*(1.0-smoothstep(100.0,240.0,dist));
+  for(int i=1;i<=4;i++){
+   float k=float(i)/4.0;vec2 tap=clamp(uv-fromCenter*k*smear,vec2(.001),vec2(.999));
+   float depthWeight=exp(-abs(viewZAt(tap)-viewPos.z)/max(1.0,-viewPos.z*.08));
+   float weight=(1.0-k*.5)*depthWeight;acc+=texture2D(tColor,tap).rgb*weight;w+=weight;
+  }
+  color=acc/w;
+ }
  #ifdef BLOOM
  // Long-lens depth of field (broadcast camera and opening shots only).
  if(dofAmount>.001){float coc=clamp(abs(dist-dofFocus)/(dofFocus*.9)-.25,0.0,1.0)*dofAmount;color=mix(color,texture2D(tDof,uv).rgb,coc);}
@@ -213,7 +242,9 @@ void main(){
  gl_FragColor=vec4(clamp(color,0.0,1.0),1.0);
 }`;
 
-export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full',features:wanted={}}={}){
+export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full',quality=mobile?'medio':'alto',features:wanted={}}={}){
+ if(!Object.hasOwn(CINEMATIC_QUALITY,quality))quality=mobile?'medio':'alto';
+ const profile=()=>CINEMATIC_QUALITY[quality];
  const look={...LOOK},features={...CINEMATIC_FEATURES,...wanted};
  const aoOn=()=>level==='full'&&features.ao,lensOn=()=>level==='full'&&features.lens;
  const quadScene=new THREE.Scene(),quadCamera=new THREE.OrthographicCamera(-1,1,1,-1,0,1);
@@ -223,26 +254,26 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
  const target=(options={})=>{const t=new THREE.WebGLRenderTarget(1,1,{type:THREE.HalfFloatType,depthBuffer:false,...options});t.texture.generateMipmaps=false;t.texture.minFilter=t.texture.magFilter=THREE.LinearFilter;return t;};
  let dofHalf=null,dofQuarter=null,dofBlur=null,hdr=null,aoA=null,aoB=null,sunTarget=null,lumTarget=null,adapt=[null,null],adaptReset=true;const bloom=[];
  const depthUniforms=()=>({tDepth:{value:null},cameraNear:{value:.1},cameraFar:{value:1000},projScale:{value:new THREE.Vector2(1,1)},depthSize:{value:new THREE.Vector2(1,1)}});
- const aoMaterial=pass(aoShader,{...depthUniforms(),fullTexel:{value:new THREE.Vector2()},radius:{value:look.aoRadius},intensity:{value:look.aoIntensity},bias:{value:look.aoBias},frame:{value:0},fade:{value:new THREE.Vector2(...look.aoFade)}});
+ const aoMaterial=pass(aoShader,{...depthUniforms(),fullTexel:{value:new THREE.Vector2()},radius:{value:look.aoRadius},intensity:{value:look.aoIntensity},bias:{value:look.aoBias},frame:{value:0},fade:{value:new THREE.Vector2(...look.aoFade)}},{SAMPLES:profile().aoSamples});
  const blurMaterial=pass(blurShader,{tInput:{value:null},direction:{value:new THREE.Vector2()}});
  const prefilter=pass(prefilterShader,{tInput:{value:null},texel:{value:new THREE.Vector2()},threshold:{value:look.bloomThreshold},knee:{value:look.bloomKnee}});
  const down=pass(downShader,{tInput:{value:null},texel:{value:new THREE.Vector2()}});
  const up=pass(upShader,{tInput:{value:null},tBase:{value:null},texel:{value:new THREE.Vector2()}});
- const sunMaterial=pass(sunShader,{tDepth:{value:null},sunUV:{value:new THREE.Vector2()},aspect:{value:new THREE.Vector2(1,1)}});
+ const sunMaterial=pass(sunShader,{tDepth:{value:null},tColor:{value:null},sunUV:{value:new THREE.Vector2()},aspect:{value:new THREE.Vector2(1,1)}});
  const compositeUniforms={...depthUniforms(),tColor:{value:null},tAO:{value:null},tBloom:{value:null},tSun:{value:null},
   resolution:{value:new THREE.Vector2()},aoSize:{value:new THREE.Vector2()},cameraWorld:{value:new THREE.Matrix4()},camPos:{value:new THREE.Vector3()},
   sunDir:{value:new THREE.Vector3(0,1,0)},sunUV:{value:new THREE.Vector2()},sunFront:{value:0},time:{value:0},speedBlur:{value:0},
-  tDof:{value:null},dofFocus:{value:10},dofAmount:{value:0},tExposure:{value:null},adaptKey:{value:.2},adaptRange:{value:new THREE.Vector2(1,1)},debugView:{value:0},exposure:{value:0},aoStrength:{value:0},bloomStrength:{value:0},vignette:{value:0},grain:{value:0},aberration:{value:0},saturation:{value:1},greenSaturation:{value:1},contrast:{value:1},flare:{value:0},streak:{value:0},
+  tDof:{value:null},dofFocus:{value:10},dofAmount:{value:0},tExposure:{value:null},adaptKey:{value:.2},adaptRange:{value:new THREE.Vector2(1,1)},debugView:{value:0},exposure:{value:0},aoStrength:{value:0},bloomStrength:{value:0},vignette:{value:0},grain:{value:0},aberration:{value:0},saturation:{value:1},greenSaturation:{value:1},contrast:{value:1},flare:{value:0},streak:{value:0},clarity:{value:0},
   whiteBalance:{value:new THREE.Vector3()},shadowTint:{value:new THREE.Vector3()},highlightTint:{value:new THREE.Vector3()},hazeColor:{value:new THREE.Vector3()},hazeSun:{value:new THREE.Vector3()},
   hazeDensity:{value:0},hazeFalloff:{value:0},hazeStart:{value:0},hazeBase:{value:0}};
  const tent=pass(tentShader,{tInput:{value:null},texel:{value:new THREE.Vector2()}});
  const lumMaterial=pass(lumShader,{tInput:{value:null}}),adaptMaterial=pass(adaptShader,{tLum:{value:null},tPrev:{value:null},rate:{value:1}});
  // One composite program per set of parts in use, built when first needed (they share the uniforms).
  const composites=new Map();
- const composite=()=>{const ao=stats.ao,lens=stats.lens,key=(ao?'ao':'')+(lens?'lens':'');let m=composites.get(key);if(!m){m=pass(compositeShader,compositeUniforms,{...(ao?{AO:''}:{}),...(lens?{BLOOM:''}:{})});composites.set(key,m);}return m;};
+ const composite=()=>{const ao=stats.ao,lens=stats.lens,detail=level==='full',key=(ao?'ao':'')+(lens?'lens':'')+(detail?'detail':'');let m=composites.get(key);if(!m){m=pass(compositeShader,compositeUniforms,{...(ao?{AO:''}:{}),...(lens?{BLOOM:''}:{}),...(detail?{DETAIL:''}:{})});composites.set(key,m);}return m;};
  const size=new THREE.Vector2(),sunProjected=new THREE.Vector3(),cameraDirection=new THREE.Vector3();
  let width=0,height=0,frame=0,time=0,previousToneMapping=renderer.toneMapping,previousColorSpace=renderer.outputColorSpace;
- const stats={level,passes:0,width:0,height:0,samples:0,sunVisible:0,ao:false,lens:false};
+ const stats={level,quality,passes:0,width:0,height:0,samples:0,sunVisible:0,ao:false,lens:false,aoSamples:0,bloomScale:0};
 
  function allocate(){
   dispose();
@@ -255,18 +286,20 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
   hdr.isMainView=true;stats.samples=samples;
   lumTarget=target();lumTarget.setSize(16,16);lumTarget.texture.minFilter=lumTarget.texture.magFilter=THREE.NearestFilter;
   adapt=[target(),target()];for(const t of adapt)t.setSize(1,1);adaptReset=true;
-  stats.ao=aoOn();stats.lens=lensOn();
+  stats.ao=aoOn();stats.lens=lensOn();stats.aoSamples=stats.ao?profile().aoSamples:0;stats.bloomScale=stats.lens?profile().bloomScale:0;
   const hw=Math.max(1,width>>1),hh=Math.max(1,height>>1);
   if(stats.ao){
    aoA=target({type:THREE.HalfFloatType,format:THREE.RGFormat});aoB=target({type:THREE.HalfFloatType,format:THREE.RGFormat});aoA.setSize(hw,hh);aoB.setSize(hw,hh);
    for(const t of [aoA,aoB])t.texture.minFilter=t.texture.magFilter=THREE.NearestFilter;
   }
   if(!stats.lens)return;
-  for(let i=0,w=hw,h=hh;i<5;i++,w=Math.max(1,w>>1),h=Math.max(1,h>>1)){const a=target(),b=target();a.setSize(w,h);b.setSize(w,h);bloom.push({down:a,up:b,w,h});}
+  for(let i=0,w=Math.max(1,Math.floor(width/profile().bloomScale)),h=Math.max(1,Math.floor(height/profile().bloomScale));i<profile().bloomLevels;i++,w=Math.max(1,w>>1),h=Math.max(1,h>>1)){const a=target(),b=target();a.setSize(w,h);b.setSize(w,h);bloom.push({down:a,up:b,w,h});}
   sunTarget=target({type:THREE.UnsignedByteType});sunTarget.setSize(1,1);
-  dofHalf=target();dofHalf.setSize(hw,hh);dofBlur=target();dofBlur.setSize(hw,hh);dofQuarter=target();dofQuarter.setSize(Math.max(1,hw>>1),Math.max(1,hh>>1));
+  // The driving cameras never need these: allocate only when a broadcast shot asks.
  }
- function dispose(){for(const t of [hdr,aoA,aoB,sunTarget,lumTarget,dofHalf,dofQuarter,dofBlur,...adapt])if(t){t.depthTexture?.dispose();t.dispose();}for(const b of bloom){b.down.dispose();b.up.dispose();}bloom.length=0;hdr=aoA=aoB=sunTarget=lumTarget=dofHalf=dofQuarter=dofBlur=null;adapt=[null,null];}
+ function dispose(){for(const t of [hdr,aoA,aoB,sunTarget,lumTarget,dofHalf,dofQuarter,dofBlur,...adapt])if(t){t.depthTexture?.dispose();t.dispose();}for(const b of bloom){b.down.dispose();b.up.dispose();}bloom.length=0;hdr=aoA=aoB=sunTarget=lumTarget=dofHalf=dofQuarter=dofBlur=null;adapt=[null,null];
+  Object.assign(stats,{passes:0,width:0,height:0,samples:0,sunVisible:0,ao:false,lens:false,aoSamples:0,bloomScale:0});
+ }
  function draw(material,output){quad.material=material;renderer.setRenderTarget(output);renderer.render(quadScene,quadCamera);stats.passes++;}
  // Materials compile for the render target they draw into: with the look on, the scene is
  // linear and un-tone-mapped both on screen and off it, so load-time compiles stay valid.
@@ -279,16 +312,23 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
  return {
   look,stats,
   get level(){return level;},
+  get quality(){return quality;},
+  setQuality(value){if(!Object.hasOwn(CINEMATIC_QUALITY,value)||value===quality)return quality;quality=value;stats.quality=value;aoMaterial.defines.SAMPLES=profile().aoSamples;aoMaterial.needsUpdate=true;width=height=0;return quality;},
   setLevel(value){if(!CINEMATIC_LEVELS.includes(value)||value===level)return level;level=value;stats.level=level;width=height=0;if(level==='off')dispose();applyRendererState();return level;},
   // {ao, lens, motionBlur, samples}: the targets are rebuilt at the next frame when one of them changes.
   get features(){return {...features};},
   setFeatures(patch){const before=JSON.stringify(features);for(const key of Object.keys(CINEMATIC_FEATURES))if(patch&&typeof patch[key]===typeof CINEMATIC_FEATURES[key])features[key]=patch[key];if(JSON.stringify(features)!==before)width=height=0;return {...features};},
   // context: {dt, speed (m/s), mode (camera), hazeBase (m)}
   render(scene,camera,{dt=0,speed=0,mode='chase',hazeBase=0,dof=null}={}){
-   if(level==='off'){renderer.setRenderTarget(null);renderer.render(scene,camera);return;}
+   if(level==='off'){
+    renderer.getDrawingBufferSize(size);
+    Object.assign(stats,{passes:1,width:size.x,height:size.y,samples:0,sunVisible:0,ao:false,lens:false,aoSamples:0,bloomScale:0});
+    renderer.setRenderTarget(null);renderer.render(scene,camera);return;
+   }
    renderer.getDrawingBufferSize(size);
    if(size.x!==width||size.y!==height||!hdr){width=size.x;height=size.y;allocate();}
-   time+=dt;frame=(frame+1)%64;stats.passes=0;stats.width=width;stats.height=height;
+   // Count the primary scene pass too, so Simples is one and Leve/Completo include it.
+   time+=dt;frame=(frame+1)%64;stats.passes=1;stats.width=width;stats.height=height;
    const info=renderer.info,autoReset=info.autoReset;
    renderer.setRenderTarget(hdr);renderer.render(scene,camera);
    const calls=info.render.calls,triangles=info.render.triangles;info.autoReset=false;
@@ -305,7 +345,7 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
     u.tAO.value=aoA.texture;u.aoSize.value.set(hw,hh);
    }
    if(stats.lens){
-    prefilter.uniforms.tInput.value=hdr.texture;prefilter.uniforms.texel.value.set(1/width,1/height);prefilter.uniforms.threshold.value=look.bloomThreshold;prefilter.uniforms.knee.value=look.bloomKnee;
+    prefilter.uniforms.tInput.value=hdr.texture;prefilter.uniforms.texel.value.set(profile().bloomScale*.5/width,profile().bloomScale*.5/height);prefilter.uniforms.threshold.value=look.bloomThreshold;prefilter.uniforms.knee.value=look.bloomKnee;
     draw(prefilter,bloom[0].down);
     for(let i=1;i<bloom.length;i++){down.uniforms.tInput.value=bloom[i-1].down.texture;down.uniforms.texel.value.set(1/bloom[i-1].w,1/bloom[i-1].h);draw(down,bloom[i].down);}
     let source=bloom[bloom.length-1].down;
@@ -315,11 +355,12 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
     sunProjected.copy(u.sunDir.value).multiplyScalar(camera.far*.5).add(camera.position).project(camera);
     const front=cameraDirection.dot(u.sunDir.value)>.05&&Math.abs(sunProjected.x)<1.4&&Math.abs(sunProjected.y)<1.4;
     u.sunUV.value.set(sunProjected.x*.5+.5,sunProjected.y*.5+.5);u.sunFront.value=front?1:0;
-    sunMaterial.uniforms.tDepth.value=hdr.depthTexture;sunMaterial.uniforms.sunUV.value.copy(u.sunUV.value);sunMaterial.uniforms.aspect.value.set(height/width,1);
+    sunMaterial.uniforms.tDepth.value=hdr.depthTexture;sunMaterial.uniforms.tColor.value=hdr.texture;sunMaterial.uniforms.sunUV.value.copy(u.sunUV.value);sunMaterial.uniforms.aspect.value.set(height/width,1);
     if(front)draw(sunMaterial,sunTarget);
     // Depth of field only when a shot asks for it: {focus: metres, amount: 0..1}.
     u.dofAmount.value=dof?.amount??0;
     if(u.dofAmount.value>.001){
+     if(!dofHalf){const hw=Math.max(1,width>>1),hh=Math.max(1,height>>1);dofHalf=target();dofHalf.setSize(hw,hh);dofBlur=target();dofBlur.setSize(hw,hh);dofQuarter=target();dofQuarter.setSize(Math.max(1,hw>>1),Math.max(1,hh>>1));}
      u.dofFocus.value=Math.max(.5,dof.focus);
      down.uniforms.tInput.value=hdr.texture;down.uniforms.texel.value.set(1/width,1/height);draw(down,dofHalf);
      down.uniforms.tInput.value=dofHalf.texture;down.uniforms.texel.value.set(1/dofHalf.width,1/dofHalf.height);draw(down,dofQuarter);
@@ -335,7 +376,7 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
    adapt.reverse();adaptReset=false;u.tExposure.value=adapt[0].texture;u.adaptKey.value=look.adaptKey;u.adaptRange.value.set(...look.adaptRange);
    u.tColor.value=hdr.texture;u.resolution.value.set(width,height);u.cameraWorld.value.copy(camera.matrixWorld);u.camPos.value.copy(camera.position);u.time.value=time;
    u.debugView.value=look.debug;u.exposure.value=look.exposure;u.aoStrength.value=1;u.bloomStrength.value=look.bloom;u.vignette.value=look.vignette;u.grain.value=look.grain;u.aberration.value=look.aberration;
-   u.saturation.value=look.saturation;u.greenSaturation.value=look.greenSaturation;u.contrast.value=look.contrast;u.flare.value=look.flare;u.streak.value=look.streak;
+   u.saturation.value=look.saturation;u.greenSaturation.value=look.greenSaturation;u.contrast.value=look.contrast;u.flare.value=look.flare;u.streak.value=look.streak;u.clarity.value=profile().clarity;
    u.whiteBalance.value.set(...look.whiteBalance);u.shadowTint.value.set(...look.shadowTint);u.highlightTint.value.set(...look.highlightTint);
    u.hazeColor.value.set(...look.hazeColor);u.hazeSun.value.set(...look.hazeSun);u.hazeDensity.value=look.hazeDensity;u.hazeFalloff.value=look.hazeFalloff;u.hazeStart.value=look.hazeStart;u.hazeBase.value=hazeBase;
    // A little smear at speed, only for the cameras that ride with the car.

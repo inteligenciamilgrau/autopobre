@@ -6,11 +6,11 @@ const LEVEL_TEXT={
  auto:'Escolhe pelo aparelho',
  baixo:'Celulares simples e notebooks sem placa de vídeo. Sem sombras, imagem mais leve.',
  medio:'A maioria dos celulares. Sombras leves e visual de cinema leve.',
- alto:'Computadores com placa de vídeo. Cinema completo e sombras nítidas.',
- ultra:'Placas de vídeo fortes. Água realista, mais árvores, sombras longas e imagem 2×.'
+ alto:'Computadores com placa de vídeo. Cinema completo, pista detalhada e capim com vento.',
+ ultra:'Placas de vídeo fortes. Água realista, vegetação densa, luz e materiais no máximo.'
 };
 // Settings that only work with another one: [setting, it needs, the reason shown].
-const NEEDS=[['ao',v=>v.post==='full','Só no visual de cinema Completo.'],['lens',v=>v.post==='full','Só no visual de cinema Completo.'],['motionBlur',v=>v.post!=='off','Desligado no visual Simples.']];
+const NEEDS=[['ao',v=>v.post==='full','Só no visual de cinema Completo.'],['lens',v=>v.post==='full','Só no visual de cinema Completo.'],['motionBlur',v=>v.post!=='off','Desligado no visual Simples.'],['targetFps',v=>v.dynamicResolution,'Ligue a resolução dinâmica para usar esta meta.']];
 const element=(tag,props={},...children)=>{const e=Object.assign(document.createElement(tag),props);e.append(...children);return e;};
 export class GraphicsPanel {
  constructor({root,touch=false,graphics,onChange,screen=()=>({width:innerWidth,height:innerHeight,ratio:devicePixelRatio||1})}){

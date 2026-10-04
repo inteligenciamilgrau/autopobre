@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {clamp} from './physics.js';
 import {sceneryBands} from './track-clearance.js';
 import {LakeWaves,waveVertexCommon,waveVertex,waveFragmentCommon,waveClip} from './lake-waves.js';
+import {createVergeVegetation} from './verge-vegetation.js';
 
 // Land cover is read from the 2020 GeoSampa orthophoto already packed in the
 // track GLB: woods become 3D trees, orange roofs become houses, dark smooth
@@ -445,13 +446,13 @@ const terrainShore={shoreMap:{value:null},shoreBounds:{value:new THREE.Vector4(0
 // open data; it replaces reading those classes from the colours of an aerial photograph.
 export function terrainMaterial(textures,field,{ortho=null,cover=null,mobile=false}={}){
  // Pushed back in depth: far away, roads and kerbs a few centimetres above it still win.
- const material=new THREE.MeshStandardMaterial({name:'Terreno_paisagem_v1',map:ortho,roughness:.95,metalness:0,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:2});
+ const material=new THREE.MeshStandardMaterial({name:'Terreno_paisagem_v2',map:ortho,roughness:.95,metalness:0,polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:2});
  material.onBeforeCompile=shader=>{
-  Object.assign(shader.uniforms,terrainShore,{coverMap:{value:cover},grassMap:{value:textures.grass},wildMap:{value:textures.wild},concreteMap:{value:textures.concrete},grassNormalMap:{value:textures.grassNormal},
+  Object.assign(shader.uniforms,terrainShore,{coverMap:{value:cover},grassMap:{value:textures.grass},wildMap:{value:textures.wild},concreteMap:{value:textures.concrete},gravelMap:{value:textures.gravel},grassNormalMap:{value:textures.grassNormal},
    trackField:{value:field.texture},fieldBounds:{value:new THREE.Vector4(field.x0,field.y0,field.width,field.height)}});
   shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vLandWorld;').replace('#include <begin_vertex>','#include <begin_vertex>\nvLandWorld=(modelMatrix*vec4(transformed,1.0)).xyz;');
   shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
-uniform sampler2D grassMap,wildMap,concreteMap,grassNormalMap,trackField,shoreMap,coverMap;uniform vec4 fieldBounds,shoreBounds;uniform float shoreOn;varying vec3 vLandWorld;
+uniform sampler2D grassMap,wildMap,concreteMap,gravelMap,grassNormalMap,trackField,shoreMap,coverMap;uniform vec4 fieldBounds,shoreBounds;uniform float shoreOn;varying vec3 vLandWorld;
 float landHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float landNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(landHash(i),landHash(i+vec2(1,0)),f.x),mix(landHash(i+vec2(0,1)),landHash(i+vec2(1,1)),f.x),f.y);}
 `).replace('#include <map_fragment>',`
@@ -479,25 +480,45 @@ float bareM=0.0;
  treeM=landCover.r;roofM=0.0;pavedM=landCover.g;paintM=0.0;bareM=landCover.b;
 #endif
 treeM*=1.0-waterBed;
-vec3 grass=mix(texture2D(grassMap,w/3.3).rgb,texture2D(grassMap,w/12.7+.31).rgb,.45);
-vec3 wild=mix(texture2D(wildMap,w/4.2).rgb,texture2D(wildMap,w/15.3+.17).rgb,.5);
-vec3 concrete=mix(texture2D(concreteMap,w/3.9).rgb,texture2D(concreteMap,w/13.1+.5).rgb,.4);
+#ifdef LAND_SIMPLE
+ vec3 grass=texture2D(grassMap,w/3.3).rgb;
+ vec3 wild=texture2D(wildMap,w/4.2).rgb;
+ vec3 concrete=texture2D(concreteMap,w/3.9).rgb;
+#else
+ // Rotated layers keep the blades and stones at a believable scale and break
+ // repeating tiles without a huge terrain texture or extra texture fetches.
+ vec2 rotated=mat2(.8,-.6,.6,.8)*w;
+ float textureBlend=smoothstep(.25,.75,macro);
+ vec3 grass=mix(texture2D(grassMap,w/3.3).rgb,texture2D(grassMap,rotated/4.8+.31).rgb,textureBlend);
+ vec3 wild=mix(texture2D(wildMap,w/4.2).rgb,texture2D(wildMap,rotated/6.7+.17).rgb,textureBlend);
+ vec3 concrete=mix(texture2D(concreteMap,w/3.9).rgb,texture2D(concreteMap,rotated/7.1+.5).rgb,.4);
+#endif
 // Mown verge beside the asphalt, with stripes parallel to the track. The cut lays the
 // blades one way per stripe: seen along the cut a stripe is light, against it dark, so
 // the pattern swaps as the view turns, like the verges of a real circuit.
 float groomed=1.0-smoothstep(14.0,30.0,edgeDist);
+#ifdef LAND_SIMPLE
+float sheen=sin(lateral*1.0472)*.25;
+#else
 vec2 fieldUV=vec2((vLandWorld.x-fieldBounds.x)/fieldBounds.z,(-vLandWorld.z-fieldBounds.y)/fieldBounds.w);
 vec2 across=vec2(texture2D(trackField,fieldUV+vec2(3.0/fieldBounds.z,0.0)).g-lateral,texture2D(trackField,fieldUV+vec2(0.0,3.0/fieldBounds.w)).g-lateral);
 vec2 cut=normalize(vec2(-across.y,across.x)+1e-5);cut.y=-cut.y;
 float parity=step(.5,fract(lateral/6.0))*2.0-1.0,stripeEdge=smoothstep(.0,.06,abs(fract(lateral/6.0)-.5))*smoothstep(.0,.06,.5-abs(fract(lateral/6.0)-.5));
 vec2 mowView=normalize(vLandWorld.xz-cameraPosition.xz+1e-4);
 float sheen=dot(mowView,cut)*parity*stripeEdge;
+#endif
 float dryPatch=smoothstep(.55,.85,landNoise(w*.021+7.3)*.7+landNoise(w*.09)*.3);
-vec3 lawn=grass*vec3(.5,.76,.36)*(1.0+.16*sheen)*mix(.9,1.05,macro);
+vec3 lawn=grass*vec3(.54,.73,.39)*(1.0+.12*sheen)*mix(.84,1.08,macro);
 lawn=mix(lawn,lawn*vec3(1.22,1.02,.7),dryPatch*.55);
 // Worn, dusty strip where cars run wide off the kerbs.
 float worn=(1.0-smoothstep(.6,3.2,edgeDist))*smoothstep(.35,.75,landNoise(w*.28)+landNoise(w*1.3)*.25);
 lawn=mix(lawn,wild*vec3(.82,.68,.5),worn*.7);
+#ifndef LAND_SIMPLE
+ // Small exposed stones in the worn edge, fading before they can shimmer.
+ vec3 grit=texture2D(gravelMap,w/1.4).rgb*vec3(.58,.52,.4);
+ float closeDetail=1.0-smoothstep(25.0,95.0,viewDist);
+ lawn=mix(lawn,grit,worn*closeDetail*.28);
+#endif
 vec3 ground=wild*vec3(.84,.94,.72)*mix(vec3(1.0),wildTint,.5)*mix(.8,1.1,macro);
 ground=mix(ground,wild*vec3(.36,.42,.26),treeM);
 ground=mix(ground,lawn,groomed*(1.0-pavedM)*(1.0-paintM));
@@ -516,16 +537,17 @@ float lakeBedM=shoreOn>.5?smoothstep(-.4,.5,shoreD):waterBed,bankM=smoothstep(-3
 ground=mix(ground,ground*vec3(.58,.55,.46),bankM*.75);
 ground=mix(ground,vec3(.035,.045,.03),lakeBedM);
 diffuseColor.rgb=ground;
-`).replace('#include <roughnessmap_fragment>',`float roughnessFactor=mix(.97,.8,max(pavedM,paintM));`)
+`).replace('#include <roughnessmap_fragment>',`float roughnessFactor=mix(.96,.8,max(pavedM,paintM));
+roughnessFactor=mix(roughnessFactor,.63,bankM*.7);`)
   .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
 #ifndef LAND_SIMPLE
  vec3 grassBump=texture2D(grassNormalMap,w/3.3).xyz*2.0-1.0;
- float bumpAmount=(1.0-smoothstep(6.0,55.0,viewDist))*(1.0-pavedM)*(1.0-paintM)*.55;
+ float bumpAmount=(1.0-smoothstep(10.0,65.0,viewDist))*(1.0-pavedM)*(1.0-paintM)*(1.0-lakeBedM)*.4;
  normal=normalize(normal+(viewMatrix*vec4(grassBump.x,0.0,-grassBump.y,0.0)).xyz*bumpAmount);
 #endif`);
  };
  material.defines={...(mobile?{LAND_SIMPLE:''}:{}),...(cover&&ortho?{USE_COVER:''}:{})};
- material.customProgramCacheKey=()=>'terrain-landscape-v3-'+(ortho?'ortho':'cerrado')+(cover&&ortho?'-cover':'')+(mobile?'-mobile':'');
+ material.customProgramCacheKey=()=>'terrain-landscape-v4-'+(ortho?'ortho':'cerrado')+(cover&&ortho?'-cover':'')+(mobile?'-mobile':'');
  return material;
 }
 
@@ -551,19 +573,19 @@ function merge(parts){
 }
 // Leaf atlas: one cluster of leaves over most of the square, and an opaque white corner
 // for trunks and branches. Grey-green so each tree's own colour still tints it.
-const LEAF_SPAN=.94,SOLID_UV=[.985,.985];
+const LEAF_SPAN=.94,LEAF_RESOLUTION=512,SOLID_UV=[.985,.985];
 let leafAtlas=null;
 function leafTexture(){
  if(leafAtlas)return leafAtlas;
- const size=256,data=new Uint8Array(size*size*4),rand=random(4242);
- for(let y=size-8;y<size;y++)for(let x=size-8;x<size;x++)data.set([255,255,255,255],(y*size+x)*4);
+ const size=LEAF_RESOLUTION,data=new Uint8Array(size*size*4),rand=random(4242);
+ for(let y=size-16;y<size;y++)for(let x=size-16;x<size;x++)data.set([255,255,255,255],(y*size+x)*4);
  const span=size*LEAF_SPAN,c=span/2;
  // Inner leaves first and darker: the cluster shades itself toward its middle.
  const leaves=[];
  for(let i=0;i<190;i++){const r=Math.sqrt(rand())*c*.8,a=rand()*Math.PI*2;leaves.push({x:c+Math.cos(a)*r,y:c+Math.sin(a)*r,r});}
  leaves.sort((u,v)=>u.r-v.r);
  for(const leaf of leaves){
-  const angle=rand()*Math.PI*2,len=9+rand()*9,wid=3.2+rand()*2.6,ca=Math.cos(angle),sa=Math.sin(angle);
+  const angle=rand()*Math.PI*2,len=18+rand()*18,wid=6.4+rand()*5.2,ca=Math.cos(angle),sa=Math.sin(angle);
   const shade=.52+.4*(leaf.r/c)+rand()*.14,warm=rand()<.5,tint=warm?[1.04,1,.86]:[.9,1,.98];
   const x0=Math.max(0,Math.floor(leaf.x-len)),x1=Math.min(Math.floor(span)-1,Math.ceil(leaf.x+len)),y0=Math.max(0,Math.floor(leaf.y-len)),y1=Math.min(Math.floor(span)-1,Math.ceil(leaf.y+len));
   for(let y=y0;y<=y1;y++)for(let x=x0;x<=x1;x++){
@@ -672,9 +694,13 @@ function sceneryMaterial(kind,{foliage=false}={}){
    // and give both faces of a card the crown's outward normal.
    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
 vec4 leafTexel=texture2D(map,vMapUv);
-float leafLod=max(0.0,log2(max(length(dFdx(vMapUv*256.0)),length(dFdy(vMapUv*256.0)))));
+float leafLod=max(0.0,log2(max(length(dFdx(vMapUv*${LEAF_RESOLUTION}.0)),length(dFdy(vMapUv*${LEAF_RESOLUTION}.0)))));
 leafTexel.a=min(1.0,leafTexel.a*(1.0+leafLod*.3));
-diffuseColor*=leafTexel;`).replace('normal *= faceDirection;','').replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
+diffuseColor*=leafTexel;`).replace('#include <normal_fragment_begin>',`#include <normal_fragment_begin>
+#if defined(DOUBLE_SIDED) && !defined(FLAT_SHADED)
+ normal*=faceDirection;
+ nonPerturbedNormal=normal;
+#endif`).replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
 #if NUM_DIR_LIGHTS > 0
  // Sunlight through the leaves when the sun is behind the crown.
  float leafBack=pow(max(dot(normalize(-vViewPosition),directionalLights[0].direction),0.0),5.0);
@@ -719,6 +745,19 @@ vColor=vec4(1.0);
  float fan=fract(sin(dot(instanceMatrix[3].xz,vec2(41.3,17.9)))*9631.7);
  transformed.y+=max(0.0,sin(landTime*(3.0+fan*4.0)+fan*40.0))*.07+max(0.0,sin(landTime*.35+fan*6.3)-.85)*1.6;
 #endif`);
+  if(kind==='tree'){
+   shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;').replace('#include <color_fragment>',`#include <color_fragment>
+// Fine vertical bark fissures use world metre scale and vanish before aliasing.
+if(vPart<.5){
+ float barkAlong=(vPartLocal.x+vPartLocal.z)*max(vPartScale.x,vPartScale.z);
+ float barkUp=vPartLocal.y*vPartScale.y;
+ float barkRidge=.5+.5*sin(barkAlong*57.0+sin(barkUp*3.7)*1.1);
+ float barkDetail=1.0-smoothstep(.04,.15,fwidth(barkAlong));
+ float rootMoss=1.0-smoothstep(.2,1.5,barkUp);
+ diffuseColor.rgb*=mix(1.0,.7+barkRidge*.55,barkDetail);
+ diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.75,1.04,.62),rootMoss*.45);
+}`);
+  }
   if(kind!=='house')return;
   shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;').replace('#include <color_fragment>',`#include <color_fragment>
 float houseWindow=0.0;
@@ -741,7 +780,7 @@ if((vPart<.5||vPart>2.5)&&abs(vPartNormal.y)<.5){
 roughnessFactor=mix(roughnessFactor,.06,houseWindow);`);
  };
  material.defines={tree:{TREES:''},house:{HOUSES:''},crowd:{CROWD:''}}[kind];
- material.customProgramCacheKey=()=>'scenery-'+kind+(foliage?'-foliage':'')+'-v5';
+ material.customProgramCacheKey=()=>'scenery-'+kind+(foliage?'-foliage':'')+'-v7';
  return material;
 }
 function chunked(name,geometry,material,items,compose,{size=380,shadows=true}={}){
@@ -773,7 +812,7 @@ function treeColor(rand,dry=0){
 // an orthophoto; cityAngle points the distant skyline at the city (radians, track frame).
 // density: trees and houses per area against the standard build (the Gráficos tab's scenery level);
 // lod: how near a tree block shows its full crowns.
-export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban',density=1,lod=mobile?80:130}){
+export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban',density=1,lod=mobile?80:130,ground=null}){
  const root=new THREE.Group();root.name='Paisagem';const spread=1/Math.sqrt(density);
  const rand=random(data.samples.length*7919+17),stats={trees:0,houses:0,water:0};
  const trees=[],tall=[],houses=[],flats=[],lajes=[],rounds=[];
@@ -881,16 +920,27 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
  // farmland and the odd farmhouse to the horizon, not the city's rooftops and towers.
  const rural=data.meta?.horizon==='rural';
  const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado'&&!rural,rural,cityAngle});root.add(horizon.root);
+ // Only short grass belongs on maintained verges; aerial paved/built areas and
+ // the lakes stay bare. Use the fitted visible ground supplied by the circuit.
+ const vegetated=(x,y)=>{
+  if(ortho){const i=ortho.index(x,y);if(i<0)return false;const c=landCover(ortho,i);return c.paved<.35&&c.roof<.3&&c.water<.4;}
+  if(cover){const i=Math.floor((x-cover.x0)/cover.step+.5),j=Math.floor((y-cover.y0)/cover.step+.5);return i>=0&&j>=0&&i<cover.nx&&j<cover.ny&&!['4','5','6'].includes(cover.classes[j*cover.nx+i]);}
+  return true;
+ };
+ const verge=mobile?null:createVergeVegetation({data,field,ground:ground??((x,y)=>terrainHeight(data,x,y)),vegetated,dry,density,lod,time:shared.time});
+ if(verge)root.add(verge.root);stats.grassTufts=verge?.count??0;
  Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+rounds.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
  let realistic=false;
- return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
+ return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}verge?.dispose();lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
   shared.time.value+=dt;lakes?.update();
   if(waves){waves.sync();const patch=realistic?lakes?.patch:simplePatch;if(simplePatch)simplePatch.visible=false;if(lakes)lakes.patch.visible=false;if(patch&&waves.active){patch.visible=true;waves.placePatch(patch);}}
   if(!camera)return;
+  verge?.update(camera);
   for(const block of lodBlocks){const geometry=camera.position.distanceTo(block.center)-block.radius<lodDistance?block.near:block.far;if(block.mesh.geometry!==geometry)block.mesh.geometry=geometry;}
  },
  // Trees give way to later trackside structures (marshal posts, TV towers): points {x,y,r} in track metres.
  clearAround(points){
+  verge?.clearAround(points);
   let removed=0;const zero=new THREE.Matrix4().makeScale(0,0,0),changed=new Set();
   for(const item of [...trees,...tall]){
    if(item.removed||!item.instance||!points.some(q=>Math.hypot(item.x-q.x,item.y-q.y)<q.r+item.width*.45))continue;

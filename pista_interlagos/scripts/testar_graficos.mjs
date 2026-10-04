@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
-import {GRAPHICS_LEVELS,GRAPHICS_OPTIONS,GRAPHICS_PRESETS,SHADOW_LEVELS,VIEW_DISTANCES,SCENERY_LEVELS,MIRROR_SIZES,autoLevel,normalizeGraphics,resolveGraphics,setGraphicsValue,chooseGraphicsLevel,debugCorner,FrameLimiter} from '../teste/graphics-settings.js';
-import {gpuName} from '../teste/debug-overlay.js';
+import {GRAPHICS_LEVELS,GRAPHICS_OPTIONS,GRAPHICS_PRESETS,SHADOW_LEVELS,VIEW_DISTANCES,SCENERY_LEVELS,MIRROR_SIZES,autoLevel,normalizeGraphics,resolveGraphics,setGraphicsValue,chooseGraphicsLevel,debugCorner,FrameLimiter,DisplayCadence,adaptivePixelRatio} from '../teste/graphics-settings.js';
+import {gpuName,DebugOverlay} from '../teste/debug-overlay.js';
 import {CINEMATIC_FEATURES} from '../teste/cinematic.js';
 
 const rank=(key,value)=>GRAPHICS_OPTIONS[key].choices.findIndex(([v])=>v===value);
@@ -70,6 +70,45 @@ assert.ok(Math.abs(rendered(60,30)-30)<1,`30 FPS on 60 Hz: ${rendered(60,30)}`);
 assert.equal(rendered(60,60),60,'a 60 FPS limit on a 60 Hz screen skips nothing');
 assert.equal(rendered(144,0),144,'no limit');
 assert.ok(rendered(40,60)===40,'a slow device is never held back');
+for(const limit of [90,120,144,160])assert.ok(Math.abs(rendered(165,limit)-limit)<1.5,`${limit} FPS on 165 Hz`);
+
+// Browser cadence is sampled before the limiter, then held during racing load. Moving to a
+// slower screen remeasures it; a 160 FPS request must not crush resolution on a 60 Hz monitor.
+const cadence=new DisplayCadence();let stamp=100;
+function ticks(hz,seconds,measure){for(let i=0;i<hz*seconds;i++){stamp+=1000/hz;cadence.observe(stamp,measure);}}
+ticks(160,4,true);assert.equal(cadence.hz,160);assert.equal(cadence.target(),160);
+assert.equal(cadence.target(120,144),120);assert.equal(cadence.target(160,60),60);
+ticks(40,4,false);assert.equal(cadence.hz,160,'GPU load does not masquerade as a monitor change');
+cadence.reset();ticks(60,4,false);assert.equal(cadence.hz,60);assert.equal(cadence.target(160),60);
+cadence.observe(stamp+10000);assert.equal(cadence.hz,60,'a background-tab stall is not a refresh interval');
+const loadingCadence=new DisplayCadence();for(let i=1;i<=144;i++)loadingCadence.observe(i*1000/144,true);
+loadingCadence.observe(15000);for(let i=1;i<=100;i++)loadingCadence.observe(15000+i*1000/30,false);
+assert.equal(loadingCadence.hz,144,'a long shader compilation does not extend calibration into a GPU-heavy race');
+const adapt=(frameSeconds,targetFps,min=.7,max=1.5)=>adaptivePixelRatio(1,{min,max,frameSeconds,targetFps});
+assert.ok(adapt(1/85,160)<1,'high-refresh target can trade pixels for speed');
+assert.ok(adapt(1/60,60)>1,'native refresh headroom recovers quality');
+assert.equal(adapt(1/53,60),1,'hysteresis avoids a resize for small changes');
+assert.equal(adapt(1/30,60,1),1,'never below the floor');
+assert.equal(adapt(1/165,160,.7,1),1,'never above the selected density');
+assert.ok(adaptivePixelRatio(1,{min:.7,max:1.5,frameSeconds:1/80,gpuSeconds:.004,targetFps:160})>1,'CPU-bound frames do not needlessly blur the picture');
+assert.ok(adaptivePixelRatio(1,{min:.7,max:1.5,frameSeconds:1/80,gpuSeconds:.012,targetFps:160})<1,'GPU-bound frames trade pixels for speed');
+assert.equal(normalizeGraphics({level:'alto',overrides:{materials:'baixo',targetFps:160,cameraMotion:0}}).overrides.targetFps,160);
+
+// One shared asynchronous timer serves the hidden adaptive controller and the visible panel.
+// A disjoint/lost context must invalidate stale results, including a saturated pending queue.
+{
+ let disjoint=false,lost=false,available=false,active=false,deleted=0,id=0;const listeners={};
+ const gl={QUERY_RESULT_AVAILABLE:1,QUERY_RESULT:2,isContextLost:()=>lost,getExtension:()=>({TIME_ELAPSED_EXT:3,GPU_DISJOINT_EXT:4}),
+  getParameter:()=>disjoint,getQueryParameter:(_q,key)=>key===1?available:4e6,createQuery:()=>++id,
+  beginQuery:()=>{assert(!active,'no nested GPU query');active=true;},endQuery:()=>{assert(active);active=false;},deleteQuery:()=>deleted++};
+ const timer=Object.create(DebugOverlay.prototype);Object.assign(timer,{renderer:()=>({getContext:()=>gl,domElement:{addEventListener:(event,fn)=>listeners[event]=fn}}),mode:'off',gpu:null,frameGpuMs:null,window:{gpu:0,gpuFrames:0},shown:{gpu:null}});
+ for(let i=0;i<8;i++){timer.gpuBegin();timer.gpuEnd();}
+ assert.equal(timer.gpu.pending.length,8);timer.frameGpuMs=12;disjoint=true;timer.gpuBegin();
+ assert.equal(timer.gpu.pending.length,0);assert.equal(timer.frameGpuMs,null);assert.equal(deleted,8);
+ disjoint=false;available=true;timer.gpuBegin();timer.gpuEnd();timer.gpuBegin();timer.gpuEnd();assert.equal(timer.frameGpuMs,4,'hidden profiling still supplies GPU time');
+ lost=true;listeners.webglcontextlost();timer.gpuBegin();assert.equal(timer.gpu,null);assert.equal(timer.frameGpuMs,null);
+ lost=false;listeners.webglcontextrestored();timer.gpuBegin();timer.gpuEnd();assert.equal(timer.gpu.pending.length,1,'restored context uses a fresh timer');timer.stopGpu();
+}
 
 // The overlay: the corner and the graphics card's name.
 assert.equal(debugCorner('auto',true),'tc');assert.equal(debugCorner('auto',false),'tl');assert.equal(debugCorner('br',true),'br');

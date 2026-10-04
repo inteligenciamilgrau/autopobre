@@ -2,7 +2,8 @@ import {debugCorner} from './graphics-settings.js';
 // Performance overlay (the Gráficos tab, or F3): the frame rate and frame time with a graph of the
 // last frames; the full panel adds CPU and GPU time per frame, what the GPU is asked to draw, its
 // memory and the game's own lines (lines()). main.js calls begin() and end() round every frame.
-// The text is refreshed four times a second; nothing is measured while it is off.
+// The text is refreshed four times a second. Optional GPU profiling also serves dynamic
+// resolution when the panel is hidden; queries are asynchronous and never wait for the GPU.
 const HISTORY=240,GRAPH_MS=50;
 const number=(value,digits=0)=>value.toLocaleString('pt-BR',{minimumFractionDigits:digits,maximumFractionDigits:digits});
 // "ANGLE (NVIDIA, NVIDIA GeForce RTX 5060 (0x00002D05) Direct3D11 vs_5_0 ps_5_0, D3D11)" → "NVIDIA GeForce RTX 5060 · Direct3D11".
@@ -11,8 +12,8 @@ export function gpuName(raw){
  return angle?[angle[1].trim(),angle[2]?.trim()].filter(Boolean).join(' · '):text||'desconhecida';
 }
 export class DebugOverlay {
- constructor({renderer,touch=false,lines=()=>[],target=()=>60}){
-  this.renderer=renderer;this.touch=touch;this.lines=lines;this.target=target;this.mode='off';
+ constructor({renderer,touch=false,lines=()=>[],target=()=>60,profile=()=>false}){
+  this.renderer=renderer;this.touch=touch;this.lines=lines;this.target=target;this.profile=profile;this.mode='off';this.frameGpuMs=null;
   this.times=new Float32Array(HISTORY);this.cpu=new Float32Array(HISTORY);this.cursor=0;this.count=0;
   this.window={frames:0,start:0,cpu:0,gpu:0,gpuFrames:0};this.shown={fps:0,ms:0,low:0,worst:0,cpu:0,gpu:null};
   this.last=0;this.started=0;this.refreshAt=0;this.graphAt=0;this.gpu=null;this.gpuLabel='';
@@ -28,15 +29,16 @@ export class DebugOverlay {
  setCorner(corner){for(const c of ['tl','tc','tr','bl','br'])this.root.classList.toggle('dbg-'+c,c===debugCorner(corner,this.touch));}
  // Frame start: the interval since the previous frame, and the GPU timer for this one.
  begin(now=performance.now()){
+  if(this.mode==='full'||this.profile())this.gpuBegin();else if(this.gpu?.pending.length)this.stopGpu();
   if(this.mode==='off')return;this.started=performance.now();
   if(this.last){const dt=now-this.last;if(dt<1000){this.times[this.cursor]=dt;this.count=Math.min(HISTORY,this.count+1);this.window.frames++;}}
   else this.window.start=now;
-  this.last=now;if(this.mode==='full')this.gpuBegin();
+  this.last=now;
  }
  end(){
+  this.gpuEnd();
   if(this.mode==='off'||!this.started)return;const cpu=performance.now()-this.started;this.started=0;
   this.cpu[this.cursor]=cpu;this.window.cpu+=cpu;this.cursor=(this.cursor+1)%HISTORY;
-  if(this.mode==='full')this.gpuEnd();
   const now=this.last;if(now>=this.graphAt){this.graphAt=now+100;this.drawGraph();}
   if(now-this.window.start>=250&&this.window.frames)this.refresh(now);
  }
@@ -80,14 +82,21 @@ export class DebugOverlay {
  // GPU time per frame from EXT_disjoint_timer_query_webgl2, read back a few frames later.
  gpuBegin(){
   const r=this.renderer();if(!r)return;
+  if(!this.gpuListening){
+   const lost=()=>{this.gpu=null;this.frameGpuMs=null;};
+   r.domElement.addEventListener('webglcontextlost',lost);r.domElement.addEventListener('webglcontextrestored',lost);this.gpuListening=true;
+  }
+  if(r.getContext().isContextLost()){this.gpu=null;this.frameGpuMs=null;return;}
   if(!this.gpu){const gl=r.getContext();this.gpu={gl,ext:gl.getExtension?.('EXT_disjoint_timer_query_webgl2')??null,free:[],pending:[],active:null};}
   const g=this.gpu;if(!g.ext)return;const gl=g.gl;
+  // A disjoint invalidates the whole outstanding batch, even if no query is available yet.
+  if(gl.getParameter(g.ext.GPU_DISJOINT_EXT)){this.stopGpu();return;}
   while(g.pending.length&&gl.getQueryParameter(g.pending[0],gl.QUERY_RESULT_AVAILABLE)){
-   const q=g.pending.shift();if(!gl.getParameter(g.ext.GPU_DISJOINT_EXT)){this.window.gpu+=gl.getQueryParameter(q,gl.QUERY_RESULT)/1e6;this.window.gpuFrames++;}g.free.push(q);
+   const q=g.pending.shift();if(!gl.getParameter(g.ext.GPU_DISJOINT_EXT)){const ms=gl.getQueryParameter(q,gl.QUERY_RESULT)/1e6;this.frameGpuMs=this.frameGpuMs===null?ms:this.frameGpuMs+(ms-this.frameGpuMs)*.08;if(this.mode==='full'){this.window.gpu+=ms;this.window.gpuFrames++;}}else this.frameGpuMs=null;g.free.push(q);
   }
   if(g.pending.length<8){g.active=g.free.pop()??gl.createQuery();gl.beginQuery(g.ext.TIME_ELAPSED_EXT,g.active);}
  }
  gpuEnd(){const g=this.gpu;if(!g?.active)return;g.gl.endQuery(g.ext.TIME_ELAPSED_EXT);g.pending.push(g.active);g.active=null;}
- stopGpu(){const g=this.gpu;if(!g)return;if(g.active)this.gpuEnd();for(const q of [...g.pending,...g.free])g.gl.deleteQuery(q);g.pending.length=g.free.length=0;this.shown.gpu=null;}
+ stopGpu(){this.frameGpuMs=null;const g=this.gpu;if(!g)return;if(g.active)this.gpuEnd();for(const q of [...g.pending,...g.free])g.gl.deleteQuery(q);g.pending.length=g.free.length=0;this.shown.gpu=null;}
  info(){return {mode:this.mode,corner:[...this.root.classList].find(c=>/^dbg-(tl|tc|tr|bl|br)$/.test(c))?.slice(4)??null,fps:this.shown.fps,ms:this.shown.ms,low:this.shown.low,cpu:this.shown.cpu,gpu:this.shown.gpu,gpuTimer:!!this.gpu?.ext,rows:[...this.list.querySelectorAll('dt')].map(dt=>[dt.textContent,dt.nextElementSibling.textContent])};}
 }

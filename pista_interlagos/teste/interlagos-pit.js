@@ -33,8 +33,7 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
   }
   const g=geometryFrom(positions,uvs,indices,[['roadData',road,4]]);
   // Pushed back a little: where the lanes touch, the track's own surface wins.
-  const material=roadSurface.material.clone();material.onBeforeCompile=roadSurface.material.onBeforeCompile;material.customProgramCacheKey=roadSurface.material.customProgramCacheKey;
-  material.polygonOffset=true;material.polygonOffsetFactor=1;material.polygonOffsetUnits=1;
+  const material=roadSurface.cloneMaterial({polygonOffset:true,polygonOffsetFactor:1,polygonOffsetUnits:1});
   const asphalt=new THREE.Mesh(g,material);asphalt.name='Asfalto_pit_lane';asphalt.receiveShadow=true;root.add(asphalt);
  }
  // --- Paint.

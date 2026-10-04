@@ -13,14 +13,18 @@ export const autoLevel=touch=>touch?'medio':'alto';
 export const GRAPHICS_OPTIONS=Object.freeze({
  resolution:{group:'imagem',label:'Densidade de pixels',hint:'Quantos pixels a placa de vídeo desenha por ponto da tela. É o ajuste que mais pesa.',choices:[[.5,'0,5×'],[.75,'0,75×'],[1,'1×'],[1.25,'1,25×'],[1.5,'1,5×'],[2,'2×']]},
  dynamicResolution:{group:'imagem',label:'Resolução dinâmica',hint:'Baixa a densidade sozinha quando o FPS cai e volta quando sobra fôlego.',choices:[[false,'Desligada'],[true,'Ligada']]},
- fpsLimit:{group:'imagem',label:'Limite de FPS',hint:'Segurar o FPS poupa bateria e esquenta menos o celular.',choices:[[30,'30 FPS'],[60,'60 FPS'],[0,'Sem limite']]},
+ fpsLimit:{group:'imagem',label:'Limite de FPS',hint:'Poupa energia. O navegador também depende da frequência configurada no monitor em uso.',choices:[[30,'30 FPS'],[60,'60 FPS'],[90,'90 FPS'],[120,'120 FPS'],[144,'144 FPS'],[160,'160 FPS'],[0,'Sem limite']]},
+ targetFps:{group:'imagem',label:'Meta da resolução dinâmica',hint:'Automática acompanha o ritmo estimado da tela. Uma meta maior troca nitidez por fluidez; não aumenta os Hz do monitor.',choices:[[0,'Automática · tela'],[60,'60 FPS'],[90,'90 FPS'],[120,'120 FPS'],[144,'144 FPS'],[160,'160 FPS']]},
  antialias:{group:'imagem',label:'Antisserrilhado (MSAA)',hint:'Suaviza os degraus nas bordas. No visual Simples vale ao recarregar a página.',choices:[[0,'Desligado'],[2,'2×'],[4,'4×']]},
  shadows:{group:'luz',label:'Sombras',hint:'Resolução e alcance das sombras do sol em volta do carro.',choices:[['off','Desligadas'],['baixa','Baixas'],['media','Médias'],['alta','Altas'],['ultra','Ultra']]},
  post:{group:'luz',label:'Visual de cinema',hint:'Neblina de São Paulo, cor de filme e ajuste de exposição. Simples desenha direto na tela.',choices:[['off','Simples'],['lite','Leve'],['full','Completo']]},
  ao:{group:'luz',label:'Oclusão de ambiente',hint:'Sombra de contato nos cantos e sob os carros. Só no visual Completo.',choices:[[false,'Desligada'],[true,'Ligada']]},
  lens:{group:'luz',label:'Brilho e lente',hint:'Brilho das luzes fortes, reflexo do sol na lente e foco das câmeras de TV. Só no visual Completo.',choices:[[false,'Desligado'],[true,'Ligado']]},
  motionBlur:{group:'luz',label:'Desfoque de velocidade',hint:'Borra as bordas da imagem em alta velocidade, nas câmeras que andam com o carro.',choices:[[false,'Desligado'],[true,'Ligado']]},
- scenery:{group:'mundo',label:'Cenário e vegetação',hint:'Quantidade de árvores e casas, folhagem e detalhe do terreno. Vale na próxima largada.',next:true,choices:[['basico','Básico'],['leve','Leve'],['completo','Completo'],['denso','Denso']]},
+ materials:{group:'mundo',label:'Detalhe da pista',hint:'Relevo do asfalto, borracha, remendos, zebras e refletores. Baixo reduz o trabalho da placa de vídeo.',choices:[['baixo','Baixo'],['medio','Médio'],['alto','Alto'],['ultra','Ultra']]},
+ cameraMotion:{group:'luz',label:'Movimento de câmera',hint:'Resposta à velocidade, frenagens e impactos. Reduzido é mais confortável; desligado remove essa resposta extra.',choices:[[0,'Desligado'],[.35,'Reduzido'],[1,'Completo']]},
+ actionFeedback:{group:'luz',label:'Avisos de ação',hint:'Avisos curtos para disputas roda a roda, passagens por um triz e impactos.',choices:[[false,'Desligados'],[true,'Ligados']]},
+ scenery:{group:'mundo',label:'Cenário e vegetação',hint:'Árvores, casas e capim com vento nas margens. Vale na próxima largada.',next:true,choices:[['basico','Básico'],['leve','Leve'],['completo','Completo'],['denso','Denso']]},
  viewDistance:{group:'mundo',label:'Distância de visão',hint:'Até onde o horizonte aparece antes de sumir na neblina.',choices:[['curta','Curta'],['media','Média'],['longa','Longa'],['maxima','Máxima']]},
  water:{group:'mundo',label:'Água dos lagos',hint:'Realista reflete árvores, casas e céu e ondula com o vento: desenha a cena mais uma vez.',choices:[['simples','Simples'],['realista','Realista']]},
  mirrors:{group:'mundo',label:'Retrovisores',hint:'Resolução do espelho na câmera interna: desenha a pista para trás a cada quadro.',choices:[['off','Desligados'],['baixa','Baixa'],['media','Média'],['alta','Alta']]}
@@ -29,10 +33,10 @@ export const GRAPHICS_GROUPS=Object.freeze([['imagem','Imagem'],['luz','Luz e ef
 
 // Médio is what phones always had and Alto what computers had, before this tab existed.
 export const GRAPHICS_PRESETS=Object.freeze({
- baixo:Object.freeze({resolution:.75,dynamicResolution:true,fpsLimit:60,antialias:0,shadows:'off',post:'off',ao:false,lens:false,motionBlur:false,scenery:'basico',viewDistance:'curta',water:'simples',mirrors:'baixa'}),
- medio:Object.freeze({resolution:1,dynamicResolution:true,fpsLimit:0,antialias:0,shadows:'baixa',post:'lite',ao:false,lens:false,motionBlur:false,scenery:'leve',viewDistance:'media',water:'simples',mirrors:'media'}),
- alto:Object.freeze({resolution:1.5,dynamicResolution:true,fpsLimit:0,antialias:4,shadows:'alta',post:'full',ao:true,lens:true,motionBlur:true,scenery:'completo',viewDistance:'longa',water:'simples',mirrors:'alta'}),
- ultra:Object.freeze({resolution:2,dynamicResolution:true,fpsLimit:0,antialias:4,shadows:'ultra',post:'full',ao:true,lens:true,motionBlur:true,scenery:'denso',viewDistance:'maxima',water:'realista',mirrors:'alta'})
+ baixo:Object.freeze({resolution:.75,dynamicResolution:true,fpsLimit:60,targetFps:0,antialias:0,shadows:'off',post:'off',ao:false,lens:false,motionBlur:false,materials:'baixo',cameraMotion:.35,actionFeedback:true,scenery:'basico',viewDistance:'curta',water:'simples',mirrors:'baixa'}),
+ medio:Object.freeze({resolution:1,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:0,shadows:'baixa',post:'lite',ao:false,lens:false,motionBlur:false,materials:'medio',cameraMotion:.35,actionFeedback:true,scenery:'leve',viewDistance:'media',water:'simples',mirrors:'media'}),
+ alto:Object.freeze({resolution:1.5,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:4,shadows:'alta',post:'full',ao:true,lens:true,motionBlur:true,materials:'alto',cameraMotion:1,actionFeedback:true,scenery:'completo',viewDistance:'longa',water:'simples',mirrors:'alta'}),
+ ultra:Object.freeze({resolution:2,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:4,shadows:'ultra',post:'full',ao:true,lens:true,motionBlur:true,materials:'ultra',cameraMotion:1,actionFeedback:true,scenery:'denso',viewDistance:'maxima',water:'realista',mirrors:'alta'})
 });
 
 // What each choice means to the engine (main.js applyGraphics, landscape.js).
@@ -92,4 +96,36 @@ export class FrameLimiter {
   // A frame up to 1 ms early still counts for its slot; the grid moves on by whole slots.
   if(elapsed<interval-1)return true;this.last=elapsed>interval*3?now:this.last+Math.max(1,Math.floor((elapsed+1)/interval))*interval;return false;
  }
+}
+
+// Estimate the browser's presentation cadence before the game's limiter. This is not a monitor
+// hardware query. Measure in menus and briefly after a window move; racing load cannot steadily
+// pull the estimate down and make dynamic resolution give up its target.
+export class DisplayCadence {
+ constructor(){this.hz=60;this.measured=false;this.reset();}
+ reset(){this.last=0;this.samples=[];this.elapsed=0;this.probeUntil=0;}
+ observe(now,measure=false){
+  if(!this.last){this.last=now;this.probeUntil=now+3000;return;}
+  const dt=now-this.last;this.last=now;
+  if(dt<=0||dt>100)return;
+  // Shader compilation/loading stalls must not prolong the calibration into the race.
+  if(!measure&&now>this.probeUntil)return;
+  this.samples.push(dt);this.elapsed+=dt;
+  if(this.samples.length<30||this.elapsed<650)return;
+  const sorted=this.samples.sort((a,b)=>a-b),interval=sorted[Math.floor(sorted.length*.2)];
+  const rate=Math.max(30,Math.min(240,1000/interval));
+  const common=[30,50,60,75,90,100,120,144,160,165,180,240].find(h=>Math.abs(h-rate)<h*.025);
+  this.hz=common??Math.round(rate);this.measured=true;this.samples=[];this.elapsed=0;
+ }
+ target(requested=0,limit=0){return Math.min(requested||this.hz,limit||Infinity,this.hz);}
+}
+
+// Hysteresis leaves time for textures/shaders to settle and avoids continuously rebuilding HDR
+// targets. A faster target trades pixels only; it never skips physics steps or overrides an FPS cap.
+export function adaptivePixelRatio(current,{min,max,frameSeconds,gpuSeconds=null,targetFps}){
+ const budget=1/Math.max(1,targetFps);
+ // Frame time also includes CPU simulation and the browser's presentation wait. When the
+ // asynchronous GPU timer exists, trade pixels against that work, not a CPU bottleneck.
+ const timed=Number.isFinite(gpuSeconds)&&gpuSeconds>0,load=timed?gpuSeconds:frameSeconds;
+ return load>budget*1.22?Math.max(min,current-.1):load<budget*(timed?.94:1.04)?Math.min(max,current+.05):current;
 }

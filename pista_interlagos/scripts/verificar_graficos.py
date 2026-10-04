@@ -6,6 +6,8 @@ choice after a reload, and the phone's Automático (Médio) with the overlay at 
 Usage: verificar_graficos.py [port]   (INTERLAGOS_URL overrides the address; shots go to a temp folder,
 or to GRAFICOS_OUT)."""
 import json, os, sys, tempfile
+if hasattr(sys.stdout, 'reconfigure'):
+    sys.stdout.reconfigure(encoding='utf-8')
 from pathlib import Path
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 import browser_config  # noqa: F401  (headless + in-page pointer lock)
@@ -43,7 +45,8 @@ with sync_playwright() as p:
     g = info(page)
     check('desktop_auto_is_alto', g['level'] == 'alto' and g['auto'] and g['changed'] == [], g)
     page.click('#settingsButton'); page.click('#tab-graphics')
-    check('tab_visible', page.is_visible('#settings-graphics') and page.locator('.graphics-level').count() == 5 and page.locator('#graphicsControls select').count() == 13)
+    check('tab_visible', page.is_visible('#settings-graphics') and page.locator('.graphics-level').count() == 5 and page.locator('#graphicsControls select').count() == 17)
+    check('high_refresh_choices', page.locator('#gfx-fpsLimit option[value="160"]').count() == 1 and page.locator('#gfx-targetFps option[value="144"]').count() == 1)
     check('race_tab_lost_old_controls', page.locator('#cinematicLevel').count() == 0 and page.locator('#realisticWater').count() == 0)
     page.locator('#settings').screenshot(path=str(OUT / 'aba_graficos_desktop.png'))
     # Manual change in the menu: shows as a change, Restore drops it.
@@ -70,6 +73,7 @@ with sync_playwright() as p:
     per_level = {}
     for level in ['baixo', 'medio', 'alto', 'ultra']:
         page.evaluate("l=>interlagosGraficos.set({level:l,overrides:{}})", level)
+        wait_js(page, '!interlagosGraficos.info().compiling')
         page.wait_for_timeout(4000)
         g = info(page)
         per_level[level] = {'fps': round(g['debug']['fps'], 1), 'gpu': g['debug']['gpu'] and round(g['debug']['gpu'], 2), 'cpu': round(g['debug']['cpu'], 2), 'ratio': g['pixelRatio'],
@@ -79,6 +83,12 @@ with sync_playwright() as p:
     b, u = per_level['baixo'], per_level['ultra']
     check('baixo_applied', not b['shadow']['cast'] and b['cinematic']['level'] == 'off' and b['fog'] == [300, 1600] and b['far'] == 1900 and b['mirror'] == [340, 57] and b['fpsLimit'] == 60, b)
     check('ultra_applied', u['shadow']['size'] >= 4096 and u['shadow']['reach'] == 120 and u['water'] is True and u['fog'] == [700, 4600], u)
+    check('simple_has_no_post_effects', b['cinematic']['passes'] == 1 and not b['cinematic']['ao'] and not b['cinematic']['lens'], b['cinematic'])
+    check('surface_quality_tracks_preset', page.evaluate('interlagos.surfaceInfo().quality') == 'ultra')
+    page.evaluate("interlagosGraficos.set({level:'alto',overrides:{targetFps:160,fpsLimit:120}})")
+    wait_js(page, '!interlagosGraficos.info().compiling')
+    g = info(page)
+    check('dynamic_target_respects_cap_and_screen', 0 < g['resolution']['targetFps'] <= min(120,g['resolution']['cadence']), g['resolution'])
     # Manual settings in a race: mirrors off, light film look, no motion blur, 30 FPS.
     page.evaluate("interlagosGraficos.set({level:'alto',overrides:{mirrors:'off',post:'lite',fpsLimit:30,antialias:0}})")
     page.wait_for_timeout(3500)
