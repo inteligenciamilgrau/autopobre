@@ -2,15 +2,15 @@
 // (net-link.js, sala-cloudflare), or windows of one browser through a BroadcastChannel (&local=1)
 // (net-room.js, net-cars.js). Nothing in the menus leads here; main.js loads this module only when
 // the address asks for a room:
-//   index.html#corrida=NOME  the first in a room hosts it; every pilot races the car chosen on
+//   index.html#desafio=NOME  the first in a room hosts it; every pilot races the car chosen on
 //                            Modo Corrida's car screen (or the one in &carro=73) if nobody else has
 //                            it, else the first free one. Online, the group key opens the door and
-//                            the host lets each guest in. The old #sala=NOME still opens the room
+//                            the host lets each guest in. The old #sala= and #corrida= open nothing
 //   &local=1                 this browser's windows only, no server; &servidor=local: wrangler dev
 //   &auto=1                  the automatic pilot drives this window's car from the start
 //   &fantasmas=1             (host) humans pass through each other instead of colliding
 //   &lag=150&perda=5         simulate 150 ms of network delay and 5% of lost car messages
-//   #corrida=NOME_SEGREDO    what follows the "_" is never on screen (the card and the address bar
+//   #desafio=NOME_SEGREDO    what follows the "_" is never on screen (the card and the address bar
 //                            read NOME_***): a pilot streaming his screen does not give the room away
 // A guest the host lets in goes to Modo Corrida's car screen, picks its car and presses "Aguardar
 // início da corrida". The host lets pilots in until the start (on the car screen, the track screen and

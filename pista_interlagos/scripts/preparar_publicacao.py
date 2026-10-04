@@ -30,7 +30,7 @@ def build(multiplayer=False):
     payload = {out: contained_file(ROOT, src).read_bytes() for out, src in PUBLIC_FILES.items()
                if multiplayer or out not in MULTIPLAYER}
     if not multiplayer:
-        # main.js then never reads #corrida=NOME nor asks for multiplayer.js, which is not published.
+        # main.js then never reads #desafio=NOME nor asks for multiplayer.js, which is not published.
         if payload['main.js'].count(b'const MULTIPLAYER=true;') != 1:
             raise ValueError('main.js: multiplayer switch not found; the build cannot leave the multiplayer out')
         payload['main.js'] = payload['main.js'].replace(b'const MULTIPLAYER=true;', b'const MULTIPLAYER=false;')

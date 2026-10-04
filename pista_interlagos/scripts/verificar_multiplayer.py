@@ -1,5 +1,5 @@
 """Multiplayer test version (teste/multiplayer.js) in the browser. Three windows of one browser join
-the room of index.html#corrida=...: each guest, once in the room, lands on Modo Corrida's car screen and
+the room of index.html#desafio=...: each guest, once in the room, lands on Modo Corrida's car screen and
 races only after pressing "Aguardar início da corrida". The host takes the 73 on its car screen (the
 guest's car shows there under her name) and picks Corrida única, which waits on the grid; one guest
 was in the room already (she asked for the 64), the other arrives during that wait (online, the host
@@ -11,7 +11,7 @@ the server, a guest's line also drops mid-race: nobody drives her car, it rolls 
 the yellow flag come, until she is back in it), and every
 result sheet lists all three pilots; a guest's sheet leads back to its car screen, still waiting for
 the next race. Then the host reloads (F5): it hosts again under the same
-identity and the guests keep their cars. A window opened without #corrida shows nothing of it and does
+identity and the guests keep their cars. A window opened without #desafio shows nothing of it and does
 not even load the module.
 
 Two ways, as in the game: the windows of one browser alone (&local=1, the default here), or through
@@ -85,7 +85,7 @@ def guest_window(context, host, pages, name, car=None):
     into the race before anyone could type)."""
     host.evaluate("name=>localStorage.setItem('autopobre-pilots-v1',JSON.stringify({selected:name,names:[name]}))", PILOTS[name][0])
     with context.expect_page() as popup:
-        host.evaluate("url=>{window.open(url,'_blank','popup,noopener,width=800,height=450');}", f'{URL}?intro=0&cinema=off#corrida={ROOM}&auto=1{MODE}' + (f'&carro={car}' if car else ''))
+        host.evaluate("url=>{window.open(url,'_blank','popup,noopener,width=800,height=450');}", f'{URL}?intro=0&cinema=off#desafio={ROOM}&auto=1{MODE}' + (f'&carro={car}' if car else ''))
     page = pages[name] = popup.value
     watch(page, name)
     page.wait_for_load_state('load', timeout=120000)
@@ -172,7 +172,7 @@ def drop_line(host, guest, late):
 
 
 def race_room(context, host, pages):
-    host.goto(f'{URL}?intro=0&cinema=off#corrida={ROOM}&auto=1{MODE}', wait_until='load', timeout=120000)
+    host.goto(f'{URL}?intro=0&cinema=off#desafio={ROOM}&auto=1{MODE}', wait_until='load', timeout=120000)
     wait_js(host, "window.interlagosSala?.info().role==='host'&&" + OPENING, timeout=60000)
     host.fill('#pilotName', PILOTS['host'][0])
     guest = guest_window(context, host, pages, 'guest', PILOTS['guest'][1])

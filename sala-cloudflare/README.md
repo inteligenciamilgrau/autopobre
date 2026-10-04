@@ -45,4 +45,4 @@ ORIGENS=http://127.0.0.1:8799,http://127.0.0.1:8841,http://teste.local
 - `npm test` — regressões de segurança em memória e o servidor no `wrangler dev`: chave, origem, papéis, porteiro, limites, F5 e troca de anfitrião. O teste usa chave e origem fictícias próprias, passadas ao runtime local.
 - `node teste/testar_sala_jogo.mjs` — o código de sala do próprio jogo conversando por ele.
 - `python pista_interlagos/scripts/verificar_multiplayer.py 8841 --servidor` (da raiz, com o servidor do jogo na porta 8841) — três janelas correndo uma volta pelo servidor.
-- No navegador: `.\wrangler dev` aqui e `…/index.html#corrida=teste&servidor=local` no jogo.
+- No navegador: `.\wrangler dev` aqui e `…/index.html#desafio=teste&servidor=local` no jogo.
