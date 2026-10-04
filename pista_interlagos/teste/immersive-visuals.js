@@ -29,7 +29,8 @@ export const PLATE_NAMES=Object.freeze(['Numero_lateral_','Numero_lateral_','Num
 // The distant rivals' side profile (farProxy; the car screen's card icons, car-select.js): metres in the
 // car frame, nose to +x: the body, the side windows, the axles along the car and the wheels' radius; the
 // body's width, the wheels' track (half), the tail and head lamps (x, y, z either side, width across, height)
-// and the bumpers (x, y; bumperWidth across). The Fusca's: fusca.js FUSCA_PROFILE.
+// and the bumpers (x, y; bumperWidth across). The Fusca's: fusca.js FUSCA_PROFILE (no bumpers; its fenders, in the
+// second colour).
 export const FAR_PROFILE=Object.freeze({
  body:[[-2.35,.2],[2.42,.2],[2.46,.32],[2.46,.62],[2.35,.8],[.85,.9],[.05,1.4],[-.95,1.4],[-1.65,1],[-2.3,.97],[-2.39,.4]],
  glass:[[.9,.92],[.08,1.37],[-.97,1.37],[-1.7,.99]],axles:[1.55,-1.117],wheel:.316,
@@ -321,17 +322,18 @@ export class ImmersiveVisuals {
   this.tag(root,number,[0,number==='BLAZER'?1.83:1.45,0],number==='BLAZER'?1.3:.7,.35,'#fff','#223234');return root;
  }
  // ~250-triangle silhouette in the rival's colours, for distant cars: the Opala's, or another profile's
- // (FAR_PROFILE's fields; the Fusca's, fusca.js FUSCA_PROFILE).
- farProxy(color,p=FAR_PROFILE){
+ // (FAR_PROFILE's fields; the Fusca's, fusca.js FUSCA_PROFILE, whose fenders take the second colour).
+ farProxy(color,p=FAR_PROFILE,second=color){
   const paint=new THREE.Color().setHex(color),parts=[];
   const add=(geometry,rgb)=>{let g=geometry.index?geometry.toNonIndexed():geometry;for(const key of Object.keys(g.attributes))if(key!=='position'&&key!=='normal')g.deleteAttribute(key);const c=new Float32Array(g.attributes.position.count*3);for(let i=0;i<c.length;i+=3){c[i]=rgb.r;c[i+1]=rgb.g;c[i+2]=rgb.b;}g.setAttribute('color',new THREE.BufferAttribute(c,3));parts.push(g);};
   const profile=(points,width,rgb)=>{const shape=new THREE.Shape(points.map(([x,y])=>new THREE.Vector2(x,y)));add(new THREE.ExtrudeGeometry(shape,{depth:width,bevelEnabled:false}).translate(0,0,-width/2),rgb);};
   profile(p.body,p.width,paint);
+  for(const fender of p.fenders??[])profile(fender,p.width+.02,new THREE.Color().setHex(second));
   profile(p.glass,p.width+.02,new THREE.Color(.02,.025,.03));
   const tyre=new THREE.Color(.025,.025,.025),trim=new THREE.Color(.05,.05,.05),r=p.wheel,{tail,head}=p;
   for(const x of p.axles)for(const z of [-p.track,p.track])add(new THREE.CylinderGeometry(r,r,.26,8).rotateX(Math.PI/2).translate(x,r,z),tyre);
   for(const side of [-1,1]){add(new THREE.BoxGeometry(.05,tail.h,tail.w).translate(tail.x,tail.y,side*tail.z),new THREE.Color(.5,.02,.02));add(new THREE.BoxGeometry(.04,head.h,head.w).translate(head.x,head.y,side*head.z),new THREE.Color(.8,.78,.6));}
-  for(const [x,y] of p.bumpers)add(new THREE.BoxGeometry(.06,.14,p.bumperWidth).translate(x,y,0),trim);
+  for(const [x,y] of p.bumpers??[])add(new THREE.BoxGeometry(.06,.14,p.bumperWidth).translate(x,y,0),trim);
   const geometry=mergeGeometries(parts,false);parts.forEach(g=>g.dispose());
   this.materials.farCar??=new THREE.MeshStandardMaterial({name:'Rival_distante',vertexColors:true,roughness:.4,metalness:.1});
   const mesh=new THREE.Mesh(geometry,this.materials.farCar);mesh.name='Rival_distante';mesh.castShadow=mesh.receiveShadow=true;mesh.visible=false;return mesh;
@@ -370,7 +372,7 @@ export class ImmersiveVisuals {
   const car=rivalCabin(fuscaCar(template,entry)),root=new THREE.Group(),detail=new THREE.Group();root.name=car.name+'_rival';detail.name='Rival_detalhe';detail.add(car);root.add(detail);
   const own=car.getObjectByName('Volante_Fusca');if(own)own.visible=false;
   const driver=createRivalDriver({color:entry.color,number:entry.number});driver.root.position.add(new THREE.Vector3(...FUSCA_SEAT));detail.add(driver.root);
-  const far=this.farProxy(entry.color,FUSCA_PROFILE),lamps=createBrakeLights({far:FUSCA_PROFILE.lamps});far.add(lamps);root.add(far);
+  const far=this.farProxy(entry.color,FUSCA_PROFILE,entry.stripe),lamps=createBrakeLights({far:FUSCA_PROFILE.lamps});far.add(lamps);root.add(far);
   Object.assign(root.userData,{detail,far,driver,fusca:car,wheels:car.userData.wheels.map(obj=>({obj,base:obj.quaternion.clone()})),
    brake:v=>{car.userData.brake(v);lamps.userData.set(v);},nameLabel:name?this.tag(root,name,[0,2.2,0],2.7,.30,'#fff','#172a2ddb'):null});
   return root;

@@ -45,7 +45,7 @@ export class DriverControls{
   this.lastKmh=null;this.kmhRate=0;this.anticipate=0;this.cooldown=0;this.linger=0;this.shifts=0;
  }
  // state: throttle, brake, handbrake, gear (physics), kmh, manual (the player shifts), clutch (a wheel's
- // pedal); returns the pose of controls and limbs.
+ // pedal), gears (the car's, physics.js mechanics); returns the pose of controls and limbs.
  update(state,dt){
   dt=Math.max(0,dt||0);if(dt===0)return this.info();
   const kmh=Math.abs(state.kmh??0),throttle=clamp(state.throttle??0,0,1),brake=clamp(state.brake??0,0,1),pulling=(state.handbrake??0)>0,pedal=clamp(state.clutch??0,0,1);
@@ -56,8 +56,9 @@ export class DriverControls{
   if(this.lastKmh!==null)this.kmhRate=approach(this.kmhRate,(kmh-this.lastKmh)/dt,8,dt);
   this.lastKmh=kmh;
   let soon=Infinity;
-  if(!state.manual&&g>0&&g<5&&throttle>.3&&this.kmhRate>1)soon=(SHIFT_UP_RPM/GEAR_RPM_PER_KMH[g]-kmh)/this.kmhRate;
-  if(!state.manual&&g>1&&this.kmhRate<-1)soon=Math.min(soon,(kmh-(SHIFT_DOWN_RPM+(brake>.3?700:0))/GEAR_RPM_PER_KMH[g])/-this.kmhRate);
+  const gears=state.gears??GEAR_RPM_PER_KMH;
+  if(!state.manual&&g>0&&g<5&&throttle>.3&&this.kmhRate>1)soon=(SHIFT_UP_RPM/gears[g]-kmh)/this.kmhRate;
+  if(!state.manual&&g>1&&this.kmhRate<-1)soon=Math.min(soon,(kmh-(SHIFT_DOWN_RPM+(brake>.3?700:0))/gears[g])/-this.kmhRate);
   this.cooldown=Math.max(0,this.cooldown-dt);
   if(soon>-.05&&soon<ANTICIPATE&&this.cooldown===0)this.anticipate=Math.max(this.anticipate,.6);
   else if(this.anticipate>0){this.anticipate=Math.max(0,this.anticipate-dt);if(this.anticipate===0)this.cooldown=.6;}

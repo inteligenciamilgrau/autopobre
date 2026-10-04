@@ -2,8 +2,9 @@
 outside, painted in a team's colour, plus a mosaic of them all.
 
 Usage, from the project root:
- blender --background --factory-startup --python modelo_3d/scripts/renderizar_fusca_jogo.py -- [glb] [out_dir] [--cor RRGGBB] [--so vista,vista] [--amostras N] [--esconder parte,parte]
-Defaults: pista_interlagos/teste/assets/fusca_v2.glb, modelo_3d/fusca_v2/previas/jogo/blender (gitignored), the #73's orange.
+ blender --background --factory-startup --python modelo_3d/scripts/renderizar_fusca_jogo.py -- [glb] [out_dir] [--cor RRGGBB] [--cor2 RRGGBB] [--so vista,vista] [--amostras N] [--esconder parte,parte]
+Defaults: pista_interlagos/teste/assets/fusca_v2.glb, modelo_3d/fusca_v2/previas/jogo/blender (gitignored), the #73's orange
+with white fenders (--cor2: the fenders' colour, the team's second one).
 The cockpit views put the camera where the game's does (main.js: cockpit.js eye plus fusca.js FUSCA_EYE, vertical
 field of view 74 degrees, 16:10), without the driver; EEVEE, a sun from the game's late afternoon and a plain sky.
 """
@@ -17,10 +18,10 @@ plain=[a for i,a in enumerate(args) if not a.startswith('--') and not (i and arg
 # Relative paths from where blender was started (Blender would take them from the drive's root).
 GLB=Path(plain[0]).resolve() if plain else R/'pista_interlagos/teste/assets/fusca_v2.glb'
 OUT=Path(plain[1]).resolve() if len(plain)>1 else R/'modelo_3d/fusca_v2/previas/jogo/blender'
-HIDE=[h for h in flags.get('--esconder','').split(',') if h];COLOR=flags.get('--cor','f07a2a');ONLY=set(flags['--so'].split(',')) if '--so' in flags else None;SAMPLES=int(flags.get('--amostras','32'))
+HIDE=[h for h in flags.get('--esconder','').split(',') if h];COLOR=flags.get('--cor','f07a2a');COLOR2=flags.get('--cor2','f2f0ea');ONLY=set(flags['--so'].split(',')) if '--so' in flags else None;SAMPLES=int(flags.get('--amostras','32'))
 # Game frame (x forward, y up, z the passenger's side) -> Blender after the glTF import (x, -z, y).
 G=lambda x,y,z:Vector((x,-z,y))
-EYE=(.057,1.20,.015)
+EYE=(.057,1.01,.015)
 # name: (eye in the game frame, yaw (positive toward the passenger), pitch, vertical fov)
 VIEWS={
  'interna':(EYE,0,-.01,74),
@@ -55,10 +56,11 @@ def setup():
  sun.rotation_euler=Euler((math.radians(55),0,math.radians(140)));scene.collection.objects.link(sun)
  bpy.ops.mesh.primitive_plane_add(size=60,location=(0,0,0));ground=bpy.context.object
  gm=bpy.data.materials.new('Asfalto');gm.use_nodes=True;gm.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value=(.07,.07,.075,1);gm.node_tree.nodes['Principled BSDF'].inputs['Roughness'].default_value=.85;ground.data.materials.append(gm)
- r,g,b=(int(COLOR[i:i+2],16)/255 for i in (0,2,4));lin=lambda c:c/12.92 if c<.04045 else ((c+.055)/1.055)**2.4
+ lin=lambda c:c/12.92 if c<.04045 else ((c+.055)/1.055)**2.4;rgb=lambda h:tuple(lin(int(h[i:i+2],16)/255) for i in (0,2,4))
  for m in bpy.data.materials:
   if m.name.split('.')[0] in ('Pintura_fusca','Fusca_painel','Pintura_interna_fusca'):
-   m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value=(lin(r),lin(g),lin(b),1)
+   m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value=(*rgb(COLOR),1)
+  elif m.name.split('.')[0]=='Paralama_fusca':m.node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value=(*rgb(COLOR2),1)
  # Glass as the game draws it (main.js, fusca.js prepareFusca): plain see-through, no refraction.
  for m in bpy.data.materials:
   if m.name.split('.')[0] in ('Vidro_fusca','Vidro_farol') and m.node_tree:

@@ -77,7 +77,7 @@ blender --background --factory-startup --python-exit-code 2 --python modelo_3d/s
 ```
 
 - Resolução de jogo: 170 × 112 seções na carroceria (o estúdio usa 300 × 192), peças torneadas com até 36 segmentos,
-  frisos mais simples. Cerca de 188 mil triângulos e 3,7 MB, sem texturas (as faces que o jogo pinta têm UV).
+  frisos mais simples. Cerca de 180 mil triângulos e 3,6 MB, sem texturas (as faces que o jogo pinta têm UV).
 - Referencial do Opala: frente +X, esquerda −Z, pneus em y = 0; o entre-eixos de 2,40 m centrado no do Opala
   (eixos em x +1,417 e −0,983). Quatro pivôs `Roda_*_PIVO`, pintura `Pintura_fusca`, painel `Fusca_painel`, metal
   pintado por dentro `Pintura_interna_fusca` (os três na cor da equipe), lanterna `Lanterna_fusca` (luz de freio), vidros
@@ -88,7 +88,7 @@ blender --background --factory-startup --python-exit-code 2 --python modelo_3d/s
 - **Cabine de Fusca de corrida** (`modelo_3d/scripts/fusca_cabine.py`, desde 03/10/2026): painel de metal na cor do carro
   com o velocímetro VDO atrás do volante, grade do rádio, porta-luvas, alça e botões, sob o acolchoado preto; conta-giros
   Auto Meter no acolchoado; painel de chaves sob o painel; forros de porta em vinil preto (friso cromado, bolso, puxador,
-  manivela, maçaneta e pino), laterais traseiras; forro do teto claro com as costuras, envolvendo as colunas, quebra-sóis
+  manivela, maçaneta e pino), laterais traseiras; forro do teto claro com as costuras, quebra-sóis
   e luz de teto; gaiola (arco atrás dos bancos, colunas A até o assoalho, travessa do para-brisa, barras baixas nas portas,
   diagonal, escoras e barra do cinto); banco concha com cinto vermelho; túnel, tapetes de borracha, torre do câmbio, freio
   de mão, extintor no lugar do banco do carona, base do banco traseiro e bagageiro em preto com a bateria. A cabine é
@@ -109,8 +109,30 @@ blender --background --factory-startup --python-exit-code 2 --python modelo_3d/s
   do espelho do Opala, `side-mirrors.js` com o vidro próprio do Fusca), o velocímetro VDO (0–140 km/h, marcador de
   gasolina) e o conta-giros têm ponteiros ao vivo e luz de troca; a placa amarela diz "SÃO PAULO · FUS-K" e o número do
   carro (FUS-K99 no 99). Os retrovisores vivos ficam no plano do próprio vidro. Câmera interna: `FUSCA_EYE` (5 cm mais para trás que antes, para os retrovisores caberem na tela).
+- **Preparado para correr** (pedido de um piloto da Copa Fusca, 03/10/2026; `fusca_acabamento.py` e `fusca_cabine.py`):
+  sem para-choques nem estribos (o escapamento sai só 2 cm atrás da traseira); rodas de corrida pretas com seis furos e
+  pneus baixos de 0,54 m (`fusca_acabamento.WHEEL_R`); carroceria 19 cm mais baixa que a do Fusca de rua, como na foto
+  de um Fusca da Copa que o usuário mandou (`fusca_cabine.LOWER`: o exportador baixa tudo menos as rodas, as caixas de
+  roda descem menos; soleiras a 7 cm do chão, teto a 1,345 m, arcos a ~1 cm dos pneus); a tampa do motor (uma peça só, das
+  venezianas até embaixo da placa, com a maçaneta e a placa) aberta 12° na dobradiça de cima, com duas hastes e o
+  motor à mostra (coifa, gerador, carburadores com filtros
+  cromados, cabeçotes, polias e correia; `cut_lid`/`open_lid`/`engine`); os quatro para-lamas
+  com material próprio, `Paralama_fusca`, que o jogo pinta na segunda cor da equipe (a da faixa do Opala: o 99 é preto
+  com para-lamas amarelos, como as plotagens da Copa Fusca). A emenda é cortada exatamente na malha onde o bojo do
+  para-lama encontra o resto da carroceria no campo implícito do V2 (nas pontas, contra o capô e a tampa do motor, com
+  os aventais retos no meio), com um friso preto por cima. Faróis embutidos no para-lama (`construir_farois`, no lugar do V2): inclinados 34° com
+  a frente do para-lama e recuados até o aro ficar quase rente à lataria (no V2 ficavam em pé, o topo 16 cm para fora),
+  o nicho cortado no eixo do farol e um contorno curto na cor do para-lama onde o aro ainda fica até 2 cm fora. Por dentro, como na
+  foto do piloto: a janela da porta vai 4,5 cm mais à frente e a coluna A fica fina, a barra da gaiola corre por cima
+  dela e pelo trilho do teto até o arco principal, a travessa do para-brisa recuou (não tapa mais o vidro), colunas e
+  testeira são de metal pintado (a divisa com o forro fica sob as barras) e as borrachas das janelas são mais finas.
+  O assento, a câmera interna e a do capô descem junto (`FUSCA_SEAT`, `FUSCA_EYE`, `FUSCA_HOOD_EYE`); a colisão
+  (`physics.js` `FUSCA_BODY`, `FUSCA_HULL`) vai do escapamento ao bico. Mecânica própria (`physics.js`
+  `FUSCA_MECHANICS`, teste `testar_mecanica_fusca.mjs`): 1600 a ar de ~93 cv, 820 kg, 167 km/h sozinho e limitador a
+  172 km/h no vácuo, pneus 5% mais aderentes (a IA freia e contorna com eles), traseira mansa na aceleração; cerca de
+  2:10 em Interlagos (o Opala, com o mesmo piloto da IA, 1:54).
 - Prévias: `blender --background --factory-startup --python modelo_3d/scripts/renderizar_fusca_jogo.py -- [glb] [pasta]`
-  renderiza as vistas da câmera interna e de fora (padrão em `previas/jogo/blender`, fora do git).
+  renderiza as vistas da câmera interna e de fora (padrão em `previas/jogo/blender`, fora do git; `--cor2` pinta os para-lamas).
 - No Modo Corrida, a aba Fusca da tela de carros põe o grid inteiro de Fusca, cada um nas cores e com o número do seu carro
   (`pista_interlagos/teste/fusca.js`, `immersive-visuals.js` `fuscaRival`), com a mecânica do Opala. Validação no
   navegador: `pista_interlagos/scripts/verificar_fusca.py`.

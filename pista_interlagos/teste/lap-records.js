@@ -28,6 +28,8 @@ export class AutomaticRecords {
  start(name){this.name=cleanName(name);this.signature='';this.retryAt=0;}
  update(mode,now=Date.now()){
   if(!this.name||!mode||mode.recordAssisted)return;
+  // The boards are the Opala's: a race in Fuscas (their own mechanics, physics.js FUSCA_MECHANICS) keeps none.
+  const model=mode.car?.mechanics?.name;if(model&&model!=='opala')return;
   const bestLap=mode.car.best;if(!validTime(bestLap)||mode.car.laps<1)return;
   // Race times only from the whole grid (fullGrid): a solo practice or a 1x1 starts at the front.
   const laps=mode.active?mode.storyLaps:mode.freeTotalLaps,completed=mode.fullGrid!==false&&laps===LAPS.standard&&mode.car.laps>=laps&&validTime(mode.finishTime);

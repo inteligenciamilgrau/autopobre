@@ -13,9 +13,10 @@ const G=9.81,ROAD_GRIP=1.24,GRASS_GRIP=.78,GRASS_ROLLING=.7;
 const PIT_TOLERANCE=2/3.6;
 // Road-wheel lock follows the grip limit: full input reaches the limit at any
 // speed and partial input turns proportionally, instead of saturating above ~70 km/h.
-export function steerLimit(speed){
+// grip: the car's tyres against the Opala's (its mechanics' grip).
+export function steerLimit(speed,grip=1){
  const kinematic=MAX_STEER/(1+speed/28),v2=speed*speed;
- return v2<1?kinematic:Math.min(kinematic,Math.atan(WHEELBASE*ROAD_GRIP*G*.94/v2)*1.3);
+ return v2<1?kinematic:Math.min(kinematic,Math.atan(WHEELBASE*ROAD_GRIP*grip*G*.94/v2)*1.3);
 }
 // Old Stock Opala 4.1 six, prepared: gameplay estimate, not a dyno sheet.
 // Engine rpm per km/h in each gear (final drive included); 5th tops out near 218 km/h.
@@ -28,6 +29,25 @@ const SHIFT_TIME=.16;
 const TORQUE_TO_ACCEL=.1191*.9/.316/1250;
 // Opala CdA of about 0.9 m2 at sea-level air density, over 1250 kg.
 const AERO_DRAG=.5*1.2*.9/1250;
+// A car's mechanics (its body's, OPALA_BODY or FUSCA_BODY): engine, gearbox, drag and tyres. The Opala's are the
+// numbers above, as every car always had them. The rigid body (mass and inertia for contacts, suspension, wheel
+// places, centre of mass) stays the Opala's for both; the Fusca's lightness is in its numbers per kilogram.
+// gears: engine rpm per km/h (1st to 5th); torque: [rpm, N m] at the crank; torqueToAccel: N m times rpm/(km/h)
+// to m/s2 (driveline 90%, over the car's mass: the tyre's size cancels out); drag: CdA times half the air's
+// density, over the mass; grip: the tyres against the Opala's (road grip, the steering's limit, the AI's corners
+// and brakes); rearGrip: the rear axle's extra margin; rearShare: the rear axle's share of the weight, for
+// traction; powerSlide: how much of the rear's side grip the throttle takes on a corner's exit; tyre: the tyre's
+// radius (the wheels' spin).
+export const OPALA_MECHANICS=Object.freeze({name:'opala',gears:GEAR_RPM_PER_KMH,torque:TORQUE_CURVE,torqueToAccel:TORQUE_TO_ACCEL,drag:AERO_DRAG,grip:1,rearGrip:1,rearShare:.47,powerSlide:.3,tyre:.31595});
+// A Copa Fusca's (the pilots: better than the Opalas in the corners, worse on the straights, about 170 km/h at
+// most and 2:10 a lap at Interlagos, no spins on the throttle): a prepared 1600 air-cooled flat four of about
+// 93 hp (69 kW at 6200 rpm), 820 kg with its driver, a Fusca's CdA (0.9 m2 with the engine lid open): 167 km/h
+// alone, the limiter at 172 km/h in a tow; stickier tyres for its weight, the engine's weight on the driven rear
+// wheels and a calmer tail under power. Gameplay estimates, not a dyno sheet (testar_mecanica_fusca.mjs).
+const FUSCA_MASS=820;
+export const FUSCA_MECHANICS=Object.freeze({name:'fusca',gears:Object.freeze([0,118,82,62,49,40.8]),
+ torque:Object.freeze([[0,80],[1000,89],[2500,105],[4000,117],[4500,120],[5500,116],[6200,107],[7000,89],[7400,0]]),
+ torqueToAccel:.9/2.6526/FUSCA_MASS,drag:.5*1.2*.9/FUSCA_MASS,grip:1.05,rearGrip:1.04,rearShare:.58,powerSlide:.1,tyre:.27});
 // --- Rigid body. The origin is the centre of mass, 0.52 m above the ground,
 // 1.55 m behind the front axle and 1.117 m ahead of the rear axle.
 export const CG_HEIGHT=.52;
@@ -50,21 +70,21 @@ export const SUSPENSION_WHEELS=Object.freeze([[FRONT_AXLE,HALF_TRACK],[FRONT_AXL
 // shoulders, beltline and roof touch only when the car is upset.
 export const HULL=[[2.25,.75,-.28],[2.25,-.75,-.28],[-2.05,.8,-.27],[-2.05,-.8,-.27],[.2,.93,-.34],[.2,-.93,-.34],[1,0,-.36],[0,0,-.36],[-1.4,0,-.41],
  [2.42,.7,0],[2.42,-.7,0],[-2.35,.8,-.1],[-2.35,-.8,-.1],[2.3,.85,.28],[2.3,-.85,.28],[-2.3,.85,.28],[-2.3,-.85,.28],[.2,.95,.4],[.2,-.95,.4],[.35,.66,.86],[.35,-.66,.86],[-1.05,.66,.86],[-1.05,-.66,.86]];
-// The Fusca's shell (fusca.js, modelo_3d/fusca_v2), measured on its game model as HULL on the Opala's, in the
-// same order: the low nine (the bumper guards' feet front and rear, the running boards, the floor and the
-// exhaust's tips, 25 to 37 cm off the ground), then the bumpers, the fenders' tops by the lamps, the
-// beltline, the roof's edges and the top of its dome.
-export const FUSCA_HULL=[[2.15,.45,-.16],[2.15,-.45,-.16],[-1.86,.45,-.15],[-1.86,-.45,-.15],[.1,.74,-.25],[.1,-.74,-.25],[1,0,-.27],[0,0,-.27],[-1.82,0,-.25],
- [2.1,.55,0],[2.1,-.55,0],[-1.8,.55,-.05],[-1.8,-.55,-.05],[1.85,.55,.25],[1.85,-.55,.25],[-1.5,.58,.2],[-1.5,-.58,.2],[.2,.7,.38],[.2,-.7,.38],[.45,.5,.87],[.45,-.5,.87],[-.75,.5,.87],[-.75,-.5,.87],[-.1,0,1.01]];
-// The body a car meets the world with; the mechanics (mass, engine, tyres, suspension) are the Opala's for
-// both. Its plan, round the centre of mass: halfLength, halfWidth and `ahead` (the plan's centre ahead of the
+// The Fusca's shell (fusca.js, modelo_3d/fusca_v2: a race Fusca, its body 19 cm lower than the street car's, no
+// bumpers nor running boards), measured on its game model as HULL on the Opala's, in the same order: the low nine
+// (the aprons' corners front and rear, the sills, the floor and the exhaust's tips, 7 to 13 cm off the ground),
+// then the nose and the tail, the fenders' tops by the lamps, the beltline, the roof's edges and the top of its dome.
+export const FUSCA_HULL=[[1.95,.45,-.41],[1.95,-.45,-.41],[-1.67,.45,-.39],[-1.67,-.45,-.39],[.1,.65,-.45],[.1,-.65,-.45],[1,0,-.45],[0,0,-.45],[-1.74,0,-.43],
+ [2,.3,-.24],[2,-.3,-.24],[-1.72,.4,-.29],[-1.72,-.4,-.29],[1.85,.55,.045],[1.85,-.55,.045],[-1.5,.58,-.045],[-1.5,-.58,-.045],[.2,.65,.19],[.2,-.65,.19],[.45,.5,.66],[.45,-.5,.66],[-.75,.5,.655],[-.75,-.5,.655],[-.1,0,.825]];
+// The body a car meets the world with, and its mechanics (OPALA_MECHANICS, FUSCA_MECHANICS). Its plan, round the centre of mass: halfLength, halfWidth and `ahead` (the plan's centre ahead of the
 // centre of mass) between cars (race-field.js); the same box with `wallAhead` against the guardrails and the
 // pit walls; front, rear and halfWidth against tree trunks and people. Its shell (hull) meets the ground and
 // the water. The Opala's numbers are the ones its contacts always used: between cars the box sat 8 cm ahead,
 // against the walls round the centre of mass, and trunks and people met its measured ends. The Fusca's plan
-// runs from the rear bumper guards to the front ones (-1.86 to 2.164 m) and across its fenders (0.77 m).
-export const OPALA_BODY=Object.freeze({name:'opala',halfLength:2.38,halfWidth:.93,ahead:.08,wallAhead:0,front:2.42,rear:2.35,hull:HULL});
-export const FUSCA_BODY=Object.freeze({name:'fusca',halfLength:2.012,halfWidth:.77,ahead:.152,wallAhead:.152,front:2.164,rear:1.86,hull:FUSCA_HULL});
+// runs from the foot of its open engine lid to the nose (-1.793 to 2.021 m; it races without bumpers) and across its
+// fenders (0.77 m).
+export const OPALA_BODY=Object.freeze({name:'opala',halfLength:2.38,halfWidth:.93,ahead:.08,wallAhead:0,front:2.42,rear:2.35,hull:HULL,mechanics:OPALA_MECHANICS});
+export const FUSCA_BODY=Object.freeze({name:'fusca',halfLength:1.907,halfWidth:.77,ahead:.114,wallAhead:.114,front:2.021,rear:1.793,hull:FUSCA_HULL,mechanics:FUSCA_MECHANICS});
 // The underbody skids over grass and soil; bodywork and roof scrape harder.
 const LOW_HULL=9,UNDERBODY_FRICTION=.3,HULL_FRICTION=.5;
 // Handling balance: the front reaches the limit first; the rear keeps a reserve
@@ -81,8 +101,8 @@ const slideGrip=(slip,along,drop)=>1-drop*smooth((Math.atan2(Math.abs(slip),Math
 // Soil piles up against a tyre sliding sideways across it: a moderate slide
 // ploughs to a stop sooner, and a fast one can trip the car over.
 const trip=slip=>1+.3*smooth((Math.abs(slip)-2)/6)+1.15*smooth((Math.abs(slip)-10)/12);
-export function engineTorque(rpm){
- for(let i=1;i<TORQUE_CURVE.length;i++)if(rpm<=TORQUE_CURVE[i][0]){const [r0,t0]=TORQUE_CURVE[i-1],[r1,t1]=TORQUE_CURVE[i];return t0+(t1-t0)*(rpm-r0)/(r1-r0);}
+export function engineTorque(rpm,curve=TORQUE_CURVE){
+ for(let i=1;i<curve.length;i++)if(rpm<=curve[i][0]){const [r0,t0]=curve[i-1],[r1,t1]=curve[i];return t0+(t1-t0)*(rpm-r0)/(r1-r0);}
  return 0;
 }
 export const GUARDRAIL_CLEARANCE=5;
@@ -123,8 +143,10 @@ function bodyAxes(heading,pitch,roll,axes){
 const renderAxes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};
 export class TestCar {
  constructor(data){this.data=data;this.a=data.samples;this.n=this.a.length;this.pitGeo=pitGeometry(data);this.axes={f:[1,0,0],l:[0,1,0],u:[0,0,1],j:[0,1,0]};this.body=OPALA_BODY;this.reset();}
- // The body it meets the world with (OPALA_BODY, FUSCA_BODY); the next reset or settle seats it on its own shell.
+ // The body it meets the world with (OPALA_BODY, FUSCA_BODY), with its mechanics; the next reset or settle seats
+ // it on its own shell.
  setBody(body){if(body!==this.body){this.body=body;this.shell=null;}return this;}
+ get mechanics(){return this.body.mechanics??OPALA_MECHANICS;}
  // The grid spot: back metres before the line, lane metres across (race-roster.js playerGridSlot).
  resetGrid({back=GRID_START_BACK,lane=0}={}){const target=this.data.meta.reconstructed_xy_m-back;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));if(lane){this.x+=this.surface.lx*lane;this.y+=this.surface.ly*lane;this.settle();}this.awaitingStart=true;}
  reset(index=0){this.awaitingStart=false;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.shifts=0;this.rightings=0;this.rightedAt=null;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.beforeCross=null;this.recover(index);}
@@ -236,15 +258,15 @@ export class TestCar {
   if(!(Math.hypot(this.x-this.stepX,this.y-this.stepY)<.5))this.settle();
   const p=this.surface,oldX=this.x,oldY=this.y;
   const c=Math.cos(this.heading),s=Math.sin(this.heading),v=this.vx*c+this.vy*s,lat=-this.vx*s+this.vy*c,speed=Math.hypot(this.vx,this.vy);
-  const condition=this.condition?.factors,grounded=this.wheelsDown>0;
-  const loose=!p.onRoad,mu=(p.onRoad?(input.handbrake?.99:ROAD_GRIP):GRASS_GRIP)*(condition?.grip??1);
+  const condition=this.condition?.factors,grounded=this.wheelsDown>0,m=this.mechanics;
+  const loose=!p.onRoad,mu=(p.onRoad?(input.handbrake?.99:ROAD_GRIP*m.grip):GRASS_GRIP)*(condition?.grip??1);
   // Smooth the driver's input, then scale it to the lock available at this speed. A racing wheel
   // (input.wheel) is already where the driver's hands put it: it turns the wheels at once.
   const command=clamp(input.left-input.right,-1,1),inputResponse=command*(this.steerInput??0)<0?20:12;
   this.steerInput=input.wheel?command:(this.steerInput??0)+(command-(this.steerInput??0))*(1-Math.exp(-dt*inputResponse));
   // With the tail out, steering against the slide gets extra lock up to the
   // slide angle, and castor already turns the wheels part of the way.
-  const drift=v>3?Math.atan2(lat-REAR_AXLE*this.yaw,v):0,baseSteer=this.steerInput*steerLimit(speed)*(condition?.steering??1);
+  const drift=v>3?Math.atan2(lat-REAR_AXLE*this.yaw,v):0,baseSteer=this.steerInput*steerLimit(speed,m.grip)*(condition?.steering??1);
   const counterSteer=this.steerInput*drift>0?this.steerInput*Math.abs(drift)*COUNTER_RANGE:0;
   this.steer=clamp(baseSteer+counterSteer+drift*CASTER_ALIGN,-MAX_STEER,MAX_STEER);
   // Cockpit wheel keeps the familiar hand travel: road-wheel angle is small at speed.
@@ -268,11 +290,11 @@ export class TestCar {
   else{
    if(!(this.gear>0))this.gear=1;
    if(this.shiftTimer===0){
-    if(this.gear<5&&kmh*GEAR_RPM_PER_KMH[this.gear]>SHIFT_UP_RPM){this.gear++;this.shiftTimer=SHIFT_TIME;this.shifts=(this.shifts??0)+1;}
-    else if(this.gear>1&&kmh*GEAR_RPM_PER_KMH[this.gear]<SHIFT_DOWN_RPM+(input.brake>.3?700:0)&&kmh*GEAR_RPM_PER_KMH[this.gear-1]<SHIFT_UP_RPM-400){this.gear--;this.shiftTimer=SHIFT_TIME*.6;this.shifts=(this.shifts??0)+1;}
+    if(this.gear<5&&kmh*m.gears[this.gear]>SHIFT_UP_RPM){this.gear++;this.shiftTimer=SHIFT_TIME;this.shifts=(this.shifts??0)+1;}
+    else if(this.gear>1&&kmh*m.gears[this.gear]<SHIFT_DOWN_RPM+(input.brake>.3?700:0)&&kmh*m.gears[this.gear-1]<SHIFT_UP_RPM-400){this.gear--;this.shiftTimer=SHIFT_TIME*.6;this.shifts=(this.shifts??0)+1;}
    }
   }
-  const ratio=GEAR_RPM_PER_KMH[Math.max(1,this.gear)],wheelRpm=kmh*ratio;
+  const ratio=m.gears[Math.max(1,this.gear)],wheelRpm=kmh*ratio;
   // The clutch slips at launch, so the engine can sit in its torque band from rest.
   const engineRpm=Math.max(wheelRpm,this.gear===1?IDLE_RPM+input.throttle*2600:IDLE_RPM);
   // A wheel's clutch pedal (manual only): the drive fades out from a quarter of its travel to 85%;
@@ -280,7 +302,7 @@ export class TestCar {
   const engaged=!manual||input.reverse?1:this.gear===0?0:clamp((.85-(input.clutch||0))/.6,0,1);
   let drive=0;
   if(this.gear>0){
-   drive=input.throttle*engineTorque(Math.min(engineRpm,REDLINE_RPM))*ratio*TORQUE_TO_ACCEL*power;
+   drive=input.throttle*engineTorque(Math.min(engineRpm,REDLINE_RPM),m.torque)*ratio*m.torqueToAccel*power;
    if(wheelRpm>=REDLINE_RPM)drive=0;
    if(this.shiftTimer>0)drive*=.12;
    drive*=engaged;
@@ -296,7 +318,7 @@ export class TestCar {
   // traction limiter keeps the driven tyres just past the peak of grip.
   // Unloaded rear tyres (a crest, a jump) have nothing to push against; climbing
   // a slope loads them and they push harder. The squat under power is in rearShare.
-  const rearGrip=clamp(this.rearLoad/(1+.034*Math.max(0,drive)),0,1.35),rearShare=.47+clamp(drive,0,8)*.5/(G*WHEELBASE),traction=mu*G*rearShare*1.04*rearGrip;
+  const rearGrip=clamp(this.rearLoad/(1+.034*Math.max(0,drive)),0,1.35),rearShare=m.rearShare+clamp(drive,0,8)*.5/(G*WHEELBASE),traction=mu*G*rearShare*1.04*rearGrip;
   let wheelspin=0;
   // Loose ground still takes some push from spinning tyres.
   if(!burning&&drive>traction){wheelspin=drive-traction;drive=traction+(p.onRoad?0:wheelspin*.55*rearGrip);}
@@ -319,7 +341,7 @@ export class TestCar {
   // In soil a driven tyre digs its tread in and keeps most of its side bite.
   const powerSlide=p.onRoad&&!input.handbrake&&traction>0?clamp((drive/traction-.86)/.14,0,1)*clamp((speed-4)/6,0,1):0;
   const grip={front:mu*Math.sqrt(1-frontUse*frontUse)*FRONT_BALANCE,
-   rear:mu*Math.sqrt(1-rearUse*rearUse)*(loose?LOOSE_REAR_BALANCE:REAR_BALANCE)*(input.handbrake&&!burning?.45:1)*(1-.3*powerSlide)*(1-(loose?.15:.45)*clamp(wheelspin/4,0,1))*(.8+.2*(condition?.stability??1)),loose};
+   rear:mu*Math.sqrt(1-rearUse*rearUse)*(loose?LOOSE_REAR_BALANCE:REAR_BALANCE*m.rearGrip)*(input.handbrake&&!burning?.45:1)*(1-m.powerSlide*powerSlide)*(1-(loose?.15:.45)*clamp(wheelspin/4,0,1))*(.8+.2*(condition?.stability??1)),loose};
   if(burning){
    // The stunt assist steers the rotation directly, as a sliding pivot on the front tyres.
    const targetYaw=input.brake?0:turn*1.35*this.burnout;
@@ -328,7 +350,7 @@ export class TestCar {
   // --- Rigid-body integration: finer sub-steps while the body is upset or airborne.
   const wild=this.wheelsDown<4||this.hullContact||this.upright<.9,count=dt>0?Math.max(1,Math.ceil(dt*(wild?360:120)-1e-6)):0,h=dt/count;
   // Slipstream: RaceField sets car.draft (0-0.5) for one step when this car runs in a wake.
-  const forces={dt,drive,rolling,engineBrake,brakeDecel,burning,grip,drag:AERO_DRAG*(1-clamp(this.draft||0,0,.5)),
+  const forces={dt,drive,rolling,engineBrake,brakeDecel,burning,grip,drag:m.drag*(1-clamp(this.draft||0,0,.5)),
    // Bracing at rest, then a tight powered circle that fits the asphalt width.
    crawl:input.brake?0:Math.abs(turn)*2*this.burnout,swing:!input.brake,braced:Math.abs(turn)<.02&&speed<.8,
    hold:grounded&&speed<.3&&!!(input.brake||input.handbrake&&!burning)};
@@ -368,8 +390,8 @@ export class TestCar {
   }
   // Tree trunks (tree-contact.js; main.js gives them to the player's car).
   if(this.posts){const hit=this.posts.collide(this);if(hit)this.wallImpactSpeed=Math.max(this.wallImpactSpeed,hit);}
-  this.distance+=speed*dt;this.clock+=dt;this.spin+=v*dt/.31595;
-  this.rearSpin=(this.rearSpin??0)+(input.handbrake&&!burning?0:v+this.rearSlipSpeed)*dt/.31595;
+  this.distance+=speed*dt;this.clock+=dt;this.spin+=v*dt/m.tyre;
+  this.rearSpin=(this.rearSpin??0)+(input.handbrake&&!burning?0:v+this.rearSlipSpeed)*dt/m.tyre;
   // Upside down or on its side and at rest: after a pause the marshals right it.
   const resting=speed<1.5&&Math.abs(this.vz)<1.5&&Math.abs(this.yaw)+Math.abs(this.rollRate)+Math.abs(this.pitchRate)<1.2;
   if(this.upright<.45&&resting)this.overturned+=dt;else if(this.upright>.8)this.overturned=0;

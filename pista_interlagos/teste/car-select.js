@@ -8,21 +8,21 @@ import {fuscaCar,fuscaDispose,FUSCA_PROFILE} from './fusca.js';
 // shows through the screen's open middle (carros.css); the car is the race model, painted as the rivals
 // are (ImmersiveVisuals.rivalCar, fuscaCar), so it is what races.
 // Card icon: the car's side view (the distant rivals' model, immersive-visuals.js FAR_PROFILE, or the
-// Fusca's, FUSCA_PROFILE), metres to a 100×34 box, nose to the right; the stripe along the waist, the
-// number on the door. The Opala's windows sit a little inside the body's outline (the 3D ones are wider
+// Fusca's, FUSCA_PROFILE), metres to a 100×34 box, nose to the right; in the second colour the Opala's stripe
+// along the waist or the Fusca's fenders (trim), the number on the door. The Opala's windows sit a little inside the body's outline (the 3D ones are wider
 // than the body instead).
 const P=pts=>pts.map(([x,y])=>`${((x+2.5)*20).toFixed(1)},${((1.55-y)*20).toFixed(1)}`).join(' ');
 const wheelSpots=profile=>profile.axles.map(x=>[(x+2.5)*20,(1.55-profile.wheel)*20,profile.wheel*23.4]);
 const ICONS={
- opala:{body:P(FAR_PROFILE.body),glass:P([[.86,.9],[.08,1.34],[-.95,1.34],[-1.62,.98]]),stripe:P([[-2.38,.56],[2.46,.56],[2.46,.67],[-2.37,.67]]),wheels:wheelSpots(FAR_PROFILE),number:[57,22]},
- fusca:{body:P(FUSCA_PROFILE.body),glass:P(FUSCA_PROFILE.glass),stripe:P(FUSCA_PROFILE.stripe),wheels:wheelSpots(FUSCA_PROFILE),number:[(FUSCA_PROFILE.number[0]+2.5)*20,(1.55-FUSCA_PROFILE.number[1])*20+3.5]}};
+ opala:{body:P(FAR_PROFILE.body),glass:P([[.86,.9],[.08,1.34],[-.95,1.34],[-1.62,.98]]),trim:[P([[-2.38,.56],[2.46,.56],[2.46,.67],[-2.37,.67]])],wheels:wheelSpots(FAR_PROFILE),number:[57,22]},
+ fusca:{body:P(FUSCA_PROFILE.body),glass:P(FUSCA_PROFILE.glass),trim:FUSCA_PROFILE.fenders.map(P),wheels:wheelSpots(FUSCA_PROFILE),number:[(FUSCA_PROFILE.number[0]+2.5)*20,(1.55-FUSCA_PROFILE.number[1])*20+3.5]}};
 // Built as elements, not markup: the number goes in as text and the colours as attributes, whatever
 // the entry holds.
 const svgNode=(tag,attrs)=>{const n=document.createElementNS('http://www.w3.org/2000/svg',tag);for(const [k,v] of Object.entries(attrs))n.setAttribute(k,v);return n;};
 function carIcon(entry,model){
  const dark=luminance(entry.color)>.55,icon=ICONS[model],f=v=>v.toFixed(1);
  const svg=svgNode('svg',{viewBox:'0 0 100 34','aria-hidden':'true'});
- svg.append(svgNode('polygon',{points:icon.body,fill:css(entry.color)}),svgNode('polygon',{points:icon.stripe,fill:css(entry.stripe)}),svgNode('polygon',{points:icon.glass,fill:'#17232a'}));
+ svg.append(svgNode('polygon',{points:icon.body,fill:css(entry.color)}),...icon.trim.map(points=>svgNode('polygon',{points,fill:css(entry.stripe)})),svgNode('polygon',{points:icon.glass,fill:'#17232a'}));
  for(const [x,y,r] of icon.wheels)svg.append(svgNode('circle',{cx:f(x),cy:f(y),r:f(r),fill:'#0d0f0f'}),svgNode('circle',{cx:f(x),cy:f(y),r:f(r*.42),fill:'#8d9396'}));
  const number=svgNode('text',{x:f(icon.number[0]),y:f(icon.number[1]),'text-anchor':'middle','font-family':'Arial,sans-serif','font-size':'10.5','font-weight':'900','font-style':'italic',fill:dark?'#141716':'#f4f3ee',stroke:dark?'#f4f3ee':'#141716','stroke-width':'.7','paint-order':'stroke'});
  number.textContent=entry.number;svg.append(number);return svg;
@@ -164,11 +164,11 @@ export class CarSelect {
   }
   $('carNumber').textContent='#'+entry.number;$('carNumber').style.setProperty('--body',css(entry.color));$('carNumber').style.setProperty('--stripe',css(entry.stripe));
   $('carName').textContent=own?`${name} 99 · Auto-Pobre Racing`:`${name} ${entry.number} · ${entry.shortName}`;
-  $('carDetail').textContent=own&&fusca?`O Fusca do Stevan Gaipo: preto com a faixa amarela do 99, sem os patrocinadores do Opala. ${entry.rank}º no campeonato (${entry.points} pts).`
+  $('carDetail').textContent=own&&fusca?`O Fusca do Stevan Gaipo: preto com os para-lamas amarelos (o amarelo da faixa do Opala 99), sem os patrocinadores. ${entry.rank}º no campeonato (${entry.points} pts).`
    :own?`O carro do Stevan Gaipo e do Edu Neves, da vaquinha ao grid. ${entry.rank}º no campeonato (${entry.points} pts).`
    :fusca?`Nas cores do carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele; o Stevan Gaipo vai de Fusca 99.`
    :`Carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele${this.room?'':'; o Stevan Gaipo vai de Opala 99'}.`;
-  if(!this.room)this.note.textContent=fusca?'De Fusca, o grid inteiro corre de Fusca, cada um com as cores e o número do seu carro e a mesma mecânica dos Opalas. O piloto do carro escolhido fica de fora e o Stevan Gaipo corre com o Fusca 99.'
+  if(!this.room)this.note.textContent=fusca?'De Fusca, o grid inteiro corre de Fusca de corrida, cada um com as cores do seu carro (a segunda nos para-lamas, como na Copa Fusca) e o número: menos motor que os Opalas (no máximo uns 170 km/h), melhor nas curvas e mais manso na saída delas. O piloto do carro escolhido fica de fora e o Stevan Gaipo corre com o Fusca 99.'
    :'Todos correm com o mesmo Opala: muda a pintura e o número. O piloto do carro escolhido fica de fora e o Stevan Gaipo corre com o 99.';
   // In a room the note says how the cars are shared, and what became of the last choice.
   if(this.room)this.room.textContent=this.notice||(this.asked?`Pedindo o #${this.asked} ao anfitrião… Vale a partir da próxima largada.`:

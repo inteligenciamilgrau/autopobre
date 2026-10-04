@@ -137,7 +137,7 @@ export async function createDriver(cockpit){
  let pose={lean:0,pitch:0,lateral:0},controlPose=choreography.info(),errors=[],legErrors=[];
  function update(car,dt,{command,impact=0,phoneArrived=false}={}){
   const speed=car.vx*Math.cos(car.heading)+car.vy*Math.sin(car.heading);
-  controlPose=choreography.update({throttle:command?.throttle??0,brake:command?.brake??0,handbrake:command?.handbrake??0,gear:car.gear,kmh:speed*3.6,manual:!!car.manualGear,clutch:command?.clutch??0},dt);
+  controlPose=choreography.update({throttle:command?.throttle??0,brake:command?.brake??0,handbrake:command?.handbrake??0,gear:car.gear,kmh:speed*3.6,manual:!!car.manualGear,clutch:command?.clutch??0,gears:car.mechanics?.gears},dt);
   controls.apply(controlPose);
   pose=motion.update(car,dt,{look:roadAhead(car),wheel:wheelTurn.rotation.z,reach:handState.away,rough:car.surface&&!car.surface.onRoad&&car.wheelsDown!==0?1:0,impact,phoneArrived});
   torso.rotation.set(pose.lean,pose.twist,pose.pitch);chest.scale.set(1+pose.breath*.014,1,1+pose.breath*.006);

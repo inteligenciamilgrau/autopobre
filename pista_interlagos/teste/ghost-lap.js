@@ -117,11 +117,14 @@ export function decodeGhost(entry){
  }catch{return null;}
 }
 
-// The saved laps: one per pilot (any case), circuit and mode, as the records are.
+// The saved laps: one per pilot (any case), circuit, mode and car (the Opala's laps were saved before the Fusca
+// had mechanics of its own: a lap without a car is an Opala's).
 const pilotKey=name=>cleanName(name).toLocaleLowerCase('pt-BR');
-const sameGhost=(g,{circuit,mode,pilot})=>g.circuit===circuit&&g.mode===mode&&pilotKey(g.pilot)===pilotKey(pilot);
+export const GHOST_CARS=Object.freeze(['opala','fusca']);
+const carOf=g=>g.car??'opala';
+const sameGhost=(g,key)=>g.circuit===key.circuit&&g.mode===key.mode&&carOf(g)===carOf(key)&&pilotKey(g.pilot)===pilotKey(key.pilot);
 export function readGhosts(storage){
- try{const list=JSON.parse(storage?.getItem(GHOST_KEY)||'[]');return Array.isArray(list)?list.filter(g=>g&&typeof g==='object'&&Object.hasOwn(CIRCUITS,g.circuit)&&MODES.includes(g.mode)&&typeof g.pilot==='string'&&!!cleanName(g.pilot)&&Number.isFinite(g.time)&&typeof g.data==='string'):[];}
+ try{const list=JSON.parse(storage?.getItem(GHOST_KEY)||'[]');return Array.isArray(list)?list.filter(g=>g&&typeof g==='object'&&Object.hasOwn(CIRCUITS,g.circuit)&&MODES.includes(g.mode)&&GHOST_CARS.includes(carOf(g))&&typeof g.pilot==='string'&&!!cleanName(g.pilot)&&Number.isFinite(g.time)&&typeof g.data==='string'):[];}
  catch{return [];}
 }
 // The pilot's ghost here, ready to replay (null: none saved, or unreadable). Its name comes out
@@ -133,12 +136,12 @@ export function loadGhost(storage,key){
 // Keeps the lap when it is the pilot's first here or beats his ghost. The newest GHOST_LIMIT laps
 // stay; when the browser's storage is full the oldest go first, until it fits. Returns the saved
 // entry, or null (slower, not storable, or no room even alone).
-export function saveGhost(storage,{circuit,mode,pilot,lap},now=new Date()){
- const name=cleanName(pilot);if(!storage||!name||!Object.hasOwn(CIRCUITS,circuit)||!MODES.includes(mode))return null;
- const key={circuit,mode,pilot:name},list=readGhosts(storage),old=list.find(g=>sameGhost(g,key));
+export function saveGhost(storage,{circuit,mode,car='opala',pilot,lap},now=new Date()){
+ const name=cleanName(pilot);if(!storage||!name||!Object.hasOwn(CIRCUITS,circuit)||!MODES.includes(mode)||!GHOST_CARS.includes(car))return null;
+ const key={circuit,mode,car,pilot:name},list=readGhosts(storage),old=list.find(g=>sameGhost(g,key));
  if(old&&lap.time>=old.time&&decodeGhost(old))return null;
  const encoded=encodeGhost(lap);if(!encoded)return null;
- const entry={circuit,mode,pilot:name,date:now.toISOString(),...encoded};
+ const entry={circuit,mode,car,pilot:name,date:now.toISOString(),...encoded};
  let others=list.filter(g=>g!==old).sort((a,b)=>String(b.date??'').localeCompare(String(a.date??''))).slice(0,GHOST_LIMIT-1);
  for(;;){
   try{storage.setItem(GHOST_KEY,JSON.stringify([entry,...others]));return entry;}

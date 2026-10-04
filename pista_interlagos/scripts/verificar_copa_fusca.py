@@ -68,7 +68,7 @@ with sync_playwright() as p:
  rounds=page.locator('#championshipCalendar li');assert rounds.count()==11
  places=page.locator('#championshipCalendar li span').all_inner_texts();dates=page.locator('#championshipCalendar li small').all_inner_texts()
  assert places.count('Interlagos - SP')==6 and places[7]=='Goiânia - GO' and dates[0]=='21 e 22 FEV' and dates[-1]=='19 e 20 DEZ',(places,dates)
- assert page.inner_text('#championshipTitle')=='Temporada 2026, nas datas da Copa Fusca GT-Oil'
+ assert page.inner_text('#championshipTitle')=='Temporada 2026, nas datas da Copa Fusca Seineca'
  status=page.inner_text('#championshipStatus');assert status.startswith('11 etapas de Fusca'),status
  if not page.evaluate("import('./circuits.js').then(m=>Object.hasOwn(m.CIRCUITS,'goiania'))"):
   soon=page.locator('#championshipCalendar li.soon');assert soon.count()==1 and 'em breve' in soon.inner_text(),soon.all_inner_texts()

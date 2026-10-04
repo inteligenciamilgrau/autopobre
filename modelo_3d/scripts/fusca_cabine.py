@@ -17,14 +17,18 @@ Objects flagged "interno" are the player's only: the rivals (immersive-visuals.j
 import bpy,bmesh,math
 import numpy as np
 from mathutils import Vector,Matrix
-import criar_fusca_v2 as V2
+import criar_fusca_v2 as V2,medidas_fusca as MED
 
 OFFSET_X=.2165 # exportar_fusca_jogo.py: game x = OFFSET_X - y
+# The race car sits LOWER than criar_fusca_v2's street car (a Copa Fusca photo: smaller wheels, the sills a few cm off
+# the ground, the arches just over the tyres): the exporter brings everything but the wheels down by it, so a point of
+# the game's frame is that much higher in this one.
+LOWER=.19
 def game(x,y,z):
  """A point of the game's car frame (+X forward, +Y up, -Z the driver's side) in this frame."""
- return Vector((-z,OFFSET_X-x,y))
+ return Vector((-z,OFFSET_X-x,y+LOWER))
 # fusca.js FUSCA_SEAT plus cockpit.js's V06 drop: where the driver's group (with cockpit.js's controls) sits.
-SEAT=(.257,.113-.093,.06)
+SEAT=(.257,-.077-.093,.06)
 def opala(x,y,z):
  """A point of cockpit.js's frame (the Opala's controls, as the driver carries them) in this car."""
  return game(x+SEAT[0],y+SEAT[1],z+SEAT[2])
@@ -34,7 +38,7 @@ COLUMN=(opala(.368,.821,-.34),opala(.62,.719,-.34)) # the column's start behind 
 AXLE=opala(.755,.70,-.34) # the hanging pedals' axle (cockpit.js), clutch to throttle across x
 PEDALS=[opala(.755,.70,z).x for z in (-.46,-.35,-.248)]
 SHIFTER=opala(.095,.472,.02) # the H lever's base plate
-EYE=game(.057,1.20,.015) # main.js: cockpit.js eye + fusca.js FUSCA_EYE
+EYE=game(.057,1.01,.015) # main.js: cockpit.js eye + fusca.js FUSCA_EYE
 SKIN=.02 # criar_fusca_v2.casca_oca
 FLOOR=.312 # the cabin floor's top (the driver's heels rest at .332)
 
@@ -181,6 +185,8 @@ def build(sup,body,m):
  """Everything inside, in criar_fusca_v2's frame. Returns the new objects."""
  M=materials(m);cab=Cabin(sup);made=[]
  add=lambda o:(made.append(o),o)[1]
+ global BARS
+ BARS=pillar_bars(cab)
  recolor_shell(body,M)
  for o in headliner(cab,M):add(o)
  for o in dash(cab,M):add(o)
@@ -211,19 +217,51 @@ def poking_out(cab,objects,tolerance=.003):
   if worst>tolerance:out.append((o.name,worst))
  return out
 
+# The cage's A-pillar bars hug the pillars (from the cockpit each bar stands in front of its pillar, as in a race
+# Fusca), then run along the roof's edge over the door to the main hoop; the header bar crosses under the roof at
+# HEADER_Y, behind the windscreen's top, out of the way of the glass. The headliner covers the roof between them; the
+# pillars, the header and the doors' frames are bare metal, and the edge between the two hides under the bars.
+HEADER_Y=-.33
+def on_skin(cab,p,inset):
+ """The outer surface's point nearest p, moved inset along its inward normal."""
+ loc,n,_,_=cab.bvh.find_nearest(Vector(p));return loc-n*inset
+def pillar_bars(cab):
+ """{side: points} of each A-pillar bar's centre line, front to back (y growing): up from the footwell's front inside
+ the cowl, along the middle of the pillar (between the windscreen's edge and the door window's), then along the roof's
+ edge over the door window."""
+ inset=SKIN+CAGE_R+.004;bars={}
+ at=lambda pts,z:Vector([float(np.interp(z,[p.z for p in pts],[p[i] for p in pts])) for i in range(3)])
+ for s in (1,-1):
+  screen=sorted((cab.sup.topo(x,y)[0] for x,y in V2.densificar(MED.PLANTA_PARABRISA,.01,True) if s*x>.40 and -.58<y<-.405),key=lambda p:p.z)
+  window=sorted((cab.sup.lado(y,z,s)[0] for y,z in V2.densificar(MED.JAN_PORTA,.01,True) if y<-.25 and z>1.03),key=lambda p:p.z)
+  low=[cab.inside(Vector(p),SKIN+CAGE_R+.022) for p in ((s*.56,-.74,FLOOR+.005),(s*.60,-.70,.62),(s*.60,-.62,.86))];low[0].z=FLOOR+.005
+  pillar=[on_skin(cab,(at(screen,z)+at(window,z))/2,inset) for z in np.linspace(1.07,1.26,6)]
+  rail=[on_skin(cab,cab.sup.lado(float(y),1.405,s)[0],inset) for y in (-.26,-.14,0.,.14,.28,.42)]
+  bars[s]=low+pillar+rail
+ return bars
+BARS={}
+def along(path,y):
+ """The point of a path (y growing) at y."""
+ ys=[p.y for p in path];return Vector([float(np.interp(y,ys,[p[i] for p in path])) for i in range(3)])
+def under_bars(c):
+ """c (on the side walls, from the windscreen to the main hoop) lower round the cabin's axis than its A-pillar bar."""
+ b=along(BARS[1 if c.x>0 else -1],c.y);return math.atan2(c.z-.85,abs(c.x))<math.atan2(b.z-.85,abs(b.x))
+
 def recolor_shell(body,M):
- """The body's inner faces (criar_fusca_v2: the dark 'interior' slots): over the cabin and above the windows' sills
- the headliner (its cloth wraps the pillars, as a Fusca's does), the rest painted like the body, bare metal inside."""
+ """The body's inner faces (criar_fusca_v2: the dark 'interior' slots): the headliner over the roof between the cage's
+ bars, back to the rear window, the rest painted like the body, bare metal inside (the pillars and the header too, as
+ in a Fusca prepared to race)."""
  me=body.data;slots=[i for i,mt in enumerate(me.materials) if mt and mt.name=='Interior_Escuro']
  me.materials.append(M['liner']);liner=len(me.materials)-1;me.materials.append(M['painted']);paint=len(me.materials)-1
  for p in me.polygons:
   if p.material_index in slots:
    c,n=p.center,p.normal
-   # Its edge hides behind the dash at the front, behind the door cards' and side panels' tops at the sides (the
-   # windows' frames are lined too) and under the parcel shelf at the back (the lining covers the wall under the
-   # rear window): the faces' steps along it never show.
+   # Its edge hides under the header bar and the A-pillar bars, under the main hoop, behind the side panels' tops
+   # and under the parcel shelf at the back (the lining covers the wall under the rear window): the faces' steps
+   # along it never show.
    lined=c.z>.97 if c.y<.98 else c.z>.81
-   p.material_index=liner if lined and -.62<c.y<1.32 else paint
+   bare=c.y<HEADER_Y or (c.y<MAIN_Y and under_bars(c))
+   p.material_index=liner if lined and -.62<c.y<1.32 and not bare else paint
 
 def headliner(cab,M):
  """Bows under the lined roof (the headliner's seams), sun visors on the header and the dome light."""
@@ -232,11 +270,11 @@ def headliner(cab,M):
   pts=[]
   for x in np.linspace(-.62,.62,25):
    p,n=cab.roof(float(x),y,.002)
-   if p is not None and n.z<-.45 and p.z>1.375:pts.append(p)
+   if p is not None and n.z<-.45 and p.z>1.375 and not (y<MAIN_Y and under_bars(p)):pts.append(p)
   if len(pts)>4:out.append(pipe(f'Forro_costura_{k}',pts,.0055,M['liner'],8))
- # Sun visors folded up against the lining, hinged on the header over each seat.
+ # Sun visors folded up against the lining, hinged behind the cage's header bar over each seat.
  for s in (1,-1):
-  p,n=cab.roof(s*.27,-.30,.03)
+  p,n=cab.roof(s*.27,-.22,.03)
   v=box(f'Quebra_sol_{"E" if s>0 else "D"}',p,(.30,.15,.014),M['liner'],.006,z_axis=-n,up=Vector((0,-1,0)))
   bpy.context.view_layer.update();W=v.matrix_world
   out.append(v);out.append(pipe(f'Quebra_sol_eixo_{s}',[W@Vector((-.13,.078,0)),W@Vector((.13,.078,0))],.005,M['chrome'],8,interno=True))
@@ -500,12 +538,11 @@ def cage(cab,M):
  hoop=[Vector((foot,MAIN_Y,FLOOR+.005))]+hoop+[Vector((-foot,MAIN_Y,FLOOR+.005))]
  out.append(pipe('Gaiola_arco_principal',hoop,CAGE_R,M['cage'],14,smooth=True,step=.04))
  near=lambda pts,**k:min(pts,key=lambda p:sum((getattr(p,a)-v)**2 for a,v in k.items()))
- corner={s:near(hoop,x=s*.40,z=1.45) for s in (1,-1)}
+ corner={s:near(hoop,x=BARS[s][-1].x,z=BARS[s][-1].z) for s in (1,-1)}
  for s in (1,-1):
   side='E' if s>0 else 'D'
-  # A-pillar bar: from the front of the footwell up the pillar, over the door along the roof to the hoop.
-  guide=[(s*.56,-.74,FLOOR+.005),(s*.60,-.70,.62),(s*.60,-.62,.86),(s*.57,-.57,1.0),(s*.53,-.49,1.14),(s*.47,-.40,1.28),(s*.43,-.30,1.38),(s*.41,-.12,1.43),(s*.40,.15,1.45)]
-  pts=[cab.inside(p,margin) for p in spline(guide,.04)];pts[0]=Vector((pts[0].x,pts[0].y,FLOOR+.005))
+  # A-pillar bar (pillar_bars): from the front of the footwell up the pillar, over the door along the roof to the hoop.
+  pts=spline(BARS[s],.04)
   pts.append(corner[s]);out.append(pipe('Gaiola_coluna_A_'+side,pts,CAGE_R,M['cage'],14,smooth=True,step=.04))
   if s>0:
    # Foam on the driver's side over his helmet.
@@ -519,8 +556,10 @@ def cage(cab,M):
   end=cab.inside(Vector((s*.50,.97,.81)),margin)
   out.append(pipe('Gaiola_escora_'+side,[corner[s],cab.inside(Vector((s*.46,.75,1.18)),margin),end],CAGE_R,M['cage'],12,smooth=True,step=.05))
   out.append(box('Gaiola_sapata_'+side,(pts[0].x,pts[0].y,FLOOR+.003),(.07,.07,.006),M['cage'],.002,interno=True))
- # Header bar across the top of the windscreen (it carries the rear-view mirror), the diagonal and the harness bar.
- header=[cab.inside(Vector((x,-.36,1.42)),margin) for x in np.linspace(-.44,.44,9)]
+ # Header bar across under the roof behind the windscreen's top, from one A-pillar bar to the other (it carries the
+ # rear-view mirror), the diagonal and the harness bar.
+ ends=[along(BARS[s],HEADER_Y) for s in (-1,1)];inset=SKIN+CAGE_R+.004
+ header=[ends[0]]+[on_skin(cab,cab.sup.topo(float(x),HEADER_Y)[0],inset) for x in np.linspace(ends[0].x,ends[1].x,11)[1:-1] if abs(x)<ends[1].x-.06]+[ends[1]]
  global HEADER
  HEADER=header[len(header)//2]
  out.append(pipe('Gaiola_travessa_parabrisa',header,CAGE_R,M['cage'],12,smooth=True,step=.05))

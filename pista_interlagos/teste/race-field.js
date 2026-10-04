@@ -2,7 +2,8 @@ import {TestCar,clamp,wrap,steerLimit,WHEELBASE,OPALA_BODY} from './physics.js?v
 import {RIVAL_ROSTER,ACE_NUMBER,AI_LEVELS,gridSlot,playerGridSlot} from './race-roster.js';
 import {pitGeometry,wallContact,pitLane,curveloPitFrame,CURVELO_PIT} from './pit-lane.js';
 // Contacts between cars: each car's plan is its body's box (physics.js OPALA_BODY, FUSCA_BODY; a remote
-// car without one is an Opala). Mass and inertia are the Opala's for every body (the same mechanics).
+// car without one is an Opala). Mass and inertia are the Opala's for every body; engine and tyres are the body's
+// (physics.js OPALA_MECHANICS, FUSCA_MECHANICS): the drivers plan their corners and brakes on the car's grip.
 const MASS=1250,INERTIA=MASS*(4.76**2+1.86**2)/12;
 const plan=c=>c.body??OPALA_BODY;
 const axes=c=>[[Math.cos(c.heading),Math.sin(c.heading)],[-Math.sin(c.heading),Math.cos(c.heading)]];
@@ -376,7 +377,8 @@ export class RaceField {
    // The ace is already at the limit: a move asks only a little more of him, and a move round the
    // outside of the corner ahead leaves him a margin instead (the car drifts out as it gets there).
    const outside=st.clean&&r.mode==='pass'&&!!bend&&r.passSide===-bend.dir,pushGrip=st.clean?(outside?0:.006):.02,pushBrake=st.clean?.025:.05;
-   const grip=m?m.grip:st.cornerGrip*r.form*(1+wobble)*(1+pushGrip*push)*(outside?.97:1),braking=m?m.brake:st.braking*(1+1.5*wobble)*(1+pushBrake*push)*(st.clean?r.pace:1);
+   // The style's grip and braking are an Opala's: a car with stickier tyres (physics.js mechanics) corners and brakes harder.
+   const tyres=c.mechanics?.grip??1,grip=(m?m.grip:st.cornerGrip*r.form*(1+wobble)*(1+pushGrip*push)*(outside?.97:1))*tyres,braking=(m?m.brake:st.braking*(1+1.5*wobble)*(1+pushBrake*push)*(st.clean?r.pace:1))*tyres;
    // Bend of the planned path at sample k. A parallel lane bends tighter on the inside
    // (curvature / (1 - curvature * offset)); banking helps.
    const bendAt=k=>{const cl=line.centre[k],mine=r.lineUse*line.curve[(k-r.apex+n)%n]+(1-r.lineUse)*cl;return mine+(cl/Math.max(.5,1-cl*fit(r.lane,k))-mine)*r.blend;};
@@ -519,7 +521,7 @@ export class RaceField {
    const reach=1+.12*look;aim=clamp(aim,d-reach,d+reach);
    const p=a[k],dx=p[1]+p[9]*aim-c.x,dy=p[2]+p[10]*aim-c.y,alpha=wrap(Math.atan2(dy,dx)-c.heading),away=Math.abs(alpha)>Math.PI/2;
    // After a spin the path can lie behind: turn round on full lock, slowly.
-   const turn=away?Math.sign(alpha):clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(dx,dy))/steerLimit(speed),-1,1);
+   const turn=away?Math.sign(alpha):clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(dx,dy))/steerLimit(speed,c.mechanics?.grip),-1,1);
    if(away)target=Math.min(target,6);
    // Off the asphalt the ace eases off until the tyres are back on it.
    if(st.clean&&!here.onRoad&&!here.pit)target=Math.min(target,Math.max(12,speed-1));
@@ -629,7 +631,7 @@ export class RaceField {
  pursuit(c,look,aim,reach){
   const a=this.data.samples,here=c.surface,p=a[(c.index+Math.round(look/this.line.ds))%a.length],to=clamp(aim(p),here.d-reach,here.d+reach);
   const dx=p[1]+p[9]*to-c.x,dy=p[2]+p[10]*to-c.y,alpha=wrap(Math.atan2(dy,dx)-c.heading);
-  return clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(dx,dy))/steerLimit(Math.hypot(c.vx,c.vy)),-1,1);
+  return clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(dx,dy))/steerLimit(Math.hypot(c.vx,c.vy),c.mechanics?.grip),-1,1);
  }
  // Multiplayer (multiplayer.js, the host's field): the driver of a car raced over the network is gone
  // mid-race and no bot takes the wheel: nobody drives it (stopInput), and at the flag it is AB (why:
@@ -674,7 +676,7 @@ export class RaceField {
   for(const o of bodies){if(o===c)continue;const dx=o.x-c.x,dy=o.y-c.y,forward=dx*fx+dy*fy,side=dy*fx-dx*fy;if(forward>0&&forward<40&&Math.abs(side)<2.3)target=Math.min(target,Math.max(0,o.vx*fx+o.vy*fy)+Math.sqrt(2*3*Math.max(0,forward-6.3)));}
   if(speed<.5&&(left<1.5||target<.3)){P.parked=left<1.5;return hold;}
   const look=u+4+speed*.3,p=R.at(look),t=clamp((look-slot.u+12)/10,0,1),lane=p.fast+(p.work-p.fast)*t*t*(3-2*t),tx=p.x-p.ty*lane,ty=p.y+p.tx*lane,alpha=wrap(Math.atan2(ty-c.y,tx-c.x)-c.heading);
-  const turn=clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(tx-c.x,ty-c.y))/steerLimit(speed),-1,1);
+  const turn=clamp(Math.atan2(2*WHEELBASE*Math.sin(alpha),Math.hypot(tx-c.x,ty-c.y))/steerLimit(speed,c.mechanics?.grip),-1,1);
   const input={left:Math.max(0,turn),right:Math.max(0,-turn),throttle:clamp((target-speed)*.6,0,1),brake:clamp((speed-target)*.7,0,1),reverse:0,handbrake:0};
   // Wedged against a wall: back out with the wheels turned, then go on.
   r.blocked=speed<1.2&&target>3?(r.blocked??0)+dt:0;if(r.blocked>2.5){r.recover=1.2;r.blocked=0;}

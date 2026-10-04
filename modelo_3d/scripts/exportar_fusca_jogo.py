@@ -10,17 +10,19 @@ Fusca's 2.40 m wheelbase is centred on the Opala's (physics axles at +1.55 and -
 13 cm inside the physics' contact points. What the game (fusca.js, fusca-cockpit.js) finds by name:
  - Roda_{Dianteira,Traseira}_{Esquerda,Direita}_PIVO: an unrotated empty at each wheel centre (axle along Z) holding
    tyre, wheel, drum, hubcap and trim ring, turned and spun by main.js as the Opala's.
- - Pintura_fusca: the body paint (the team's colour). Fusca_painel: the dash's face toward the driver, painted like
-   the body as a Fusca's metal dash is; Pintura_interna_fusca: the bare metal inside, the same colour in satin.
+ - Pintura_fusca: the body paint (the team's colour); Paralama_fusca: the four fenders' (the team's second colour, as
+   the Copa Fusca's liveries wear it). Fusca_painel: the dash's face toward the driver, painted like the body as a
+   Fusca's metal dash is; Pintura_interna_fusca: the bare metal inside, the same colour in satin.
  - Lanterna_fusca: the tail lamps' red lens (lit while braking). Volante_Fusca: the Fusca's own two-spoke wheel,
    hidden in a driven car (the driver brings the race wheel he turns); the column's collar stays.
  - Vidro_fusca: the windows. Espelho_fusca: the door mirrors' glass (the player's show the road behind); the
    mirrors (arms, chrome heads, glass) are nodes of their own, named ..._Retrovisores (they stand out of the body).
  - Espelho_interno_fusca: the rear-view mirror's glass; Mostrador_velocimetro, Mostrador_contagiros: the dials,
    with UVs for the faces the game paints. Nodes with the extra "interno" are the player's only (the rivals drop them).
-Changed from the studio model: the cabin of a Fusca prepared to race (fusca_cabine.py: dash, door cards, headliner,
-cage, bucket seat, mirror...), the door mirrors and the finish outside (fusca_acabamento.py), the windscreen and rear
-window cut open whole, a yellow plate; the headlamps and indicators glow less (in the studio the 30 W bulbs light
+Changed from the studio model, a Fusca prepared to race: no bumpers, the body 5 cm lower on its wheels
+(fusca_cabine.LOWER), the fenders in their own material with a welt along each seam, the door windows reaching
+further forward round a slimmer A-pillar (fusca_acabamento.py), its cabin (fusca_cabine.py: dash, door cards, headliner,
+cage on the pillars, bucket seat, mirror...), the door mirrors, the windscreen and rear window cut open whole, a yellow plate; the headlamps and indicators glow less (in the studio the 30 W bulbs light
 the scene, on track they are off in daylight). Left out: its driver (the game seats its own), scenery, cameras, lights.
 """
 import bpy,sys,math,re
@@ -33,6 +35,13 @@ import criar_fusca_v2 as V2,medidas_fusca as MED
 # +X, left to +Y, which glTF makes -Z) and moved forward to the middle of the Opala's wheelbase: axles at x +1.417, -0.983.
 OFFSET_X=.2165
 TO_GAME=Matrix.Translation((OFFSET_X,0,0))@Matrix.Rotation(math.radians(90),4,'Z')
+# Everything but the wheels comes down by fusca_cabine.LOWER (a race Fusca is lowered: the tyres fill the arches); the
+# wheel arches' dark liners come down less, so the tyres' tops stay under them.
+LINER=re.compile(r'^Caixa_roda_')
+def to_game(o):
+ if WHEEL.match(o.name):return TO_GAME
+ return Matrix.Translation((0,0,-CABIN.LOWER+(LINER_LIFT if LINER.match(o.name) else 0)))@TO_GAME
+LINER_LIFT=.045
 # Game resolution: body sections along and round the car (the studio model has 300 x 192), lathed parts' segments
 # (up to 96), the step between the points of the trims round the windows (1.5 cm) and the trims' bevel steps (none
 # for the hair-thin panel gaps and louvres).
@@ -52,6 +61,10 @@ V2.densificar=lambda pts,passo=.02,fechar=True:dense(pts,max(passo,TRIM_STEP),fe
 import fusca_cabine as CABIN,fusca_acabamento as FINISH
 # The body with a rounded nose (fusca_acabamento.py RoundNose) in place of the studio's flat front.
 V2.Carroceria,V2.Y_NARIZ=FINISH.RoundNose,FINISH.NOSE_Y
+# The headlamps leaning back into the fenders, near flush with them (fusca_acabamento.py construir_farois).
+V2.construir_farois=FINISH.construir_farois
+# The door windows reaching further forward, round a slimmer A-pillar (fusca_acabamento.py door_window).
+MED.JAN_PORTA=FINISH.DOOR_WINDOW
 
 def build():
  """The game's Fusca in an empty scene, in criar_fusca_v2.py's frame (collection Fusca_v2). Returns (body, sup, mats)."""
@@ -59,6 +72,8 @@ def build():
  mats=V2.criar_materiais()
  V2.usar_colecao('Fusca_v2')
  car,body=V2.construir_carroceria(mats,SECTIONS,RING)
+ # The fenders' seams cut into the skin before it is hollowed (fusca_acabamento.py fenders; race_prep paints them).
+ seams=FINISH.fenders(car,body)
  sup=V2.construir_tudo(car,body,mats)['sup']
  # criar_fusca_v2.py cuts the windscreen and the rear window with a slab between their outlines' points only: the
  # roof's dome rises out of it across the rear window, and 40% of that opening (its middle) stays shut behind the
@@ -79,6 +94,8 @@ def build():
   ring=V2.densificar(poly,.02,True)
   for x0,x1 in ((.45,1.1),(-1.1,-.45)):V2.prisma_yz(ring,x0,x1,V,F)
  V2.subtrair(body,V,F)
+ # The engine lid cut out as its own part (fusca_acabamento.py cut_lid; race_prep opens it).
+ lid=FINISH.cut_lid(sup,body,mats)
  # The body's 4th slot (the floor's inner faces, the dark interior in criar_fusca_v2.py) comes out of its booleans
  # empty, and an empty slot exports without a material (three.js draws it white): the dark interior again.
  for i,m in enumerate(body.data.materials):
@@ -99,6 +116,8 @@ def build():
  for o in [o for o in bpy.data.collections['Fusca_v2'].objects if STUDIO_CABIN.match(o.name)]:bpy.data.objects.remove(o)
  painted=mats['tinta'].copy();painted.name='Fusca_painel'
  CABIN.build(sup,body,mats);FINISH.build(sup,body,mats)
+ # Prepared to race: no bumpers, the fenders in their own material with a welt along each seam (fusca_acabamento.py).
+ FINISH.race_prep(car,body,seams,mats,sup,lid)
  # A dull yellow plate, as Brazil's were (the .blend's light grey glares in the game's sun).
  mats['placa'].node_tree.nodes['Principled BSDF'].inputs['Base Color'].default_value=(.3,.26,.07,1)
  bpy.context.view_layer.update()
@@ -122,7 +141,7 @@ def export(output):
   first={}
   for i,m in enumerate(me.materials):first.setdefault(m,i)
   for p in me.polygons:p.material_index=first[me.materials[p.material_index]]
-  me.transform(TO_GAME@o.matrix_world);return me
+  me.transform(to_game(o)@o.matrix_world);return me
  temporary=bpy.data.collections.new('EXPORTAR_FUSCA');scene.collection.children.link(temporary)
  def place(name,me,parent=None,offset=Vector(),source=None):
   me.transform(Matrix.Translation(-offset));o=bpy.data.objects.new(name,me);temporary.objects.link(o);o.parent=parent
@@ -130,12 +149,12 @@ def export(output):
    if source is not None and source.get(key):o[key]=source[key]
   return o
  root=bpy.data.objects.new('FUSCA_ROOT',None);temporary.objects.link(root)
- root['entre_eixos_m']=2.4;root['deslocamento_x_m']=OFFSET_X;root['origem']='Fusca V2: modelado do zero a partir de medidas (modelo_3d/fusca_v2)'
- # Wheels: each one's parts on an empty at its centre (V2.BITOLA across, V2.EIXO_F/T along, V2.RAIO_RODA up).
+ root['entre_eixos_m']=2.4;root['deslocamento_x_m']=OFFSET_X;root['rebaixado_m']=CABIN.LOWER;root['origem']='Fusca V2: modelado do zero a partir de medidas (modelo_3d/fusca_v2)'
+ # Wheels: each one's parts on an empty at its centre (V2.BITOLA across, V2.EIXO_F/T along, fusca_acabamento.WHEEL_R up).
  pivots={}
  for side,name in (('E','Esquerda'),('D','Direita')):
   for axle,front in (('-1.2',True),('+1.2',False)):
-   s=1 if side=='E' else -1;at=TO_GAME@Vector((s*V2.BITOLA,float(axle),V2.RAIO_RODA))
+   s=1 if side=='E' else -1;at=TO_GAME@Vector((s*V2.BITOLA,float(axle),FINISH.WHEEL_R))
    p=bpy.data.objects.new(f'Roda_{"Dianteira" if front else "Traseira"}_{name}_PIVO',None);temporary.objects.link(p);p.parent=root;p.location=at;pivots[(side,axle)]=p
  steering=[]
  for o in parts:
@@ -176,7 +195,7 @@ def export(output):
  meshes=[o for o in imported.children_recursive if o.type=='MESH']
  assert all(m for o in meshes for m in o.data.materials),'malha sem material'
  materials={m.name for o in meshes for m in o.data.materials if m}
- missing={'Placa','Pintura_fusca','Fusca_painel','Pintura_interna_fusca','Forro_teto','Lanterna_fusca','Vidro_fusca','Espelho_fusca','Espelho_interno_fusca','Mostrador_velocimetro','Mostrador_contagiros'}-materials;assert not missing,missing
+ missing={'Placa','Pintura_fusca','Paralama_fusca','Fusca_painel','Pintura_interna_fusca','Forro_teto','Lanterna_fusca','Vidro_fusca','Espelho_fusca','Espelho_interno_fusca','Mostrador_velocimetro','Mostrador_contagiros'}-materials;assert not missing,missing
  for name in ('Espelho_interno_fusca','Mostrador_velocimetro','Mostrador_contagiros','Placa'):
   assert all(o.data.uv_layers for o in meshes if any(m and m.name==name for m in o.data.materials)),'sem UV: '+name
  assert any(o.get('interno') for o in imported.children_recursive),'nada marcado interno'

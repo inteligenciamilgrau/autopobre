@@ -82,7 +82,11 @@ assert.equal(readGhosts(storage).length,1);assert.equal(loadGhost(storage,{...ke
 assert.ok(saveGhost(storage,{...key,mode:'immersive',lap:first})&&saveGhost(storage,{...key,pilot:'Outra',lap:first})&&saveGhost(storage,{...key,circuit:'curvelo',lap:first}));
 assert.equal(readGhosts(storage).length,4,'modes, pilots and circuits stay apart');
 assert.equal(loadGhost(storage,{...key,mode:'immersive'}).time,first.time);
-for(const bad of [{...key,circuit:'../x'},{...key,mode:'tour'},{...key,pilot:'  '}])assert.equal(saveGhost(storage,{...bad,lap:first}),null);
+// The Fusca (its own mechanics) keeps its own lap: a slower one beside the Opala's, which laps without a car are.
+assert.ok(first.time>second.time&&saveGhost(storage,{...key,car:'fusca',lap:first}),'a Fusca lap is not measured against the Opala ghost');
+assert.equal(readGhosts(storage).length,5);assert.equal(loadGhost(storage,{...key,car:'fusca'}).time,first.time);
+assert.equal(loadGhost(storage,key).time,second.time);assert.equal(loadGhost(storage,{...key,car:'opala'}).time,second.time);
+for(const bad of [{...key,circuit:'../x'},{...key,mode:'tour'},{...key,pilot:'  '},{...key,car:'kombi'}])assert.equal(saveGhost(storage,{...bad,lap:first}),null);
 assert.equal(saveGhost(null,{...key,lap:first}),null);
 // The newest GHOST_LIMIT laps stay; a full browser drops the oldest until the new one fits.
 const many=memory();for(let i=0;i<GHOST_LIMIT+6;i++)saveGhost(many,{...key,pilot:`Piloto ${i}`,lap:second},new Date(Date.UTC(2026,9,1,0,i)));
@@ -118,4 +122,4 @@ assert.equal(detailed.model,'opala','building another model keeps the one shown'
 assert.ok(detailed.has('fusca')&&detailed.model==='fusca'&&detailed.near.visible&&detailed.triangles===12&&!detailed.shells.get('opala').near.visible&&!detailed.shells.get('opala').far.visible);
 detailed.use('kombi');assert.equal(detailed.model,'fusca','a model never built keeps the one shown');detailed.use('opala');assert.equal(detailed.triangles,14);
 
-console.log(`Ghost lap passed: laps ${first.time.toFixed(2)} s (grid) and ${second.time.toFixed(2)} s recorded whole, replay within ${(worst*100).toFixed(1)} cm, ${(text.length/1000).toFixed(1)} kB a lap, one per pilot/circuit/mode, faster replaces, oldest out, autopilot and late laps left out, shell placed as the car.`);
+console.log(`Ghost lap passed: laps ${first.time.toFixed(2)} s (grid) and ${second.time.toFixed(2)} s recorded whole, replay within ${(worst*100).toFixed(1)} cm, ${(text.length/1000).toFixed(1)} kB a lap, one per pilot/circuit/mode/car, faster replaces, oldest out, autopilot and late laps left out, shell placed as the car.`);

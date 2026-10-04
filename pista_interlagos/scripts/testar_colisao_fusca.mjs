@@ -11,7 +11,7 @@ const near=(a,b,tolerance,name)=>assert(Math.abs(a-b)<=tolerance,`${name}: ${a} 
 const metrics={};
 
 // --- The Opala's body is the one its contacts always used.
-assert.deepEqual({...OPALA_BODY,hull:undefined},{name:'opala',halfLength:2.38,halfWidth:.93,ahead:.08,wallAhead:0,front:2.42,rear:2.35,hull:undefined});
+assert.deepEqual({...OPALA_BODY,hull:undefined,mechanics:undefined},{name:'opala',halfLength:2.38,halfWidth:.93,ahead:.08,wallAhead:0,front:2.42,rear:2.35,hull:undefined,mechanics:undefined});
 assert.equal(OPALA_BODY.hull,HULL);assert.equal(HULL.length,23);assert.deepEqual(HULL[0],[2.25,.75,-.28]);assert.deepEqual(HULL[8],[-1.4,0,-.41]);
 assert.equal(new TestCar(data).body.name,'opala','a car is an Opala unless given another body');
 
@@ -32,26 +32,26 @@ function modelBounds(file){
  return {front:hi[0],rear:-lo[0],halfWidth:Math.max(hi[2],-lo[2]),top:hi[1]};
 }
 const model=metrics.model=modelBounds('../teste/assets/fusca_v2.glb');
-near(FUSCA_BODY.front,model.front,.01,'Fusca front bumper guards');near(FUSCA_BODY.rear,model.rear,.01,'Fusca rear bumper guards');
+near(FUSCA_BODY.front,model.front,.01,'Fusca nose');near(FUSCA_BODY.rear,model.rear,.01,'Fusca rear: the foot of its open engine lid');
 assert(FUSCA_BODY.halfWidth>=model.halfWidth&&FUSCA_BODY.halfWidth-model.halfWidth<.01,`Fusca fenders ${model.halfWidth}`);
 near(FUSCA_BODY.halfLength,(FUSCA_BODY.front+FUSCA_BODY.rear)/2,.002,'Fusca box length');near(FUSCA_BODY.ahead,(FUSCA_BODY.front-FUSCA_BODY.rear)/2,.002,'Fusca box centre');
 assert.equal(FUSCA_BODY.wallAhead,FUSCA_BODY.ahead);assert.equal(FUSCA_BODY.hull,FUSCA_HULL);
-for(const [x,y,z] of FUSCA_HULL)assert(x<=FUSCA_BODY.front+.001&&x>=-FUSCA_BODY.rear-.001&&Math.abs(y)<=FUSCA_BODY.halfWidth&&z+CG_HEIGHT>.2&&z+CG_HEIGHT<=model.top+.01,`shell point ${[x,y,z]}`);
+for(const [x,y,z] of FUSCA_HULL)assert(x<=FUSCA_BODY.front+.001&&x>=-FUSCA_BODY.rear-.001&&Math.abs(y)<=FUSCA_BODY.halfWidth&&z+CG_HEIGHT>.05&&z+CG_HEIGHT<=model.top+.01,`shell point ${[x,y,z]}`);
 near(Math.max(...FUSCA_HULL.map(p=>p[2]))+CG_HEIGHT,model.top,.02,'the shell reaches the top of the roof');
-assert(FUSCA_HULL.slice(0,9).every(p=>p[2]+CG_HEIGHT>.24),'the Fusca sits higher than the Opala: its low points clear 24 cm');
+assert(FUSCA_HULL.slice(0,9).every(p=>p[2]+CG_HEIGHT>.06&&p[2]+CG_HEIGHT<.14),'lowered as a Copa Fusca: its low points 6 to 14 cm off the ground (the Opala: 11 to 24 cm)');
 
 // --- Cars touching: bumper to bumper, side by side, a Fusca behind an Opala.
 const car=(x,y,body,heading=0,vx=0,vy=0)=>({x,y,heading,vx,vy,yaw:0,body});
 const touch=(gap,a,b,across=false)=>[gap-.01,gap+.01].map(d=>!!bodyContact(car(0,0,a),across?car(0,d,b):car(d,0,b)));
 const touching=metrics.touching={fuscas:FUSCA_BODY.front+FUSCA_BODY.rear,opalas:2*OPALA_BODY.halfLength,fuscaBehindOpala:FUSCA_BODY.front+OPALA_BODY.halfLength-OPALA_BODY.ahead,
  fuscasSide:2*FUSCA_BODY.halfWidth,opalasSide:2*OPALA_BODY.halfWidth};
-assert.deepEqual(touch(touching.fuscas,FUSCA_BODY,FUSCA_BODY),[true,false],'two Fuscas meet bumper to bumper');
+assert.deepEqual(touch(touching.fuscas,FUSCA_BODY,FUSCA_BODY),[true,false],'two Fuscas meet nose to tail');
 assert.deepEqual(touch(touching.opalas,OPALA_BODY,OPALA_BODY),[true,false],'two Opalas as before');
 assert.deepEqual(touch(touching.fuscaBehindOpala,FUSCA_BODY,OPALA_BODY),[true,false],'a Fusca nose into an Opala tail');
 assert.deepEqual(touch(touching.fuscasSide,FUSCA_BODY,FUSCA_BODY,true),[true,false],'two Fuscas side by side');
 assert.deepEqual(touch(touching.opalasSide,OPALA_BODY,OPALA_BODY,true),[true,false],'two Opalas side by side');
 assert.deepEqual(touch(touching.opalas,OPALA_BODY,undefined),[true,false],'a car without a body (a remote car) is an Opala');
-{const a=car(0,0,FUSCA_BODY,0,30),b=car(4,0,FUSCA_BODY,0,10),momentum=a.vx+b.vx,hit=resolveContact(a,b);
+{const a=car(0,0,FUSCA_BODY,0,30),b=car(touching.fuscas-.024,0,FUSCA_BODY,0,10),momentum=a.vx+b.vx,hit=resolveContact(a,b);
  assert(hit&&hit.speed>19&&!bodyContact(a,b)&&Math.abs(a.vx+b.vx-momentum)<1e-8&&a.vx<30&&b.vx>10,'a Fusca rear-ending another trades momentum and separates');}
 {const a=car(0,0,FUSCA_BODY,0,25),b=car(2.9,1.1,FUSCA_BODY,Math.PI/5);resolveContact(a,b);assert(!bodyContact(a,b)&&Math.abs(a.yaw)+Math.abs(b.yaw)>.05,'a glancing blow spins them');}
 
@@ -59,11 +59,12 @@ assert.deepEqual(touch(touching.opalas,OPALA_BODY,undefined),[true,false],'a car
 const idle={throttle:0,brake:0,left:0,right:0,reverse:0,handbrake:0};
 function flat(body){const c=new TestCar(data).setBody(body);c.sample=(x=0,y=0)=>({i:0,u:0,s:500,d:y,z:0,width:1000,bank:0,grade:0,gx:0,gy:0,tx:1,ty:0,lx:0,ly:1,onRoad:true});c.reset();c.x=c.y=c.heading=0;c.settle();return c;}
 for(const body of [OPALA_BODY,FUSCA_BODY])near(flat(body).z,CG_HEIGHT,.001,`${body.name} rests on its wheels`);
-// Upside down on its roof, before the marshals come: the Fusca's dome holds it higher than the Opala's flat roof.
+// Upside down on its roof, before the marshals come: the race Fusca, 19 cm lower than the street car, rests on its
+// dome (82 cm over its centre of mass) lower than the Opala on its flat roof.
 const roofRest=body=>{const c=flat(body);c.roll=Math.PI;c.z=2.2;for(let i=0;i<240;i++)c.step(idle,1/120);return {height:c.z,upright:c.upright,rightings:c.rightings};};
 const rest=metrics.upsideDown={opala:roofRest(OPALA_BODY),fusca:roofRest(FUSCA_BODY)};
 assert(rest.opala.upright<-.9&&rest.fusca.upright<-.9&&!rest.opala.rightings&&!rest.fusca.rightings,'both still on their roofs');
-near(rest.opala.height,.86,.05,'the Opala on its roof');assert(rest.fusca.height>rest.opala.height+.04&&rest.fusca.height<1.06,`the Fusca on its dome: ${rest.fusca.height}`);
+near(rest.opala.height,.86,.05,'the Opala on its roof');assert(rest.fusca.height>.7&&rest.fusca.height<.84,`the Fusca on its dome: ${rest.fusca.height}`);
 // The guardrail: pushed sideways into it, held at an angle to the road, the centre of mass stops where the body's
 // plan meets the rail: halfWidth alongside, plus halfLength and wallAhead as the nose turns in.
 function railStop(body,angle){
@@ -87,7 +88,7 @@ const reachAt=(body,facing)=>{for(const side of [1,-1]){const nx=-uy*side,ny=ux*
  throw new Error('pit wall: no clear side');};
 const pit=metrics.pitWall={opala:reachAt(undefined,false),fusca:reachAt(FUSCA_BODY,false),opalaNose:reachAt(undefined,true),fuscaNose:reachAt(FUSCA_BODY,true)};
 near(pit.opala,OPALA_BODY.halfWidth,.01,'Opala alongside the pit wall');near(pit.fusca,FUSCA_BODY.halfWidth,.01,'Fusca alongside the pit wall');
-near(pit.opalaNose,OPALA_BODY.halfLength,.01,'Opala nose to the pit wall (box round the centre of mass, as before)');near(pit.fuscaNose,FUSCA_BODY.front,.01,'Fusca nose to the pit wall: its front bumper');
+near(pit.opalaNose,OPALA_BODY.halfLength,.01,'Opala nose to the pit wall (box round the centre of mass, as before)');near(pit.fuscaNose,FUSCA_BODY.front,.01,'Fusca nose to the pit wall: its nose');
 
 // --- A field of Fuscas behind a Fusca: every rival takes the body at the reset, none overlaps another.
 const player=new TestCar(data).setBody(FUSCA_BODY),field=new RaceField(data,{seed:1,body:FUSCA_BODY});player.resetGrid();field.reset(player.surface.s,{grid:true});
@@ -100,4 +101,4 @@ assert(field.rivals.every(r=>Number.isFinite(r.car.x+r.car.y+r.car.z)&&r.progres
 // Without a body the field races Opalas (race-field.js loads physics.js under its own URL: compared by name).
 const opala=new RaceField(data,{seed:1});opala.reset(new TestCar(data).surface.s,{grid:true});assert(opala.rivals.every(r=>r.car.body.name==='opala'&&r.car.body.halfLength===2.38));
 console.log(JSON.stringify(metrics,null,1));
-console.log('Fusca collision passed: Opala body unchanged, Fusca plan and shell from its model, bumper and side contacts, guardrail, pit wall, roof and a racing field.');
+console.log('Fusca collision passed: Opala body unchanged, Fusca plan and shell from its model, nose-to-tail and side contacts, guardrail, pit wall, roof and a racing field.');

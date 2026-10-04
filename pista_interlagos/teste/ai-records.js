@@ -15,6 +15,8 @@ export class AutomaticAIRecords {
  constructor(storage){this.storage=storage;this.rows=readAIRecords(storage);this.signature='';this.retryAt=0;}
  update(mode,now=Date.now()){
   if(!mode?.rivals?.length||now<this.retryAt)return;
+  // The boards are the Opala's: a field of Fuscas (physics.js FUSCA_MECHANICS) keeps none.
+  const model=mode.rivals[0].car?.mechanics?.name;if(model&&model!=='opala')return;
   // A 1x1 rival starts on pole with nobody ahead: its laps count, its race time does not (fullGrid).
   const circuit=mode.data.meta.id,category=mode.active?'immersive':'normal',standard=mode.fullGrid!==false&&(mode.active?mode.storyLaps:mode.freeTotalLaps)===LAPS.standard;
   const signature=JSON.stringify([circuit,category,...mode.rivals.map(r=>[r.car.best,r.finished?r.finishTime:null])]);

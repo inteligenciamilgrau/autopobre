@@ -14,7 +14,7 @@ export class ManualGearbox {
  up(){if(this.gear<TOP_GEAR)this.gear=this.gear<1?1:this.gear+1;return this.gear;}
  // Down a gear unless the engine would over-rev; from 1st (or neutral) to reverse only nearly stopped.
  down(car){
-  if(this.gear>1){if(kmhOf(car)*GEAR_RPM_PER_KMH[this.gear-1]<=DOWNSHIFT_RPM)this.gear--;}
+  if(this.gear>1){if(kmhOf(car)*(car?.mechanics?.gears??GEAR_RPM_PER_KMH)[this.gear-1]<=DOWNSHIFT_RPM)this.gear--;}
   else if(this.gear>=0&&kmhOf(car)<REVERSE_KMH)this.gear=-1;
   return this.gear;
  }

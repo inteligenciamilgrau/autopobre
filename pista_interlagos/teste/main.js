@@ -20,7 +20,7 @@ import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY,OPALA_BODY,FUSCA_BODY
 import {PLAYER_ENTRY,ACE_NUMBER,playerGridSlot,carEntry,fieldRoster,duelRivalFor,cssColor,MODEL_NAMES} from './race-roster.js';
 import {CarSelect} from './car-select.js';
 import {CarLivery} from './car-livery.js';
-import {FuscaBody,prepareFusca,FUSCA_URL,FUSCA_SEAT,FUSCA_EYE,FUSCA_HOOD_EYE} from './fusca.js';
+import {FuscaBody,prepareFusca,FUSCA_URL,FUSCA_SEAT,FUSCA_EYE,FUSCA_HOOD_EYE,FUSCA_WHEEL_TRAVEL,FUSCA_WHEEL_BUMP} from './fusca.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260927-omp-retrovisores';
 import {CarOpenings} from './car-openings.js';
@@ -228,7 +228,7 @@ function updateRecordTvs(now){
 // (ghost-car.js). ghostSavedAt: the crossing that saved a new one (the lap banner says so).
 const ghostRecorder=new GhostRecorder(),ghostCar=new GhostCar(),ghostPose={};scene.add(ghostCar.root);
 let ghostLap=null,ghostKey='',ghostSavedAt=null,ghostOnTrack=false;
-const ghostOwner=()=>immersive&&data?{circuit:circuit.id,mode:immersive.active?'immersive':'normal',pilot:immersive.pilotName||''}:null;
+const ghostOwner=()=>immersive&&data?{circuit:circuit.id,mode:immersive.active?'immersive':'normal',car:raceModel,pilot:immersive.pilotName||''}:null;
 // The saved lap for the pilot, circuit and mode on track now (read again when any of them changes).
 function currentGhost(){
  const key=ghostOwner(),id=key?JSON.stringify(key):'';
@@ -524,7 +524,8 @@ function updateCar(dt){
   wheelSpin.setFromAxisAngle(axleAxis,-(w.front?car.spin:car.rearSpin));
   w.obj.quaternion.copy(wheelTurn).multiply(w.base).multiply(wheelSpin).premultiply(bodyTiltInverse);
   // Suspension travel: wheels tuck in over bumps and hang down in the air.
-  wheelOffset.copy(w.basePosition);wheelOffset.y+=car.wheelTravel?.[w.index]??0;
+  const travel=car.wheelTravel?.[w.index]??0;
+  wheelOffset.copy(w.basePosition);wheelOffset.y+=fuscaBody.active?Math.min(FUSCA_WHEEL_BUMP,travel*FUSCA_WHEEL_TRAVEL):travel;
   w.obj.position.copy(wheelOffset.sub(bodyPivot).applyQuaternion(bodyTiltInverse).add(bodyPivot));
  }
 }

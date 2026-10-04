@@ -1,7 +1,7 @@
 """The Fusca tab of Modo Corrida's car screen (car-select.js, fusca.js): the grid's 15 cars as Fuscas (the 99
-black with the yellow stripe), the studio turning the chosen one in its colours, the choice kept, and on
+black with yellow fenders), the studio turning the chosen one in its colours, the choice kept, and on
 track a field of Fuscas: the player's (the Opala's body, cockpit and brake lamps hidden, the driver in the
-Fusca's seat, its own cabin with live mirrors and dials) and every rival's, each driver on the Fusca's seat, with Stevan Gaipo's Fusca 99 in the seat
+Fusca's seat, its own cabin with live mirrors and dials, the fenders in the team's second colour) and every rival's, each driver on the Fusca's seat, with Stevan Gaipo's Fusca 99 in the seat
 of the team taken; all of them collide with the Fusca's own body (physics.js FUSCA_BODY). Back on the menu the Opala returns; the Opala tab and Modo História stay Opalas.
 Usage: verificar_fusca.py [porta]
 Screens in renders/: fusca_99.png, fusca_73.png, fusca_19.png, fusca_opala_aba.png, fusca_grid.png,
@@ -40,12 +40,12 @@ with sync_playwright() as p:
  assert page.get_attribute('#carModels [data-model="opala"]','aria-selected')=='true' and page.locator('#carCards [data-car]').count()==15
  wait_js(page,"interlagosCarros.info().live&&interlagosCarros.info().built==='99'",timeout=180000);assert not fuscas,fuscas
 
- # The Fusca tab: the same 15 cars, the 99 still chosen (Stevan's black Fusca with the yellow stripe), then the 73.
+ # The Fusca tab: the same 15 cars, the 99 still chosen (Stevan's black Fusca with yellow fenders), then the 73.
  page.click('#carModels [data-model="fusca"]')
  assert page.get_attribute('#carModels [data-model="fusca"]','aria-selected')=='true'
  assert page.locator('#carCards [data-car]').count()==15 and page.get_attribute('#carCards [data-car="99"]','aria-checked')=='true' and 'Fusca' in page.inner_text('#carsTitle')
  wait_js(page,"(i=>i.live&&i.builtModel==='fusca'&&i.built==='99')(interlagosCarros.info())",timeout=180000)
- assert 'Fusca 99' in page.inner_text('#carName') and 'faixa amarela' in page.inner_text('#carDetail'),page.inner_text('#carDetail');shot(page,'fusca_99.png')
+ assert 'Fusca 99' in page.inner_text('#carName') and 'para-lamas amarelos' in page.inner_text('#carDetail'),page.inner_text('#carDetail');shot(page,'fusca_99.png')
  page.click('#carCards [data-car="73"]');wait_js(page,"(i=>i.builtModel==='fusca'&&i.built==='73')(interlagosCarros.info())")
  prefs=page.evaluate(PREFS);assert prefs['carModel']=='fusca' and prefs['car']=='73',prefs
  assert 'Fusca 73' in page.inner_text('#carName') and 'Konrad' in page.inner_text('#carDetail'),page.inner_text('#carName')
@@ -65,14 +65,14 @@ with sync_playwright() as p:
  page.evaluate(HOOK);page.wait_for_timeout(400)
  field=page.evaluate(FIELD);cars=page.evaluate(CARS);print(json.dumps({'field':field,'cars':cars},ensure_ascii=False),flush=True)
  assert cars['raceModel']=='fusca' and cars['raceCar']=='73' and not cars['opalaShown'] and cars['painted']=='99',cars
- f=cars['fusca'];assert f and f['number']=='73' and f['wheels']==4 and f['decals']==5 and not f['ownWheelShown'],f
+ f=cars['fusca'];assert f and f['number']=='73' and f['wheels']==4 and f['decals']==3 and f['fenders']==f['stripe'] and not f['ownWheelShown'],f
  assert abs(cars['seatShift'][0]-.257)<1e-6,cars
  assert '73' not in field['rivals'] and field['seats'][field['rivals'].index('99')]=='99' and field['me']=='73',field
  # The whole field in Fuscas, each rival's driver on the Fusca's seat (rival-driver.js CABIN_DROP plus fusca.js FUSCA_SEAT).
  assert field['models']==['fusca']*14 and field['fuscasShown']==14 and not field['opala99Shown'],field
  # And each meets the others, the walls and the ground with the Fusca's body (physics.js FUSCA_BODY).
  assert field['bodies']==['fusca']*14 and field['playerBody']=='fusca',field
- assert all(s==[.257,.02,.06] for s in field['seat']),field['seat']
+ assert all(s==[.257,-.17,.06] for s in field['seat']),field['seat']
  # The rivals' cabins without the player's details (fusca.js rivalCabin: dials, switches, mirror glass...).
  assert field['inside']==[0]*14,field['inside']
  shot(page,'fusca_grid.png')
@@ -92,7 +92,7 @@ with sync_playwright() as p:
  print(json.dumps({'cockpit':cockpit},ensure_ascii=False),flush=True)
  # The Opala's cockpit hides; the camera on the Fusca's centre line (fusca.js FUSCA_EYE); its rear-view mirror shows
  # this frame's rear picture, both door mirrors are live, the dials' needles move (fusca-cockpit.js).
- assert not cockpit['visible'] and max(abs(a-b) for a,b in zip(cockpit['eye'],[.057,1.2,.015]))<1e-3,cockpit
+ assert not cockpit['visible'] and max(abs(a-b) for a,b in zip(cockpit['eye'],[.057,1.01,.015]))<1e-3,cockpit
  assert cockpit['mirrorFrame']==cockpit['frame'] and cockpit['cabin']['mirror']==1,cockpit
  assert cockpit['side']['count']==2 and cockpit['side']['live'] and sorted(cockpit['side']['sides'])==[-1,1] and all(cockpit['side']['visible']),cockpit['side']
  assert set(cockpit['cabin']['needles'])=={'speed','fuel','tach'} and cockpit['cabin']['needles']['speed']<-2.4,cockpit['cabin']

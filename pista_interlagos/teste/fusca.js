@@ -5,39 +5,46 @@ import {FuscaCockpit} from './fusca-cockpit.js';
 // The Fusca (Modo Corrida's car screen, its Fusca tab): modelo_3d/fusca_v2, modelled from the Type 1's
 // measurements and exported by modelo_3d/scripts/exportar_fusca_jogo.py in the Opala's frame (+X forward, -Z the
 // driver's side, tyres on y=0, its 2.40 m wheelbase centred on the Opala's). In a Fusca race the whole field races
-// one (immersive-visuals.js fuscaRival), with the Opala's physics. Each wears a team's colours as the Opalas do
-// (race-roster.js): the body paint and the dash, a stripe along the waist, the number on both doors and on the roof.
-export const FUSCA_URL='./assets/fusca_v2.glb?v=fusca-v2-cabine-nariz-2';
+// one (immersive-visuals.js fuscaRival), with its own mechanics (physics.js FUSCA_MECHANICS). A Fusca prepared to
+// race, as a Copa Fusca photo shows one: no bumpers nor running boards, small black wheels, the body 19 cm lower than
+// the street car's (the sills 7 cm off the ground, the arches just over the tyres), the engine lid propped open. Each wears a team's colours as the Opalas do (race-roster.js), as the
+// Copa Fusca's liveries do: the body paint and the dash in the first, the four fenders in the second (the Opala's
+// stripe), the number on both doors and on the roof.
+export const FUSCA_URL='./assets/fusca_v2.glb?v=fusca-v2-corrida-4';
 // The driver (driver.js and rival-driver.js, with the race wheel he turns) moves this much from the Opala's
-// seat: onto the Fusca's steering wheel, 26 cm further forward, 11 cm higher and 6 cm inboard (the Fusca is
+// seat: onto the Fusca's steering wheel, 26 cm further forward, 8 cm lower and 6 cm inboard (the Fusca is
 // narrower: from the Opala's seat his left elbow came out through the door). The exporter builds the cabin round
-// this place (modelo_3d/scripts/fusca_cabine.py SEAT): change both together.
-export const FUSCA_SEAT=Object.freeze([.257,.113,.06]);
+// this place (modelo_3d/scripts/fusca_cabine.py SEAT, LOWER): change both together.
+export const FUSCA_SEAT=Object.freeze([.257,-.077,.06]);
 // The cockpit camera (the Opala's is an onboard camera on the car's centre line, cockpit.js eye) moves up with the
 // seat and 7 cm higher still (over the dash top the road shows from about 8 m ahead), and 5 cm less forward: from
 // the centre line the door mirrors (only whole in sight behind the A-pillars) then sit about 50 degrees out, inside
 // a 16:9 screen. The exporter aims the mirrors and the tachometer at this eye (fusca_cabine.py EYE).
-export const FUSCA_EYE=Object.freeze([.207,.18,0]);
+export const FUSCA_EYE=Object.freeze([.207,-.01,0]);
 // cockpit.js's eye in its V06 view, which main.js keeps in a Fusca (the classic interior is the Opala's only).
 const CABIN_EYE=new THREE.Vector3(-.15,1.02,.015);
 // The hood camera: the Opala's (main.js hoodEye, 1.1 m forward, 1.25 m up) would see past the Fusca's lower,
 // rounder front lid; this one sits 13 cm over the lid, just ahead of the windscreen.
-export const FUSCA_HOOD_EYE=Object.freeze([.92,1.22,0]);
+export const FUSCA_HOOD_EYE=Object.freeze([.92,1.03,0]);
 // The side view (car-select.js card icons; the distant rivals' model, immersive-visuals.js farProxy, as
-// FAR_PROFILE for the Opala): metres in the car frame, nose to +x, read off the GLB's silhouette. width, track,
-// tail, head and bumpers shape the distant model; lamps moves the distant Opala's brake lights onto its tail.
+// FAR_PROFILE for the Opala): metres in the car frame, nose to +x, read off the GLB's silhouette. fenders: the
+// front and rear fenders' sides, in the second colour. width, track, tail, head and bumpers (none) shape the
+// distant model; lamps moves the distant Opala's brake lights onto its tail.
 export const FUSCA_PROFILE=Object.freeze({
- body:[[-1.73,.3],[1.99,.3],[1.99,.62],[1.9,.73],[1.8,.83],[1.7,.91],[1.6,.96],[1.4,1.03],[1.2,1.064],[1,1.087],[.8,1.107],[.6,1.43],[.5,1.465],[.3,1.506],[.1,1.528],[-.1,1.535],[-.3,1.533],[-.5,1.52],[-.7,1.489],[-.9,1.414],[-1.1,1.29],[-1.3,1.147],[-1.5,.94],[-1.6,.818],[-1.7,.634],[-1.73,.5]],
- glass:[[.69,1.02],[.6,1.17],[.46,1.32],[.3,1.345],[0,1.355],[-.4,1.345],[-.6,1.29],[-.74,1.22],[-.81,1.13],[-.81,1.02]],
- stripe:[[-1.2,.75],[1.4,.75],[1.4,.85],[-1.2,.85]],number:[.33,.56],axles:[1.417,-.983],wheel:.335,
- width:1.5,track:.666,tail:{x:-1.71,y:.64,z:.545,w:.08,h:.12},head:{x:1.97,y:.66,z:.505,w:.17,h:.17},bumpers:[[2.1,.47],[-1.86,.47]],bumperWidth:1.44,lamps:[.45,-.05,0]});
-// Where the team's colours go (car frame): the waist stripe from the front fender to the rear one, above the
-// wheel arches and under the window trim, ending before the fenders round off toward the nose and the tail
-// (seen from behind it would wrap round them); the number on each door under it, and on the roof, read from
-// the driver's side as the Opalas' are.
-const STRIPE={x:.1,y:.8,w:2.6,h:.1},DOOR={x:.33,y:.56,w:.46,h:.34},ROOF={x:-.1,y:1.3,w:.66,h:.52},SIDE=.72;
-// Painted like the body: the paint, the dash (a Fusca's is the body's sheet metal) and the bare metal inside.
-const PAINTED=['Pintura_fusca','Fusca_painel','Pintura_interna_fusca'];
+ body:[[-1.73,.09],[2,.09],[2.016,.19],[2.016,.36],[2,.407],[1.9,.506],[1.8,.617],[1.7,.695],[1.6,.755],[1.4,.826],[1.2,.868],[1,.893],[.8,.917],[.6,1.24],[.5,1.275],[.3,1.316],[.1,1.338],[-.1,1.345],[-.3,1.343],[-.5,1.33],[-.7,1.299],[-.9,1.224],[-1.1,1.1],[-1.3,.957],[-1.4,.89],[-1.5,.8],[-1.6,.72],[-1.7,.62],[-1.79,.52],[-1.79,.38],[-1.73,.3]],
+ glass:[[.73,.83],[.65,.98],[.5,1.13],[.3,1.155],[0,1.165],[-.4,1.155],[-.6,1.1],[-.74,1.03],[-.81,.94],[-.81,.83]],
+ fenders:[[[.81,.09],[.85,.26],[.9,.37],[.95,.45],[1.05,.55],[1.15,.61],[1.25,.67],[1.4,.69],[1.6,.67],[1.7,.62],[1.8,.59],[1.9,.51],[1.98,.42],[1.98,.09]],
+  [[-.39,.09],[-.45,.19],[-.5,.28],[-.55,.4],[-.6,.48],[-.7,.59],[-.8,.66],[-1,.71],[-1.1,.71],[-1.2,.68],[-1.3,.63],[-1.4,.55],[-1.5,.5],[-1.6,.41],[-1.7,.31],[-1.71,.09]]],
+ number:[.33,.37],axles:[1.417,-.983],wheel:.27,
+ width:1.5,track:.666,tail:{x:-1.71,y:.45,z:.545,w:.08,h:.12},head:{x:1.99,y:.47,z:.505,w:.17,h:.17},bumpers:[],lamps:[.45,-.24,0]});
+// The wheels' travel shown on the player's car (main.js): half the suspension's (physics.js, the Opala's), and at
+// most WHEEL_BUMP up: the arches sit just over the tyres.
+export const FUSCA_WHEEL_TRAVEL=.5,FUSCA_WHEEL_BUMP=.012;
+// Where the numbers go (car frame): on each door, and on the roof, read from the driver's side as the Opalas' are.
+const DOOR={x:.33,y:.37,w:.46,h:.34},ROOF={x:-.1,y:1.11,w:.66,h:.52},SIDE=.72;
+// Painted like the body: the paint, the dash (a Fusca's is the body's sheet metal) and the bare metal inside; in
+// the second colour, the fenders (the exporter's Paralama_fusca).
+const PAINTED=['Pintura_fusca','Fusca_painel','Pintura_interna_fusca'],FENDERS='Paralama_fusca';
 // The cabin's materials (fusca_cabine.py) that the sun only reaches through the windows: a rival's cast no shadow.
 const CABIN=new Set(['Pintura_interna_fusca','Forro_teto','Vinil_preto','Gaiola','Banco_concha','Banco_tecido','Fusca_painel','Aco_escuro','Volante_baquelite']);
 // The loaded GLB made ready to clone: shadows, and glass as plain see-through materials (Blender's
@@ -61,7 +68,7 @@ export function fuscaCar(template,entry){
  const recolor=m=>{
   if(!swap.has(m)){
    let c=m;
-   if(PAINTED.includes(m.name)){c=m.clone();c.color.setHex(entry.color);if(entry.finish)Object.assign(c,entry.finish);}
+   if(PAINTED.includes(m.name)||m.name===FENDERS){c=m.clone();c.color.setHex(m.name===FENDERS?entry.stripe:entry.color);if(entry.finish)Object.assign(c,entry.finish);}
    else if(m.name==='Lanterna_fusca'){c=lamp=m.clone();c.emissive.setRGB(1,.05,.02);c.emissiveIntensity=0;}
    else if(m.name==='Placa'&&m.map===null){c=m.clone();c.map=plateTexture(entry.number);c.color.setHex(0xffffff);}
    if(c!==m)own.push(c);swap.set(m,c);
@@ -72,17 +79,13 @@ export function fuscaCar(template,entry){
   if(o.isMesh)o.material=Array.isArray(o.material)?o.material.map(recolor):recolor(o.material);
   else if(o.name.startsWith('Roda_')&&o.name.includes('PIVO'))wheels.push(o);
  });
- // The stripe and numbers are bent onto the paint (immersive-visuals.js), 6 mm off it.
+ // The numbers are bent onto the paint (immersive-visuals.js), 6 mm off it.
  root.updateMatrixWorld(true);const paint=[];root.traverse(o=>{if(o.isMesh&&[o.material].flat().some(m=>m.name==='Pintura_fusca'))paint.push(o);});
  const body=bodyTriangles(root,paint),V=(x,y,z)=>new THREE.Vector3(x,y,z),stuck=[];
- const stripe=new THREE.MeshStandardMaterial({name:'Faixa_fusca',color:entry.stripe,roughness:.3,metalness:.05,polygonOffset:true,polygonOffsetFactor:-1,polygonOffsetUnits:-1}),sticker=numberSticker(entry.number);
- own.push(stripe,sticker);
- for(const side of [-1,1]){
-  stuck.push([bendOnBody(body,V(STRIPE.x,STRIPE.y,side*SIDE),V(side,0,0),V(0,1,0),STRIPE.w,STRIPE.h,72,2),stripe,'Faixa_fusca']);
-  stuck.push([bendOnBody(body,V(DOOR.x,DOOR.y,side*SIDE),V(side,0,0),V(0,1,0),DOOR.w,DOOR.h,16,8),sticker,'Numero_porta_'+entry.number]);
- }
- stuck.push([bendOnBody(body,V(ROOF.x,ROOF.y,0),V(-1,0,0),V(0,0,1),ROOF.w,ROOF.h),sticker,'Numero_teto_'+entry.number]);
- for(const [geometry,material,name] of stuck){const decal=new THREE.Mesh(geometry,material);decal.name=name;decal.renderOrder=material===stripe?1:2;decal.receiveShadow=true;root.add(decal);own.push(geometry);}
+ const sticker=numberSticker(entry.number);own.push(sticker);
+ for(const side of [-1,1])stuck.push([bendOnBody(body,V(DOOR.x,DOOR.y,side*SIDE),V(side,0,0),V(0,1,0),DOOR.w,DOOR.h,16,8),'Numero_porta_'+entry.number]);
+ stuck.push([bendOnBody(body,V(ROOF.x,ROOF.y,0),V(-1,0,0),V(0,0,1),ROOF.w,ROOF.h),'Numero_teto_'+entry.number]);
+ for(const [geometry,name] of stuck){const decal=new THREE.Mesh(geometry,sticker);decal.name=name;decal.renderOrder=2;decal.receiveShadow=true;root.add(decal);own.push(geometry);}
  root.userData.own=own;root.userData.wheels=wheels;root.userData.entry=entry;root.userData.lamp=lamp;
  root.userData.brake=v=>{if(lamp)lamp.emissiveIntensity=v>BRAKE_ON?7:0;};
  return root;
@@ -129,6 +132,7 @@ export class FuscaBody {
  // The dials (fusca-cockpit.js): speed in km/h, rpm, the fuel left (0-1).
  update(speed,rpm,fuel){this.cockpit?.update(speed,rpm,fuel);}
  clear(){if(!this.car)return;this.cockpit?.dispose();this.cockpit=null;this.car.removeFromParent();fuscaDispose(this.car);this.car=null;this.wheels=[];}
- info(){return this.car?{number:this.car.userData.entry.number,wheels:this.wheels.length,decals:this.car.children.filter(o=>o.name.startsWith('Faixa_')||o.name.startsWith('Numero_')).length,braking:!!this.car.userData.lamp?.emissiveIntensity,ownWheelShown:!!this.car.getObjectByName('Volante_Fusca')?.visible,
+ info(){let fenders=null;this.car?.traverse(o=>{if(o.isMesh)for(const m of [o.material].flat())if(m.name===FENDERS)fenders=m.color.getHex();});
+  return this.car?{number:this.car.userData.entry.number,wheels:this.wheels.length,decals:this.car.children.filter(o=>o.name.startsWith('Numero_')).length,fenders,stripe:new THREE.Color(this.car.userData.entry.stripe).getHex(),braking:!!this.car.userData.lamp?.emissiveIntensity,ownWheelShown:!!this.car.getObjectByName('Volante_Fusca')?.visible,
   cabin:this.cockpit?.info()??null}:null;}
 }

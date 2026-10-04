@@ -16,7 +16,7 @@ export const OLD_STOCK_2026=Object.freeze([
  ['brasilia','Brasília - DF','21 e 22 MAR'],['interlagos','Interlagos - SP','18 e 19 ABR'],['interlagos','Interlagos - SP','30 e 31 MAI'],
  ['cascavel','Cascavel - PR','11 e 12 JUL'],['interlagos','Interlagos - SP','01 e 02 AGO'],['cascavel','Cascavel - PR','19 e 20 SET'],
  ['chapeco','Chapecó - SC','31 OUT e 01 NOV'],['interlagos','Interlagos - SP','19 e 20 DEZ']].map(([circuit,place,date])=>Object.freeze({circuit,place,date})));
-// The Copa Fusca GT-Oil 2026 calendar as announced (subject to change): eleven rounds, six at
+// The Copa Fusca Seineca 2026 calendar as announced (subject to change): eleven rounds, six at
 // Interlagos. Raced in Fuscas (model), in Modo Corrida only: the story's Opala 99 does not race it.
 export const COPA_FUSCA_2026=Object.freeze([
  ['interlagos','Interlagos - SP','21 e 22 FEV'],['brasilia','Brasília - DF','21 e 22 MAR'],['interlagos','Interlagos - SP','18 e 19 ABR'],
@@ -27,7 +27,7 @@ export const CHAMPIONSHIP_MODES=Object.freeze(['corrida','historia']);
 export const CHAMPIONSHIP_CALENDARS=Object.freeze({
  todas:Object.freeze({id:'todas',name:'Todas as pistas',title:'Todas as pistas, somando pontos',label:'CAMPEONATO',modes:CHAMPIONSHIP_MODES,rounds:Object.freeze(CHAMPIONSHIP_ROUNDS.map(circuit=>Object.freeze({circuit})))}),
  oldstock2026:Object.freeze({id:'oldstock2026',name:'Old Stock 2026',title:'Temporada 2026, nas datas da Old Stock',label:'OLD STOCK 2026',modes:CHAMPIONSHIP_MODES,rounds:OLD_STOCK_2026}),
- copafusca2026:Object.freeze({id:'copafusca2026',name:'Copa Fusca 2026',title:'Temporada 2026, nas datas da Copa Fusca GT-Oil',label:'COPA FUSCA 2026',modes:Object.freeze(['corrida']),model:'fusca',kind:'de Fusca',rounds:COPA_FUSCA_2026})});
+ copafusca2026:Object.freeze({id:'copafusca2026',name:'Copa Fusca 2026',title:'Temporada 2026, nas datas da Copa Fusca Seineca',label:'COPA FUSCA 2026',modes:Object.freeze(['corrida']),model:'fusca',kind:'de Fusca',rounds:COPA_FUSCA_2026})});
 // The calendars a mode offers (its tabs, in order); one it does not offer falls back to Todas as pistas.
 export const calendarsFor=mode=>Object.keys(CHAMPIONSHIP_CALENDARS).filter(id=>CHAMPIONSHIP_CALENDARS[id].modes.includes(mode));
 export const championshipCalendar=(id,mode)=>Object.hasOwn(CHAMPIONSHIP_CALENDARS,id)&&(!mode||CHAMPIONSHIP_CALENDARS[id].modes.includes(mode))?id:'todas';
