@@ -2,7 +2,7 @@ import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {structureMaterial} from './landscape.js';
 import {RIVAL_ROSTER} from './race-roster.js';
-import {canvasTexture,garageDoors,facadeGlass,tyreWall,css,pitLaneSign} from './pit-textures.js';
+import {canvasTexture,garageDoors,facadeGlass,FACADE_GLASS_ROWS,tyreWall,css,pitLaneSign} from './pit-textures.js';
 import {createPeople} from './pit-crew.js';
 import {createBox99,tyreStacks} from './pit-box99.js';
 import {curveloPitFrame,inPitBox,garageBays,pitLane} from './pit-lane.js';
@@ -43,8 +43,13 @@ export function createPitBuildings({pit,c,lerp,at,root,obstacles,textures,labels
  const place=(list,g,p,d,y)=>{const o=at(p,d);g.rotateY(heading(p));g.translate(o.x,y,o.z);list.push(g);};
  // Box 99 and the café next to it are open (floor above and back rooms only); rival
  // teams take the closed garages nearest Box 99, further away the doors are plain.
- const skins=[0xc68e6a,0x8d5a3b,0xe0b08f,0x6b4128,0xb77a55];
+ const skins=[0xc68e6a,0x8d5a3b,0xe0b08f,0x6b4128,0xb77a55,0xa0694a,0x553322,0xd9a982];
  const slope=Math.tan(.28),panel=bay/2/Math.cos(.28),span=depth+3,mid=depth/2-.5;
+ // One seeded draw per bay, per circuit: who stands at the doors and on the terrace, the tyre stacks
+ // and which glass the bay shows, so nothing repeats in a fixed every-second or every-third rhythm.
+ let seed=(Math.round(pit.garages[0]*10)+bays*7919)>>>0||1;const rnd=()=>(seed=(Math.imul(seed,1664525)+1013904223)>>>0)/4294967296,pick=list=>list[Math.floor(rnd()*list.length)];
+ const tops=[0xf2f0ea,0x2f6db5,0xe690a8,0x1b1d20,0xc8a23a,0x7a8b6f,0xb23a3a,0x4a4f57,0xe8e2d0,0x2e6b4f],bottoms=[0x2d3338,0x3b4a66,0x1b1d20,0x6b5a45,0x8a8f96];
+ const look=()=>({skin:pick(skins),hairStyle:pick(['short','short','long','curly','bald']),hair:pick([0x2b1f17,0x1b1410,0x5a3a22,0x8a7a6a]),mustache:rnd()<.2,belly:rnd()*rnd()*.8,glasses:rnd()<.15});
  for(let b=0;b<bays;b++){
   const s=pit.garages[0]+(b+.5)*bay,p=lerp(s),front=(open.has(b)?b99.front:p[c.hi])+.35,hd=heading(p),base=p[c.z];
   if(open.has(b)){box(parts.block,p,front+depth/2,0,bay,depth,3,5.2);if(depth>17)box(parts.block,p,front+(16.5+depth)/2,0,bay,depth-16.5,5.2+sink,-sink);}
@@ -52,16 +57,36 @@ export function createPitBuildings({pit,c,lerp,at,root,obstacles,textures,labels
    box(parts.block,p,front+depth/2,0,bay,depth,8.2+sink,-sink);plane(parts.doors,p,front-.03,bay-2.4,4.6,0,doors.uv(teams.get(b)??RIVAL_ROSTER.length));
    box(parts.frames,p,front-.06,0,bay-2.1,.26,.2,4.6);for(const side of [-1,1])box(parts.frames,p,front-.06,side*(bay-2.25)/2,.15,.26,4.6,0);
    const team=teams.has(b)?RIVAL_ROSTER[teams.get(b)]:null;signs.push({p,front,label:String(b+1).padStart(2,'0'),color:team?.color??0x5d666b});
-   // The rival crews wait at their doors, some with a stack of tyres.
-   if(team){const side=b%2?1:-1,w=at(p,front-.7);crowd.push({name:'Porta_equipe_'+team.number,outfit:{top:team.color,bottom:0x2d3338,trim:0xf4f1ea,hands:0x1b1d20,hat:'cap',hatColor:team.color,skin:skins[b%5],mustache:b%4===1},pose:['folded','stand','ready'][b%3],x:w.x+p[c.tx]*side*3,y:w.y+.05,z:w.z-p[c.ty]*side*3,yaw:hd-Math.PI/2+(b%3-1)*.4});
-    if(b%2===0){const t=at(p,front-.62);tyres.push([t.x-p[c.tx]*side*3.6,t.y+.035,t.z+p[c.ty]*side*3.6,hd,3+b%3]);}}
+   // The rival crews wait at their doors: nobody, one or a few, each where they like; tyres stacked at some.
+   // #19's door always has one (Leonardo takes his place in the story paddock, immersive-visuals.js leoDoor);
+   // the draw stays, so the other bays keep theirs.
+   if(team){
+    const n=Math.max(team.number==='19'?1:0,pick([0,1,1,1,2,2,3])),tyreSide=rnd()<.5?1:-1,stack=rnd()<.45,parked=teams.get(b)<4,placed=[];let first=null;
+    // Along the bay: off the tyre stack, inside the bay, and (the four teams nearest Box 99 park a car nose in at
+    // the door in the story, immersive-visuals.js) clear of its flanks; never in another crewman's place.
+    const fit=a=>{if(stack&&Math.abs(a-tyreSide*3.6)<1)a-=tyreSide*1.2;a=Math.max(-(bay/2-.9),Math.min(bay/2-.9,a));return parked&&Math.abs(a)<1.5?(a<0?-1.5:1.5):a;};
+    const crowded=a=>placed.some(q=>Math.abs(q-a)<.7);
+    for(let k=0;k<n;k++){
+     // A second or third one keeps the first company, turned toward them; pushed onto someone by the rules above,
+     // he takes the first one's other side, or stays inside (his draw still made, so the next bays keep theirs).
+     const raw=first===null?(rnd()<.5?-1:1)*(1.2+rnd()*3):first+(rnd()<.5?-1:1)*(.8+rnd()*.5);let along=fit(raw);if(crowded(along))along=fit(2*first-raw);
+     const w=at(p,front-.45-rnd()*1.3),yaw=first===null?hd-Math.PI/2+(rnd()-.5)*1.1:hd+(along>first?Math.PI:0)+(rnd()-.5)*.6;
+     const hat=rnd(),polo=rnd()<.3;
+     const person={...(k===0?{name:'Porta_equipe_'+team.number}:{}),outfit:{top:polo?0xf4f1ea:team.color,bottom:pick(polo?bottoms:[0x2d3338,0x2d3338,team.color]),trim:polo?team.color:0xf4f1ea,hands:rnd()<.6?0x1b1d20:null,sleeves:polo?'short':'long',hat:hat<.55?'cap':hat<.68?'headset':null,hatColor:team.color,...look()},pose:pick(['folded','stand','ready','rest','folded']),x:w.x+p[c.tx]*along,y:w.y+.05,z:w.z-p[c.ty]*along,yaw};
+     if(crowded(along))continue;
+     crowd.push(person);placed.push(along);first??=along;
+    }
+    if(stack){const t=at(p,front-.62);tyres.push([t.x+p[c.tx]*tyreSide*3.6,t.y+.035,t.z-p[c.ty]*tyreSide*3.6,hd+(rnd()-.5)*.5,2+Math.floor(rnd()*4)]);}
+   }
   }
   // Kerb between the lane's edge and the doors.
   box(parts.block,p,front-.17,0,bay,.39,.4,p[c.bank]*(front-.17)-.34);
-  if(b!==b99?.index)plane(parts.glass,p,front-.03,bay-1.2,2.5,5.45);
+  // Upper glass: one of the variants, shifted by whole panes and sometimes mirrored.
+  if(b!==b99?.index){const row=Math.floor(rnd()*FACADE_GLASS_ROWS),u0=Math.floor(rnd()*8)/8,v0=1-(row+1)/FACADE_GLASS_ROWS,v1=1-row/FACADE_GLASS_ROWS;plane(parts.glass,p,front-.03,bay-1.2,2.5,5.45,rnd()<.5?[u0,v0,u0+1,v1]:[u0+1,v0,u0,v1]);}
   // Fascia, terrace balustrade and a few people enjoying the view.
   box(parts.frames,p,front-.12,0,bay,.3,.35,8.2);plane(parts.rail,p,front+.3,bay,.95,8.55);box(parts.steel,p,front+.3,0,bay,.06,.06,9.47);
-  if(b%3===1)for(const off of [-2.2,1.6]){const w=at(p,front+1.1);crowd.push({outfit:{top:[0xf2f0ea,0x2f6db5,0xe690a8,0x1b1d20][(b+(off>0?1:0))%4],bottom:0x2d3338,skin:skins[(b+2)%5],hairStyle:['short','long','curly'][b%3]},pose:off<0?'stand':'folded',idle:'terrace',x:w.x+p[c.tx]*off,y:base+8.2,z:w.z-p[c.ty]*off,yaw:hd-Math.PI/2+off*.1});}
+  {const t=rnd(),n=t<.58?0:t<.74?1:t<.89?2:t<.96?3:4,c0=(rnd()-.5)*(bay-5);
+   for(let k=0;k<n;k++){const off=c0+(k-(n-1)/2)*(.75+rnd()*.4),w=at(p,front+.95+rnd()*1.1);crowd.push({outfit:{top:pick(tops),bottom:pick(bottoms),sleeves:rnd()<.5?'short':'long',hat:rnd()<.2?'cap':null,hatColor:pick(tops),...look()},pose:pick(['stand','folded','rest','stand','ready']),idle:'terrace',x:w.x+p[c.tx]*off,y:base+8.2,z:w.z-p[c.ty]*off,yaw:hd-Math.PI/2+(rnd()-.5)*.9});}}
   // Canopy: two sloped membrane panels per bay meeting at a ridge on the bay's
   // centre line, with edge beams at the front and back and a ridge tube.
   const o=at(p,front+mid);

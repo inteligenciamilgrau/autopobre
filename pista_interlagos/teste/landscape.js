@@ -1,8 +1,10 @@
 import * as THREE from 'three';
-import {clamp} from './physics.js';
+import {mergeVertices} from 'three/addons/utils/BufferGeometryUtils.js';
+import {clamp,guardrailPresent,guardrailClearance} from './physics.js';
 import {sceneryBands} from './track-clearance.js';
 import {LakeWaves,waveVertexCommon,waveVertex,waveFragmentCommon,waveClip} from './lake-waves.js';
 import {createVergeVegetation} from './verge-vegetation.js';
+import {carShadowPatch} from './car-shadow.js';
 
 // Land cover is read from the 2020 GeoSampa orthophoto already packed in the
 // track GLB: woods become 3D trees, orange roofs become houses, dark smooth
@@ -32,7 +34,7 @@ export async function loadTerrainTextures(renderer){
 export function buildTrackField(data,resolution=1024){
  const t=data.terrain,x0=t.x0,y0=t.y0,width=(t.nx-1)*t.step,height=(t.ny-1)*t.step;
  const nx=resolution,ny=Math.max(2,Math.round(resolution*height/width)),sx=width/nx,sy=height/ny;
- const edge=new Float32Array(nx*ny).fill(FIELD_RANGE),side=new Float32Array(nx*ny).fill(FIELD_RANGE),water=new Float32Array(nx*ny),inside=new Uint8Array(nx*ny);
+ const edge=new Float32Array(nx*ny).fill(FIELD_RANGE),side=new Float32Array(nx*ny).fill(FIELD_RANGE),water=new Float32Array(nx*ny),inside=new Uint8Array(nx*ny),paint=new Float32Array(nx*ny);
  const a=data.samples,n=a.length;
  for(const band of sceneryBands(data)){
   const b=band.points,count=b.length;
@@ -61,9 +63,11 @@ export function buildTrackField(data,resolution=1024){
  }
  const texture=new THREE.DataTexture(new Uint16Array(nx*ny*4),nx,ny,THREE.RGBAFormat,THREE.HalfFloatType);
  texture.magFilter=texture.minFilter=THREE.LinearFilter;texture.wrapS=texture.wrapT=THREE.ClampToEdgeWrapping;texture.generateMipmaps=false;
- const field={nx,ny,x0,y0,width,height,sx,sy,edge,side,water,inside,texture,
+ // Alpha: the infield flag (CPU only) plus half the painted run-off reaching the kerb (markRunoffPaint),
+ // so the shader reads the paint as fract(a)*2 (the flag only changes under the road).
+ const field={nx,ny,x0,y0,width,height,sx,sy,edge,side,water,inside,paint,texture,
   cell(x,y){const k=Math.floor((x-x0)/sx),j=Math.floor((y-y0)/sy);return k<0||j<0||k>=nx||j>=ny?-1:j*nx+k;},
-  upload(){const out=texture.image.data,h=THREE.DataUtils.toHalfFloat;for(let i=0;i<nx*ny;i++){out[i*4]=h(edge[i]);out[i*4+1]=h(side[i]);out[i*4+2]=h(water[i]);out[i*4+3]=h(inside[i]);}texture.needsUpdate=true;}
+  upload(){const out=texture.image.data,h=THREE.DataUtils.toHalfFloat;for(let i=0;i<nx*ny;i++){out[i*4]=h(edge[i]);out[i*4+1]=h(side[i]);out[i*4+2]=h(water[i]);out[i*4+3]=h(inside[i]+Math.min(paint[i],1)*.49);}texture.needsUpdate=true;}
  };
  field.upload();
  return field;
@@ -101,7 +105,55 @@ export function landCover(ortho,i){
   tree:smooth(0,.05,g-b)*smooth(-.06,-.01,g-r)*(1-smooth(.3,.42,lum)),
   roof:smooth(.07,.14,r-g)*smooth(.03,.1,g-b)*smooth(.3,.45,r),
   paved:(1-smooth(.1,.2,sat))*smooth(.35,.5,lum),
+  // Painted run-off (blue-green), as the terrain shader reads it (paintM).
+  paint:smooth(.05,.12,b-r)*smooth(.05,.12,g-r)*smooth(.3,.45,lum),
   water:(1-smooth(.13,.19,lum))*(1-smooth(.012,.03,ortho.rough[i]))};
+}
+// Where tyres off the track throw dirt (tyre-smoke.js soft): not on the photo's grey paving, nor on the
+// painted run-off the terrain draws as teal asphalt (field.paint past the shader's .5 line; too saturated
+// to read as paved).
+export function looseGround(field,ortho){
+ return (x,y)=>{const c=field?.cell(x,y)??-1;if(c>=0&&field.paint[c]>.5)return false;const i=ortho.index(x,y);return i<0||landCover(ortho,i).paved<.35;};
+}
+
+// Painted run-off (field.paint; the terrain shader and the verge grass both read it). It is paved from
+// the track up to the barrier where there is one (the real barrier stands further out, so the photo's
+// paint runs on behind it into the grass), 16 m out where there is none; blue-green further away is
+// shade or water, not paint. Near the track the thin kerb tints the metre or two beside it in the
+// photograph, which then read as grass: a cell takes the paint found up to 4.5 m further out.
+const RUNOFF_OPEN=16;
+function markRunoffPaint(field,ortho,data){
+ const {nx,ny,sx,sy,x0,y0,edge,paint}=field,a=data.samples,n=a.length,L=data.meta.reconstructed_xy_m,step=Math.min(sx,sy)*.6;
+ // How far out from the road edge each cell may be painted (0: not at all).
+ const reach=new Float32Array(nx*ny);
+ for(const side of [-1,1])for(let i=0;i<n;i++){
+  const p=a[i],q=a[(i+1)%n],len=((i+1<n?q[0]:L)-p[0])||1;
+  for(let f=0;f<1;f+=Math.min(1,step/len)){
+   const s=p[0]+f*len,lerp=k=>p[k]+(q[k]-p[k])*f,limit=guardrailPresent(data,s,side)?guardrailClearance(data,s,side)+.3:RUNOFF_OPEN;
+   const ux=-lerp(8)*side,uy=lerp(7)*side,half=lerp(4)/2,cx=lerp(1),cy=lerp(2);
+   for(let d=-.5;d<=limit+Math.max(sx,sy)*1.5;d+=step){const c=field.cell(cx+ux*(half+d),cy+uy*(half+d));if(c>=0)reach[c]=Math.max(reach[c],limit);}
+  }
+ }
+ let marked=0;
+ for(let j=1;j<ny-1;j++)for(let k=1;k<nx-1;k++){
+  const i=j*nx+k,e=edge[i];if(!reach[i]||e<-1)continue;
+  // Outward: up the distance to the track.
+  let gx=(edge[i+1]-edge[i-1])/(2*sx),gy=(edge[i+nx]-edge[i-nx])/(2*sy);const g=Math.hypot(gx,gy);if(g<1e-3)continue;gx/=g;gy/=g;
+  const x=x0+(k+.5)*sx,y=y0+(j+.5)*sy;let best=0;
+  for(const r of [0,1.5,3,4.5]){if(r&&(e>6||e+r>reach[i]))break;const o=ortho.index(x+gx*r,y+gy*r);if(o>=0)best=Math.max(best,landCover(ortho,o).paint);}
+  if(best>.3)paint[i]=1;
+ }
+ // One pixel of the photo decides a cell: close the pinholes and drop the specks it leaves. Then the
+ // barrier side becomes a ramp across the cell (its share inside the reach), so the shader's .5 line
+ // runs smooth along the barrier instead of beading round the cells.
+ const was=paint.slice(),cell=Math.max(sx,sy);
+ for(let j=1;j<ny-1;j++)for(let k=1;k<nx-1;k++){
+  const i=j*nx+k;if(!reach[i])continue;
+  const around=was[i-1]+was[i+1]+was[i-nx]+was[i+nx];
+  const on=was[i]?around>1:around>=3;
+  paint[i]=on?clamp((reach[i]-edge[i])/cell+.5,0,1):0;marked+=paint[i]>.5;
+ }
+ return marked;
 }
 
 // Floating plants and glare leave dry specks inside a lake: close them, but keep
@@ -455,18 +507,28 @@ export function terrainMaterial(textures,field,{ortho=null,cover=null,mobile=fal
 uniform sampler2D grassMap,wildMap,concreteMap,gravelMap,grassNormalMap,trackField,shoreMap,coverMap;uniform vec4 fieldBounds,shoreBounds;uniform float shoreOn;varying vec3 vLandWorld;
 float landHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
 float landNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(landHash(i),landHash(i+vec2(1,0)),f.x),mix(landHash(i+vec2(0,1)),landHash(i+vec2(1,1)),f.x),f.y);}
+// A turn by any angle from two hashes (0..1), no trig. A few fixed turns would not do: two cells with the
+// same turn match whole at some offset, and the ground shows the pair.
+mat2 landTurn(vec2 h){vec2 r=normalize(h-.5+1e-4);return mat2(r.x,r.y,-r.y,r.x);}
 `).replace('#include <map_fragment>',`
 vec4 field=texture2D(trackField,vec2((vLandWorld.x-fieldBounds.x)/fieldBounds.z,(-vLandWorld.z-fieldBounds.y)/fieldBounds.w));
 float edgeDist=field.r,lateral=field.g,waterBed=field.b,viewDist=length(vLandWorld-cameraPosition);
 vec2 w=vLandWorld.xz;
-float macro=landNoise(w*.011)*.6+landNoise(w*.043)*.4;
+float macroFar=landNoise(w*.011),macroNear=landNoise(w*.043),macro=macroFar*.6+macroNear*.4;
 #ifdef USE_MAP
  vec3 ortho=texture2D(map,vMapUv,1.0).rgb,cs=pow(max(texture2D(map,vMapUv,2.2).rgb,vec3(0.0)),vec3(1.0/2.2));
  float lum=dot(cs,vec3(.299,.587,.114)),mx=max(cs.r,max(cs.g,cs.b)),sat=(mx-min(cs.r,min(cs.g,cs.b)))/max(mx,.001);
  float treeM=smoothstep(0.0,.05,cs.g-cs.b)*smoothstep(-.06,-.01,cs.g-cs.r)*(1.0-smoothstep(.3,.42,lum));
  float roofM=smoothstep(.07,.14,cs.r-cs.g)*smoothstep(.03,.1,cs.g-cs.b)*smoothstep(.3,.45,cs.r);
  float pavedM=(1.0-smoothstep(.1,.2,sat))*smoothstep(.35,.5,lum);
- float paintM=smoothstep(.05,.12,cs.b-cs.r)*smoothstep(.05,.12,cs.g-cs.r)*smoothstep(.3,.45,lum);
+ // Painted run-off: the photo's blue-green as markRunoffPaint kept it, between the track and the barrier
+ // (behind it and far out it is shade or grass). Its cells are 1.6 m, so near the camera the paint
+ // ends at a crisp, gently wavy edge; read from the photo it faded into the grass like a smudge.
+ float paintM=fract(field.a)*2.0,paintAa=max(fwidth(paintM),.015);
+ if(paintM>.001){
+  float paintEdge=paintM+(landNoise(w*.9+4.2)-.5)*.1+(landNoise(w*3.7+1.1)-.5)*.04;
+  paintM=mix(paintM,smoothstep(.5-paintAa,.5+paintAa,paintEdge),1.0-smoothstep(120.0,260.0,viewDist));
+ }
  vec3 wildTint=clamp(ortho/vec3(.19,.15,.085),vec3(.5),vec3(1.7));
 #else
  // Cerrado without photography: broad dry and green patches.
@@ -481,8 +543,17 @@ float bareM=0.0;
 #endif
 treeM*=1.0-waterBed;
 #ifdef LAND_SIMPLE
- vec3 grass=texture2D(grassMap,w/3.3).rgb;
- vec3 wild=texture2D(wildMap,w/4.2).rgb;
+ // Still one lookup, but each tile-sized cell, its edges wavy, takes the grass with its own offset and
+ // turn (landTurn), so the 3.3 m tile never lines up; the explicit gradients keep the mip level at the
+ // edges. The offsets need hashes of their own: derived from the turn's, they repeat whole cells.
+ vec2 cellWobble=(vec2(landNoise(w*.23),landNoise(w*.23+5.2))-.5)*.9;
+ vec2 grassUv=w/3.3,grassCell=floor(grassUv+cellWobble);
+ vec2 grassPick=vec2(landHash(grassCell+3.1),landHash(grassCell+7.7));mat2 grassRot=landTurn(grassPick);
+ vec3 grass=textureGrad(grassMap,grassRot*grassUv+grassPick*7.0,grassRot*dFdx(grassUv),grassRot*dFdy(grassUv)).rgb;
+ // The rough ground the same way, on its own 4.2 m cells (the same wobble, turned).
+ vec2 wildUv=w/4.2,wildCell=floor(wildUv+vec2(cellWobble.y,-cellWobble.x));
+ vec2 wildPick=vec2(landHash(wildCell+5.9),landHash(wildCell+2.3));mat2 wildRot=landTurn(wildPick);
+ vec3 wild=textureGrad(wildMap,wildRot*wildUv+wildPick*7.0,wildRot*dFdx(wildUv),wildRot*dFdy(wildUv)).rgb;
  vec3 concrete=texture2D(concreteMap,w/3.9).rgb;
 #else
  // Rotated layers keep the blades and stones at a believable scale and break
@@ -497,22 +568,28 @@ treeM*=1.0-waterBed;
 // blades one way per stripe: seen along the cut a stripe is light, against it dark, so
 // the pattern swaps as the view turns, like the verges of a real circuit.
 float groomed=1.0-smoothstep(14.0,30.0,edgeDist);
+// The mower wandered: stripes about 6 m wide that drift and change width, stronger in some stretches.
+// (The broad noises already worked out above, so the drift costs nothing.)
+float mowLine=lateral+(macroFar-.5)*5.0,mowStrength=.45+.75*macroNear;
 #ifdef LAND_SIMPLE
-float sheen=sin(lateral*1.0472)*.25;
+float sheen=sin(mowLine*1.0472)*.25*mowStrength;
 #else
 vec2 fieldUV=vec2((vLandWorld.x-fieldBounds.x)/fieldBounds.z,(-vLandWorld.z-fieldBounds.y)/fieldBounds.w);
 vec2 across=vec2(texture2D(trackField,fieldUV+vec2(3.0/fieldBounds.z,0.0)).g-lateral,texture2D(trackField,fieldUV+vec2(0.0,3.0/fieldBounds.w)).g-lateral);
 vec2 cut=normalize(vec2(-across.y,across.x)+1e-5);cut.y=-cut.y;
-float parity=step(.5,fract(lateral/6.0))*2.0-1.0,stripeEdge=smoothstep(.0,.06,abs(fract(lateral/6.0)-.5))*smoothstep(.0,.06,.5-abs(fract(lateral/6.0)-.5));
+float parity=step(.5,fract(mowLine/6.0))*2.0-1.0,stripeEdge=smoothstep(.0,.06,abs(fract(mowLine/6.0)-.5))*smoothstep(.0,.06,.5-abs(fract(mowLine/6.0)-.5));
 vec2 mowView=normalize(vLandWorld.xz-cameraPosition.xz+1e-4);
-float sheen=dot(mowView,cut)*parity*stripeEdge;
+float sheen=dot(mowView,cut)*parity*stripeEdge*min(mowStrength,1.0);
 #endif
 float dryPatch=smoothstep(.55,.85,landNoise(w*.021+7.3)*.7+landNoise(w*.09)*.3);
-vec3 lawn=grass*vec3(.54,.73,.39)*(1.0+.12*sheen)*mix(.84,1.08,macro);
+// Patches of a few metres too: the macro noise starts at 23 m.
+float lawnPatch=landNoise(w*.14+3.9);
+vec3 lawn=grass*vec3(.54,.73,.39)*(1.0+.12*sheen)*mix(.84,1.08,macro)*mix(.93,1.06,lawnPatch);
 lawn=mix(lawn,lawn*vec3(1.22,1.02,.7),dryPatch*.55);
-// Worn, dusty strip where cars run wide off the kerbs.
+// Worn, dusty strip where cars run wide off the kerbs: grey-brown soil, not a yellow glow.
 float worn=(1.0-smoothstep(.6,3.2,edgeDist))*smoothstep(.35,.75,landNoise(w*.28)+landNoise(w*1.3)*.25);
-lawn=mix(lawn,wild*vec3(.82,.68,.5),worn*.7);
+vec3 soil=wild*vec3(.8,.72,.6);
+lawn=mix(lawn,mix(vec3(dot(soil,vec3(.3,.55,.15))),soil,.55),worn*.65);
 #ifndef LAND_SIMPLE
  // Small exposed stones in the worn edge, fading before they can shimmer.
  vec3 grit=texture2D(gravelMap,w/1.4).rgb*vec3(.58,.52,.4);
@@ -525,7 +602,18 @@ ground=mix(ground,lawn,groomed*(1.0-pavedM)*(1.0-paintM));
 vec3 asphalt=concrete*vec3(.33,.34,.35);
 vec3 paved=mix(concrete*clamp(lum*1.25,.45,1.2),asphalt,groomed);
 ground=mix(ground,paved,pavedM*(1.0-paintM));
-ground=mix(ground,mix(asphalt*1.15,vec3(.03,.1,.085),.5),paintM);
+// Painted run-off (the aerial photo's blue-green): paint long faded to a dull grey-olive, worn back to
+// the asphalt in patches, with dark tyre streaks along the track where the cars went wide.
+// Only where there is paint: most of the ground has none.
+float runoffRubber=0.0;
+if(paintM>.001){
+ vec3 runoff=mix(vec3(.078,.083,.066),vec3(.066,.066,.064),smoothstep(.45,.75,landNoise(w*.31+1.7)*.65+landNoise(w*1.7)*.35));
+ // The aggregate shows through the paint (the concrete lookup's grain, about a third of its contrast).
+ runoff*=mix(.9,1.08,landNoise(w*.06+4.4))*mix(.94,1.05,landNoise(w*.9+2.2))*mix(1.0,clamp(dot(concrete,vec3(.3,.55,.15))/.15,.5,1.6),.35);
+ runoffRubber=smoothstep(.58,.86,landNoise(vec2(lateral*2.3,0.0)+w*.035))*(1.0-smoothstep(1.5,11.0,edgeDist));
+ runoff*=1.0-runoffRubber*.42;
+ ground=mix(ground,runoff,paintM);
+}
 ground=mix(ground,concrete*.55,roofM*(1.0-groomed));
 // Exposed soil keeps the colour seen from orbit (the red earth of western Paraná, dry fields).
 ground=mix(ground,mix(wild*vec3(.62,.45,.32),ortho*1.3,.6),bareM*(1.0-groomed*.8));
@@ -537,7 +625,7 @@ float lakeBedM=shoreOn>.5?smoothstep(-.4,.5,shoreD):waterBed,bankM=smoothstep(-3
 ground=mix(ground,ground*vec3(.58,.55,.46),bankM*.75);
 ground=mix(ground,vec3(.035,.045,.03),lakeBedM);
 diffuseColor.rgb=ground;
-`).replace('#include <roughnessmap_fragment>',`float roughnessFactor=mix(.96,.8,max(pavedM,paintM));
+`).replace('#include <roughnessmap_fragment>',`float roughnessFactor=mix(.96,.8,max(pavedM,paintM))-paintM*runoffRubber*.1;
 roughnessFactor=mix(roughnessFactor,.63,bankM*.7);`)
   .replace('#include <normal_fragment_maps>',`#include <normal_fragment_maps>
 #ifndef LAND_SIMPLE
@@ -545,31 +633,39 @@ roughnessFactor=mix(roughnessFactor,.63,bankM*.7);`)
  float bumpAmount=(1.0-smoothstep(10.0,65.0,viewDist))*(1.0-pavedM)*(1.0-paintM)*(1.0-lakeBedM)*.4;
  normal=normalize(normal+(viewMatrix*vec4(grassBump.x,0.0,-grassBump.y,0.0)).xyz*bumpAmount);
 #endif`);
+  carShadowPatch(shader);
  };
  material.defines={...(mobile?{LAND_SIMPLE:''}:{}),...(cover&&ortho?{USE_COVER:''}:{})};
- material.customProgramCacheKey=()=>'terrain-landscape-v4-'+(ortho?'ortho':'cerrado')+(cover&&ortho?'-cover':'')+(mobile?'-mobile':'');
+ material.customProgramCacheKey=()=>'terrain-landscape-v5-'+(ortho?'ortho':'cerrado')+(cover&&ortho?'-cover':'')+(mobile?'-mobile':'');
  return material;
 }
 
 // --- Instanced scenery -------------------------------------------------------
+// Parts keep their index, so a vertex shared by several triangles runs the vertex shader once
+// (thousands of fans and trees). p.attrs: extra per-part floats (the fans' limb) as attributes;
+// p.colors: per-vertex data in place of p.color (the fans' flag cloth).
 function merge(parts){
- for(const p of parts){if(p.geometry.index)p.geometry=p.geometry.toNonIndexed();p.facet??=.35;}
- let count=0;for(const p of parts)count+=p.geometry.attributes.position.count;
- const position=new Float32Array(count*3),normal=new Float32Array(count*3),color=new Float32Array(count*3),mask=new Float32Array(count),uvs=new Float32Array(count*2);let offset=0;
+ let count=0,indexCount=0;const extra=new Set();
+ for(const p of parts){p.facet??=.35;const g=p.geometry;count+=g.attributes.position.count;indexCount+=g.index?g.index.count:g.attributes.position.count;for(const k of Object.keys(p.attrs??{}))extra.add(k);}
+ const position=new Float32Array(count*3),normal=new Float32Array(count*3),color=new Float32Array(count*3),mask=new Float32Array(count),uvs=new Float32Array(count*2);
+ const index=count>65535?new Uint32Array(indexCount):new Uint16Array(indexCount),more=Object.fromEntries([...extra].map(k=>[k,new Float32Array(count)]));let offset=0,at=0;
  for(const p of parts){
   const pos=p.geometry.attributes.position,nor=p.geometry.attributes.normal,uv=p.leaf?p.geometry.attributes.uv:null;
   for(let i=0;i<pos.count;i++){
    const x=pos.getX(i),y=pos.getY(i),z=pos.getZ(i),o=offset+i;position.set([x,y,z],o*3);
    let n=[nor.getX(i),nor.getY(i),nor.getZ(i)];
    if(p.center){const d=[x-p.center[0],y-p.center[1],z-p.center[2]],l=Math.hypot(...d)||1;n=n.map((v,k)=>v*p.facet+d[k]/l*(1-p.facet));const l2=Math.hypot(...n);n=n.map(v=>v/l2);}
-   normal.set(n,o*3);color.set(p.color(x,y,z),o*3);mask[o]=p.mask;
+   normal.set(n,o*3);color.set(p.colors?p.colors.subarray(i*3,i*3+3):p.color(x,y,z),o*3);mask[o]=p.mask;
    // Leaf cards use the cluster drawn in the atlas; everything else its solid corner.
    if(uv)uvs.set([uv.getX(i)*LEAF_SPAN,uv.getY(i)*LEAF_SPAN],o*2);else uvs.set(SOLID_UV,o*2);
   }
+  for(const k of extra)more[k].fill(p.attrs?.[k]??0,offset,offset+pos.count);
+  const idx=p.geometry.index;if(idx)for(let i=0;i<idx.count;i++)index[at++]=offset+idx.getX(i);else for(let i=0;i<pos.count;i++)index[at++]=offset+i;
   offset+=pos.count;
  }
  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.BufferAttribute(position,3));g.setAttribute('normal',new THREE.BufferAttribute(normal,3));g.setAttribute('color',new THREE.BufferAttribute(color,3));g.setAttribute('partMask',new THREE.BufferAttribute(mask,1));g.setAttribute('uv',new THREE.BufferAttribute(uvs,2));
- g.computeBoundingSphere();return g;
+ for(const k of extra)g.setAttribute(k,new THREE.BufferAttribute(more[k],1));
+ g.setIndex(new THREE.BufferAttribute(index,1));g.computeBoundingSphere();return g;
 }
 // Leaf atlas: one cluster of leaves over most of the square, and an opaque white corner
 // for trunks and branches. Grey-green so each tree's own colour still tints it.
@@ -620,39 +716,56 @@ function branch(parts,from,to,r0,r1,bark){
  parts.push({geometry:g,mask:0,color:()=>bark});
 }
 // Near trees: trunk, a few limbs and a leaf-card crown (1 m tall unit; instances scale them).
-function foliageTreeGeometry(kind,seed,detail=1){
+// form (near crowns of the full builds, one mesh each): 0 the plain crown; round 1 a spreading
+// crown in two lobes on a forked trunk, 2 an upright oval; tall 1 a eucalyptus with a bare trunk and
+// a thin crown on top, 2 a column widest halfway up. About the same cards in each.
+function foliageTreeGeometry(kind,seed,detail=1,form=0){
  const rand=random(seed),parts=[],bark=[.13,.11,.09],far=detail===0;
  if(kind==='tall'){
-  branch(parts,[0,0,0],[0,.8,0],.028,.012,bark);
-  if(!far)for(let i=0;i<3;i++){const a=rand()*Math.PI*2,y=.5+i*.1;branch(parts,[0,y,0],[Math.cos(a)*.11,y+.12,Math.sin(a)*.11],.009,.004,bark);}
-  leafCrown(parts,rand,{center:[0,.7,0],radii:[.2,.3,.2],cards:far?9:30,size:far?.3:.2});
+  if(form===1){
+   branch(parts,[0,0,0],[.03,.9,0],.03,.011,bark);
+   for(let i=0;i<3;i++){const a=rand()*Math.PI*2,y=.6+i*.08;branch(parts,[.02,y,0],[Math.cos(a)*.13,y+.14,Math.sin(a)*.13],.008,.004,bark);}
+   leafCrown(parts,rand,{center:[.03,.8,0],radii:[.25,.16,.22],cards:20,size:.2});leafCrown(parts,rand,{center:[-.05,.63,.04],radii:[.15,.11,.14],cards:10,size:.18});
+  }else{
+   branch(parts,[0,0,0],[0,.8,0],.028,.012,bark);
+   if(!far)for(let i=0;i<3;i++){const a=rand()*Math.PI*2,y=.5+i*.1;branch(parts,[0,y,0],[Math.cos(a)*.11,y+.12,Math.sin(a)*.11],.009,.004,bark);}
+   leafCrown(parts,rand,form===2?{center:[0,.62,0],radii:[.25,.32,.23],cards:30,size:.21}:{center:[0,.7,0],radii:[.2,.3,.2],cards:far?9:30,size:far?.3:.2});
+  }
+ }else if(form===1){
+  branch(parts,[0,0,0],[.02,.3,0],.055,.04,bark);
+  for(const [x,z] of [[.2,.05],[-.17,-.07]])branch(parts,[.02,.28,0],[x,.5,z],.035,.018,bark);
+  leafCrown(parts,rand,{center:[.17,.58,.06],radii:[.32,.22,.3],cards:21,size:.29});leafCrown(parts,rand,{center:[-.16,.55,-.07],radii:[.3,.2,.28],cards:19,size:.28});
  }else{
-  branch(parts,[0,0,0],[.02,.42,0],.05,.03,bark);
+  branch(parts,[0,0,0],[.02,form===2?.5:.42,0],.05,.03,bark);
   if(!far)for(let i=0;i<4;i++){const a=i/4*Math.PI*2+rand()*.8;branch(parts,[.02,.36+rand()*.06,0],[Math.cos(a)*.22,.6+rand()*.12,Math.sin(a)*.22],.022,.01,bark);}
-  leafCrown(parts,rand,{center:[0,.64,0],radii:[.44,.3,.44],cards:far?12:40,size:far?.42:.3});
+  leafCrown(parts,rand,form===2?{center:[0,.68,0],radii:[.35,.33,.35],cards:40,size:.28}:{center:[0,.64,0],radii:[.44,.3,.44],cards:far?12:40,size:far?.42:.3});
  }
  return merge(parts);
 }
 // Displacement depends only on the original position, so shared corners stay welded.
 function lumpy(geometry,seed,amount){const p=geometry.attributes.position;for(let i=0;i<p.count;i++){const x=p.getX(i),y=p.getY(i),z=p.getZ(i),h=Math.sin(x*12.99+y*78.23+z*37.71+seed)*43758.5453,k=1+(h-Math.floor(h)-.5)*amount;p.setXYZ(i,x*k,y*k,z*k);}return geometry;}
+// A welded, smooth-shaded lump of foliage: no hard facets, and each corner shades once.
+function leafBlob(detail,seed,amount){const g=mergeVertices(new THREE.IcosahedronGeometry(1,detail).deleteAttribute('normal').deleteAttribute('uv'));lumpy(g,seed,amount);g.computeVertexNormals();return g;}
 
 // Unit trees (1 m tall, ~1 m crown); instances scale them. partMask marks foliage.
-// detail 1: near crowns (~110 triangles); detail 0: distant crowns (~20 triangles).
-function treeGeometry(kind,seed,detail=1){
+// detail 1: near crowns (rounded lumps, ~250 triangles); detail 0: distant crowns, one lump (26
+// triangles), both on a trunk so a far crown never floats.
+// lean (Básico): every near lump the plain one, as the light build had before the rounder crowns.
+function treeGeometry(kind,seed,detail=1,lean=false){
  const rand=random(seed),parts=[],bark=[.09,.07,.05],far=detail===0;
  const shade=(low,high)=>(x,y)=>{const s=.5+.5*smooth(low,high,y);return [s,s,s];};
  if(kind==='tall'){
-  if(!far)parts.push({geometry:new THREE.CylinderGeometry(.018,.034,.72,4,1,true).translate(0,.36,0),mask:0,color:()=>bark});
-  const layers=far?2:4;
-  for(let i=0;i<layers;i++){const y=.56+i*.36/layers*1.3,r=.2-i*.1/layers,c=[(rand()-.5)*.08,y,(rand()-.5)*.08];
-   const g=far?new THREE.OctahedronGeometry(1,0).scale(r*1.1,r*1.1,r*1.1).translate(...c):lumpy(new THREE.IcosahedronGeometry(1,0),rand()*100,.3).scale(r,r*.8,r).translate(...c);
-   parts.push({geometry:g,mask:1,center:c,facet:.12,color:shade(.45,1)});}
+  parts.push({geometry:far?new THREE.CylinderGeometry(.02,.034,.62,3,1,true).translate(0,.31,0):new THREE.CylinderGeometry(.018,.034,.72,4,1,true).translate(0,.36,0),mask:0,color:()=>bark});
+  if(far)parts.push({geometry:leafBlob(0,rand()*100,.18).scale(.2,.4,.2).translate(0,.72,0),mask:1,center:[0,.72,0],facet:.12,color:shade(.4,1)});
+  else for(let i=0;i<4;i++){const y=.56+i*.36/4*1.3,r=.2-i*.1/4,c=[(rand()-.5)*.08,y,(rand()-.5)*.08];
+   parts.push({geometry:leafBlob(i<2&&!lean?1:0,rand()*100,.3).scale(r,r*.8,r).translate(...c),mask:1,center:c,facet:.12,color:shade(.45,1)});}
  }else{
-  if(!far)parts.push({geometry:new THREE.CylinderGeometry(.03,.055,.5,4,1,true).translate(0,.25,0),mask:0,color:()=>bark});
-  const blobs=far?[[0,.66,0,.36],[.08,.52,-.06,.3]]:[[0,.72,0,.3],[.2,.58,.1,.24],[-.18,.6,.14,.23],[.05,.58,-.22,.24],[-.12,.5,-.1,.2]];
-  for(const [x,y,z,r] of blobs){const c=[x+(rand()-.5)*.06,y,z+(rand()-.5)*.06];
-   const g=far?new THREE.OctahedronGeometry(1,0).scale(r,r*.85,r).translate(...c):lumpy(new THREE.IcosahedronGeometry(1,0),rand()*100,.35).scale(r,r*.85,r).translate(...c);
-   parts.push({geometry:g,mask:1,center:[0,.6,0],facet:.12,color:shade(.35,.95)});}
+  parts.push({geometry:far?new THREE.CylinderGeometry(.03,.05,.42,3,1,true).translate(0,.21,0):new THREE.CylinderGeometry(.03,.055,.5,4,1,true).translate(0,.25,0),mask:0,color:()=>bark});
+  const blobs=far?[[0,.62,0,.42]]:[[0,.72,0,.3],[.2,.58,.1,.24],[-.18,.6,.14,.23],[.05,.58,-.22,.24],[-.12,.5,-.1,.2]];
+  // The two largest lumps are rounder; the small ones only break the outline.
+  blobs.forEach(([x,y,z,r],i)=>{const c=[x+(rand()-.5)*.06,y,z+(rand()-.5)*.06];
+   const g=leafBlob(far||lean||i>1?0:1,rand()*100,far?.28:.35).scale(r,r*(far?.75:.85),r).translate(...c);
+   parts.push({geometry:g,mask:1,center:[0,.6,0],facet:.12,color:shade(.35,.95)});});
  }
  return merge(parts);
 }
@@ -685,17 +798,103 @@ function houseGeometry(flat){
  }
  return merge(parts);
 }
-function sceneryMaterial(kind,{foliage=false}={}){
+// Per-instance shape of a tree, from the hash of its position (the same in the colour pass and the
+// shadow pass): a crown with its own lobes, height and seat on the trunk, a wider or narrower spread
+// across each axis and a lean that grows up the trunk.
+const TREE_SHAPE=`
+float treeSeedOf(){return fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453);}
+void treeShape(inout vec3 p,float seed){
+ float h1=fract(seed*91.7),h2=fract(seed*37.3),h3=fract(seed*13.1),h4=fract(seed*5.9),h5=fract(seed*23.7);
+ if(partMask>.5){
+  float a=atan(p.z,p.x+1e-5);
+  p.xz*=1.0+.16*sin(a*3.0+h1*6.283)+.08*sin(a*5.0+h2*6.283);
+  p.y=.4+(p.y-.4)*(.85+.3*h3)-.06*h4;
+ }
+ p.x*=.87+.26*h2;p.z*=.87+.26*h5;
+ p.xz+=vec2(cos(h1*6.283+h4*3.0),sin(h1*6.283+h4*3.0))*(.015+.045*h3)*p.y*p.y;
+}`;
+// The tree's own vertex work, shared by the colour and shadow passes; each tree sways on its own.
+const TREE_VERTEX=`
+#ifdef USE_INSTANCING
+ float treeSeed=treeSeedOf();
+ treeShape(transformed,treeSeed);
+ float sway=sin(landTime*1.4+instanceMatrix[3].x*.07+instanceMatrix[3].z*.05)*.012*(.7+.6*fract(treeSeed*3.3))*partMask*position.y;
+ transformed.x+=sway;transformed.z+=sway*.6;
+#endif`;
+// Grandstand fans: one merged figure posed per instance (fanData: pose, seed, sun share, sky share).
+// Poses: 0 seated, 1 arms folded, 2 phone up, 3 elbows on knees, 4 standing, 5 standing and cheering,
+// 6 waving a flag seated, 7 standing with it. Limbs (attribute): 0 torso, 1-2 left upper arm and
+// forearm, 3-4 right, 5 thighs, 6 shins, 7 head, 8 the flag in the right hand.
+const FAN_POSE=`
+mat3 fanX(float a){float c=cos(a),s=sin(a);return mat3(1.0,0.0,0.0,0.0,c,s,0.0,-s,c);}
+mat3 fanY(float a){float c=cos(a),s=sin(a);return mat3(c,0.0,-s,0.0,1.0,0.0,s,0.0,c);}
+void fanPose(inout vec3 p,inout vec3 n){
+ float pose=fanData.x,seed=fanData.y,t=landTime*(.7+.6*fract(seed*7.31))+seed*61.0;
+ bool flagPart=limb>7.5;
+ if(flagPart&&pose<5.5){p=vec3(0.0);return;}
+ float side=flagPart?1.0:(p.x<0.0?-1.0:1.0);
+ bool standing=pose>3.5&&pose<5.5||pose>6.5;
+ // Now and then a fan gets excited: a bounce in the seat, cheering harder.
+ float excite=clamp((sin(t*.21)-.5)*2.0,0.0,1.0);
+ float a=0.0,b=0.0,c=0.0,lean=0.0;
+ if(pose<.5)a=-.08*excite*max(0.0,sin(t*7.0));
+ else if(pose<1.5){a=-.15;b=-.65;c=-side*1.25;}
+ else if(pose<2.5){if(side>0.0){a=-.55;b=-1.3;c=-.45;}}
+ else if(pose<3.5){a=.3;b=.4;lean=.4;}
+ else if(pose<4.5){a=.22;b=1.0;}
+ else if(pose<5.5){a=-2.65+(.15+.25*excite)*sin(t*6.0+side);b=.25;c=side*.3;}
+ else if(side>0.0){a=-2.35+.45*sin(t*4.5);b=.1;}
+ else if(standing){a=.22;b=1.0;}
+ // The cloth ripples away from the stick (colour: distance from it, face side).
+ if(flagPart&&partMask>4.5)p+=normal*color.g*sin(t*11.0-color.r*5.0)*.06*color.r;
+ if(limb>.5&&limb<4.5||flagPart){
+  vec3 S=vec3(side*.2,.76,0.0),E=vec3(side*.21,.47,.1);
+  if(limb>1.5&&limb<2.5||limb>3.5){mat3 f=fanY(c)*fanX(b);p=E+f*(p-E);n=f*n;}
+  mat3 u=fanX(a);p=S+u*(p-S);n=u*n;
+ }
+ if(limb>6.5&&limb<7.5){
+  // The head looks around on its own, or down at the phone.
+  float nod=pose>1.5&&pose<2.5?.38:.06*sin(t*.71);
+  mat3 h=fanY((fract(seed*13.7)-.5)*.8+.18*sin(t*.37)+.06*sin(t*1.13))*fanX(nod);vec3 N=vec3(0.0,.8,0.0);p=N+h*(p-N);n=h*n;
+ }
+ if(lean>0.0&&(limb<4.5||limb>6.5)){mat3 l=fanX(lean);vec3 H=vec3(0.0,.3,0.0);p=H+l*(p-H);n=l*n;}
+ if(standing&&limb>4.5&&limb<6.5){
+  mat3 r=fanX(1.45);vec3 H=vec3(side*.09,.3,.02),K=vec3(side*.1,.3,.38);
+  if(limb<5.5){p=H+r*(p-H);n=r*n;}else p+=H+r*(K-H)-K;
+ }
+ p.y+=standing?.33:excite*max(0.0,sin(t*7.0))*.035;
+ // Build and the way they sit: slim or broad, tall or short, turned a little.
+ vec3 build=vec3(.88+.3*fract(seed*3.31),.94+.12*fract(seed*9.17),.9+.2*fract(seed*3.31));
+ mat3 y=fanY((fract(seed*5.13)-.5)*.6);p=y*(p*build);n=normalize(y*(n/build));
+}`;
+// A house's own shape, shared by the colour and shadow passes (houseDepthMaterial).
+const HOUSE_VERTEX=`
+ float houseSeed=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453);
+ if(partMask>.5&&partMask<1.5&&position.y>1.07&&position.y<1.4){
+  // Pitched roofs: each its own pitch, as a pyramid, a hip or a gable.
+  float ridge=fract(houseSeed*23.9);
+  transformed.y=1.0+(position.y-1.0)*(.65+.8*fract(houseSeed*41.3));
+  if(position.y>1.3)transformed.x=position.x*(ridge<.2?.25:ridge<.6?1.0:ridge<.8?1.6:2.45);
+ }
+ if(partMask>1.5&&partMask<2.5){
+  // A laje's water tank: on any corner, or none.
+  transformed.xz*=vec2(fract(houseSeed*7.3)<.5?-1.0:1.0,fract(houseSeed*3.1)<.5?-1.0:1.0);
+  if(fract(houseSeed*11.7)<.3)transformed=vec3(0.0);
+ }`;
+function sceneryMaterial(kind,{foliage=false,plain=false}={}){
  const material=new THREE.MeshStandardMaterial({name:{tree:'Arvores_instanciadas',house:'Casas_instanciadas',crowd:'Torcida_instanciada'}[kind],vertexColors:true,roughness:kind==='tree'?.88:.82,metalness:0});
  if(foliage)Object.assign(material,{map:leafTexture(),alphaTest:.45,alphaToCoverage:true,side:THREE.DoubleSide});
  material.onBeforeCompile=shader=>{
   if(foliage){
    // Keep the leaves' coverage in the smaller mipmaps (they would thin out with distance),
-   // and give both faces of a card the crown's outward normal.
+   // and give both faces of a card the crown's outward normal. A card seen edge-on fades out
+   // instead of drawing a thin line across the crown.
    shader.fragmentShader=shader.fragmentShader.replace('#include <map_fragment>',`
 vec4 leafTexel=texture2D(map,vMapUv);
 float leafLod=max(0.0,log2(max(length(dFdx(vMapUv*${LEAF_RESOLUTION}.0)),length(dFdy(vMapUv*${LEAF_RESOLUTION}.0)))));
 leafTexel.a=min(1.0,leafTexel.a*(1.0+leafLod*.3));
+vec3 cardNormal=normalize(cross(dFdx(vViewPosition),dFdy(vViewPosition)));
+if(vMapUv.x<.95)leafTexel.a*=mix(1.0,smoothstep(.07,.3,abs(dot(cardNormal,normalize(vViewPosition)))),1.0-smoothstep(1.5,3.5,leafLod));
 diffuseColor*=leafTexel;`).replace('#include <normal_fragment_begin>',`#include <normal_fragment_begin>
 #if defined(DOUBLE_SIDED) && !defined(FLAT_SHADED)
  normal*=faceDirection;
@@ -709,42 +908,91 @@ diffuseColor*=leafTexel;`).replace('#include <normal_fragment_begin>',`#include 
   }
   shader.uniforms.landTime=shared.time;
   shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
-attribute float partMask;uniform float landTime;varying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;`).replace('#include <color_vertex>',`
+attribute float partMask;uniform float landTime;varying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;
+#ifdef CROWD
+varying vec2 vFanLight;
+#endif
+#ifdef HOUSES
+varying float vHouseSeed;
+#endif
+#if defined(TREES)&&defined(USE_INSTANCING)
+${TREE_SHAPE}
+#endif
+#if defined(CROWD)&&defined(USE_INSTANCING)
+attribute float limb;attribute vec4 fanData;
+${FAN_POSE}
+#endif`).replace('#include <beginnormal_vertex>',`#include <beginnormal_vertex>
+#if defined(CROWD)&&defined(USE_INSTANCING)
+ vec3 fanP=position;fanPose(fanP,objectNormal);
+#endif`).replace('#include <color_vertex>',`
 vPart=partMask;vPartLocal=position;vPartNormal=normal;vPartScale=vec3(1.0);
 vColor=vec4(1.0);
 #ifdef USE_COLOR
  vColor.rgb*=color;
+#endif
+#ifdef CROWD
+ vFanLight=vec2(1.0);
+#endif
+#ifdef HOUSES
+ vHouseSeed=0.0;
 #endif
 #ifdef USE_INSTANCING
  vPartScale=vec3(length(instanceMatrix[0].xyz),length(instanceMatrix[1].xyz),length(instanceMatrix[2].xyz));
 #endif
 #ifdef USE_INSTANCING_COLOR
  #ifdef HOUSES
-  float seed=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453);
+  float seed=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453);vHouseSeed=seed;
   vec3 wall=seed<.3?vec3(.62,.6,.55):seed<.5?vec3(.66,.55,.36):seed<.65?vec3(.55,.36,.27):seed<.8?vec3(.38,.46,.5):vec3(.48,.47,.44);
+  // Paint ages differently on every building; towers drift toward concrete, beige, terracotta or blue glass.
+  wall*=.84+.26*fract(seed*7.7);
+  if(vPartScale.y>9.0){float k=fract(seed*19.3);wall=mix(wall,k<.3?vec3(.5,.5,.48):k<.55?vec3(.6,.53,.42):k<.7?vec3(.46,.3,.24):vec3(.2,.26,.32),.6)*(.72+.34*fract(seed*43.1));}
   // Laje houses: mostly bare orange brick, some grey block, some painted.
   vec3 brick=seed<.55?vec3(.4,.19,.1)*(.85+.3*fract(seed*17.0)):seed<.75?vec3(.36,.36,.34):wall;
-  vColor.rgb*=partMask>2.5?brick:partMask>1.5?vec3(1.0):mix(wall,instanceColor.rgb,partMask);
+  // Water tanks: blue fibreglass, grey fibre cement or a concrete box.
+  float tank=fract(seed*29.7);
+  vec3 tankColor=tank<.55?vec3(1.0):tank<.8?vec3(3.75,1.5,.71):vec3(5.6,2.1,.9);
+  vec3 roof=instanceColor.rgb*(.85+.3*fract(seed*61.3));
+  vColor.rgb*=partMask>2.5?brick:partMask>1.5?tankColor:mix(wall,roof,partMask);
  #elif defined(CROWD)
-  // partMask: 0 fixed colour, 1 shirt (instance colour), 2 skin, 3 trousers, 4 hair or cap.
+  // partMask: 0 fixed colour, 1 shirt (instance colour), 2 skin, 3 trousers, 4 hair or cap, 5 flag cloth.
   float who=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453),who2=fract(who*91.7),who3=fract(who*37.3);
   vec3 skinTone=mix(vec3(.6,.4,.28),vec3(.16,.09,.055),who2*who2*.85+who2*.15);
   vec3 trousers=who3<.45?vec3(.05,.08,.15):who3<.7?vec3(.03,.03,.035):who3<.85?vec3(.28,.24,.16):vec3(.36,.36,.38);
   vec3 hairOrCap=who<.22?instanceColor.rgb*.8:who<.3?vec3(.7,.7,.68):who<.36?vec3(.03,.03,.035):who3<.2?vec3(.25,.18,.1):vec3(.03,.025,.02);
-  vColor.rgb*=partMask<.5?vec3(1.0):partMask<1.5?instanceColor.rgb:partMask<2.5?skinTone:partMask<3.5?trousers:hairOrCap;
+  #ifdef USE_INSTANCING
+   // Brazil's green or the fan's own colours.
+   vec3 flag=fract(fanData.y*5.7)<.55?vec3(.02,.28,.07):instanceColor.rgb;
+   vFanLight=fanData.zw;
+  #else
+   vec3 flag=instanceColor.rgb;
+  #endif
+  vColor.rgb=partMask>4.5?flag:vColor.rgb*(partMask<.5?vec3(1.0):partMask<1.5?instanceColor.rgb:partMask<2.5?skinTone:partMask<3.5?trousers:hairOrCap);
+ #elif defined(TREES)
+  // Each tree its own shade and hue on top of the palette, younger yellower leaves on top of
+  // some crowns, and pale or dark bark.
+  float tint=fract(sin(dot(instanceMatrix[3].xz,vec2(12.9898,78.233)))*43758.5453);
+  vec3 leaf=instanceColor.rgb*(.86+.28*fract(tint*17.3))*mix(vec3(1.05,1.0,.84),vec3(.93,1.0,1.08),fract(tint*31.7));
+  leaf*=mix(vec3(1.0),vec3(1.08,1.05,.84),smoothstep(.55,.95,position.y)*fract(tint*7.7));
+  vColor.rgb*=partMask>.5?leaf:vec3(.75+.5*fract(tint*53.1));
  #else
   vColor.rgb*=mix(vec3(1.0),instanceColor.rgb,partMask);
  #endif
 #endif`).replace('#include <begin_vertex>',`#include <begin_vertex>
-#if defined(TREES)&&defined(USE_INSTANCING)
- float sway=sin(landTime*1.4+instanceMatrix[3].x*.07+instanceMatrix[3].z*.05)*.012*partMask*position.y;
- transformed.x+=sway;transformed.z+=sway*.6;
+#if defined(TREES)
+${TREE_VERTEX}
 #endif
 #if defined(CROWD)&&defined(USE_INSTANCING)
- // Fans bob and stand up now and then, each on their own rhythm.
- float fan=fract(sin(dot(instanceMatrix[3].xz,vec2(41.3,17.9)))*9631.7);
- transformed.y+=max(0.0,sin(landTime*(3.0+fan*4.0)+fan*40.0))*.07+max(0.0,sin(landTime*.35+fan*6.3)-.85)*1.6;
+ transformed=fanP;
+#endif
+#if defined(HOUSES)&&defined(USE_INSTANCING)
+${HOUSE_VERTEX}
 #endif`);
+  if(kind==='crowd'){
+   shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vFanLight;').replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
+// Under the stand's roof: the sun reaches only some rows, and the back rows see little sky.
+reflectedLight.directDiffuse*=vFanLight.x;reflectedLight.directSpecular*=vFanLight.x;
+reflectedLight.indirectDiffuse*=vFanLight.y;reflectedLight.indirectSpecular*=vFanLight.y;`);
+  }
   if(kind==='tree'){
    shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;').replace('#include <color_fragment>',`#include <color_fragment>
 // Fine vertical bark fissures use world metre scale and vanish before aliasing.
@@ -756,55 +1004,144 @@ if(vPart<.5){
  float rootMoss=1.0-smoothstep(.2,1.5,barkUp);
  diffuseColor.rgb*=mix(1.0,.7+barkRidge*.55,barkDetail);
  diffuseColor.rgb=mix(diffuseColor.rgb,diffuseColor.rgb*vec3(.75,1.04,.62),rootMoss*.45);
-}`);
+}
+#if !defined(USE_MAP)&&!defined(TREE_PLAIN)
+// Untextured crowns (the light builds): clumps of lighter and darker leaves in the crown's own space,
+// so a lump reads as foliage rather than a smooth ball; gone before it would shimmer. Not on Básico
+// (TREE_PLAIN): the cheapest level keeps its plain lumps and saves the eight hashes a crown pixel.
+vec3 clump=vPartLocal*vec3(19.0,23.0,19.0);
+float clumpDetail=(1.0-smoothstep(.35,.9,fwidth(clump.y)))*step(.5,vPart);
+if(clumpDetail>0.0){
+ vec3 ci=floor(clump),cf=fract(clump);cf=cf*cf*(3.0-2.0*cf);
+ #define CLUMP(o) fract(sin(dot(ci+o,vec3(12.99,78.23,37.71)))*43758.55)
+ float cn=mix(mix(mix(CLUMP(vec3(0,0,0)),CLUMP(vec3(1,0,0)),cf.x),mix(CLUMP(vec3(0,1,0)),CLUMP(vec3(1,1,0)),cf.x),cf.y),mix(mix(CLUMP(vec3(0,0,1)),CLUMP(vec3(1,0,1)),cf.x),mix(CLUMP(vec3(0,1,1)),CLUMP(vec3(1,1,1)),cf.x),cf.y),cf.z);
+ diffuseColor.rgb*=mix(1.0,.66+.62*cn*cn,clumpDetail)*mix(vec3(1.0),vec3(1.06,1.04,.9),cn*clumpDetail);
+}
+#endif`).replace('#include <lights_fragment_end>',`#include <lights_fragment_end>
+#ifndef USE_MAP
+// Untextured crowns are solid lumps: let in the skylight a real crown gets between its leaves and
+// the sun through them when it is behind the tree, so a backlit crown is dark green, not black.
+if(vPart>.5){
+ reflectedLight.indirectDiffuse*=1.25;
+ #if NUM_DIR_LIGHTS > 0
+  float leafBack=pow(max(dot(normalize(-vViewPosition),directionalLights[0].direction),0.0),4.0);
+  reflectedLight.directDiffuse+=diffuseColor.rgb*directionalLights[0].color*(.03+.16*leafBack);
+ #endif
+}
+#endif`);
   }
   if(kind!=='house')return;
-  shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vPart;varying vec3 vPartLocal,vPartNormal,vPartScale;').replace('#include <color_fragment>',`#include <color_fragment>
+  shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying float vPart,vHouseSeed;varying vec3 vPartLocal,vPartNormal,vPartScale;').replace('#include <color_fragment>',`#include <color_fragment>
 float houseWindow=0.0;
+// Every building its own window grid: cell width and floor height, window size, ribbon glazing
+// on some towers, and each window dark, lit or curtained. (Derivatives taken before the branch.)
+float hs=vHouseSeed,h2=fract(hs*13.7),h3=fract(hs*29.3),h4=fract(hs*51.9);
+float along=abs(vPartNormal.x)>.5?vPartLocal.z*vPartScale.z:vPartLocal.x*vPartScale.x,up=vPartLocal.y*vPartScale.y;
+vec2 g=vec2(along,up)/vec2(2.4+1.6*h2,2.75+.55*h3);
+// Where a cell is a few pixels wide the grid would alias: show its average instead.
+float detail=1.0-smoothstep(.15,.4,max(fwidth(g.x),fwidth(g.y)));
 if((vPart<.5||vPart>2.5)&&abs(vPartNormal.y)<.5){
- float along=abs(vPartNormal.x)>.5?vPartLocal.z*vPartScale.z:vPartLocal.x*vPartScale.x,up=vPartLocal.y*vPartScale.y;
- float cellA=fract(along/3.1),cellU=fract(up/2.9);
- houseWindow=step(.3,cellA)*step(cellA,.7)*step(.4,cellU)*step(cellU,.8)*step(.5,up)*step(up,vPartScale.y-.2);
- // Frame round the glass.
- float frame=step(.27,cellA)*step(cellA,.73)*step(.37,cellU)*step(cellU,.83)*(1.0-houseWindow);
+ float tower=step(9.0,vPartScale.y),ribbon=tower*step(.55,fract(hs*3.9));
+ vec2 fill=mix(vec2(.32+.3*h4,.36+.22*fract(hs*7.3)),vec2(.92,.6),ribbon),f=fract(g);
+ float inside=step(.5,up)*step(up,vPartScale.y-.2);
+ houseWindow=step(abs(f.x-.5),fill.x*.5)*step(abs(f.y-.55),fill.y*.5)*inside;
+ float frame=step(abs(f.x-.5),fill.x*.5+.03)*step(abs(f.y-.55),fill.y*.5+.04)*(1.0-houseWindow)*inside*(1.0-ribbon);
  // Rain streaks under the sills, grime rising from the pavement, a band at each floor slab.
- float streak=(1.0-houseWindow)*step(.34,cellA)*step(cellA,.66)*(1.0-smoothstep(0.0,.4,cellU))*.12;
- float grime=1.0-.28*(1.0-smoothstep(0.0,1.4,up));
- float slab=vPartScale.y>7.0?(1.0-smoothstep(0.0,.02,abs(cellU-.06)))*.18:0.0;
+ float streak=(1.0-houseWindow)*step(abs(f.x-.5),fill.x*.45)*(1.0-smoothstep(0.0,.4,f.y))*.12;
+ float grime=1.0-(.18+.2*fract(hs*71.1))*(1.0-smoothstep(0.0,1.4,up));
+ float slab=vPartScale.y>7.0?(1.0-smoothstep(0.0,.02,abs(f.y-.06)))*.18:0.0;
  float course=vPart>2.5?(1.0-smoothstep(0.0,.12,fract(up/.2)))*.15:0.0;
- diffuseColor.rgb*=grime*(1.0-streak-course)+slab;
- diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.78,.77,.74),frame*.8);
- diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.02,.025,.03),houseWindow*.92);
+ // A darker plant floor or parapet on top of a tower.
+ float crown=tower*step(vPartScale.y-1.5-2.5*h3,up);
+ float state=fract(sin(dot(floor(g)+hs*17.0,vec2(12.99,78.23)))*43758.55);
+ vec3 glass=state<.62?vec3(.02,.025,.03):state<.86?vec3(.09,.08,.065):vec3(.17,.14,.1);
+ vec3 near=diffuseColor.rgb*grime*(1.0-streak-course)+slab;
+ near=mix(near,vec3(.78,.77,.74),frame*.8);
+ near=mix(near,glass,houseWindow*.92);
+ vec3 far=mix(diffuseColor.rgb*grime,vec3(.04,.045,.05),fill.x*fill.y*.8*inside);
+ diffuseColor.rgb=mix(far,near,detail)*(1.0-crown*.3);
+ houseWindow*=detail;
 }`).replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
 // Glass is smooth: it mirrors the sky and the neighbours instead of looking painted on.
-roughnessFactor=mix(roughnessFactor,.06,houseWindow);`);
+roughnessFactor=mix(roughnessFactor,.06,houseWindow);`).replace('#include <normal_fragment_begin>',`#include <normal_fragment_begin>
+// What the vertex shader reshapes above the walls (each roof's own pitch and ridge, the tanks moved or mirrored)
+// takes its normal from the screen derivatives; walls and the round drums keep their own (a flat-shaded drum
+// showed its 64 facets as stripes). Derivatives taken before the branch.
+vec3 houseFacet=normalize(cross(dFdx(vViewPosition),dFdy(vViewPosition)));
+if(vPart>.5&&vPart<2.5&&vPartLocal.y>1.0){normal=houseFacet;nonPerturbedNormal=normal;}`);
  };
- material.defines={tree:{TREES:''},house:{HOUSES:''},crowd:{CROWD:''}}[kind];
- material.customProgramCacheKey=()=>'scenery-'+kind+(foliage?'-foliage':'')+'-v7';
+ material.defines={tree:{TREES:'',...(plain?{TREE_PLAIN:''}:{})},house:{HOUSES:''},crowd:{CROWD:''}}[kind];
+ material.customProgramCacheKey=()=>'scenery-'+kind+(foliage?'-foliage':'')+(plain?'-plain':'')+'-v10';
  return material;
 }
-function chunked(name,geometry,material,items,compose,{size=380,shadows=true}={}){
+// The trees' shadows take the same shape as the trees (lean, crown): the shadow pass draws them
+// with this material, which keeps the vertex work of sceneryMaterial('tree').
+// (The shadow pass gives it the tree material's leaf map, cut-out and side; like the default depth
+// material it replaces, its program is built on the first frame with shadows: the shadow pass draws
+// without the scene's fog, so a compile at loading would build another one.)
+function treeDepthMaterial(){
+ const material=new THREE.MeshDepthMaterial();
+ material.onBeforeCompile=shader=>{
+  shader.uniforms.landTime=shared.time;
+  shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
+attribute float partMask;uniform float landTime;
+#ifdef USE_INSTANCING
+${TREE_SHAPE}
+#endif`).replace('#include <begin_vertex>','#include <begin_vertex>\n'+TREE_VERTEX);
+ };
+ material.customProgramCacheKey=()=>'scenery-tree-depth-v2';
+ return material;
+}
+// The same for the houses that reshape (pitched roofs, laje tanks): their shadows take each roof's pitch and
+// ridge and each tank's corner (or none). Built on the first frame with shadows, like the trees'.
+function houseDepthMaterial(){
+ const material=new THREE.MeshDepthMaterial();
+ material.onBeforeCompile=shader=>{
+  shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute float partMask;').replace('#include <begin_vertex>',`#include <begin_vertex>
+#ifdef USE_INSTANCING
+${HOUSE_VERTEX}
+#endif`);
+ };
+ material.customProgramCacheKey=()=>'scenery-house-depth-v1';
+ return material;
+}
+// A shadow program of its own is built the first time the shadow pass draws one of its meshes. One mesh per
+// such material goes unculled until then (3 s after it is first drawn at most: shadows may be off), so that
+// happens on the first frames with shadows, not the first time the car nears a house mid-race.
+const warmedShadows=new WeakSet();
+function warmShadow(mesh){
+ if(warmedShadows.has(mesh.customDepthMaterial))return;warmedShadows.add(mesh.customDepthMaterial);
+ let first=0;const done=()=>{mesh.frustumCulled=true;mesh.onAfterShadow=THREE.Object3D.prototype.onAfterShadow;mesh.onBeforeRender=THREE.Object3D.prototype.onBeforeRender;};
+ mesh.frustumCulled=false;mesh.onAfterShadow=done;mesh.onBeforeRender=()=>{const now=performance.now();if(!first)first=now;else if(now-first>3000)done();};
+}
+function chunked(name,geometry,material,items,compose,{size=380,shadows=true,depth=null}={}){
  const root=new THREE.Group(),groups=new Map(),matrix=new THREE.Matrix4(),color=new THREE.Color();root.name=name;
  for(const item of items){const key=Math.floor(item.x/size)+':'+Math.floor(item.y/size);if(!groups.has(key))groups.set(key,[]);groups.get(key).push(item);}
  for(const list of groups.values()){
   const mesh=new THREE.InstancedMesh(geometry,material,list.length);mesh.name=name+'_bloco';
   list.forEach((item,i)=>{compose(item,matrix,color);mesh.setMatrixAt(i,matrix);mesh.setColorAt(i,color);item.instance={mesh,index:i};});
-  mesh.computeBoundingSphere();mesh.castShadow=shadows;mesh.receiveShadow=true;root.add(mesh);
+  mesh.computeBoundingSphere();mesh.castShadow=shadows;mesh.receiveShadow=true;if(depth){mesh.customDepthMaterial=depth;if(shadows)warmShadow(mesh);}root.add(mesh);
  }
  return root;
 }
 // Linear-space foliage albedo: real canopies reflect little light.
 const TREE_GREENS=[[.085,.15,.04],[.065,.125,.035],[.11,.17,.05],[.06,.1,.045],[.13,.16,.06],[.075,.14,.06]];
+// How far a crown reaches from its trunk at worst, in tree widths: the lumps' ~.55 (tall ~.27) stretched by
+// TREE_SHAPE's lobes and spread (x1.4) plus its lean. Placement narrows a crown near a road, garage or stand,
+// by up to 30%, so the shaped crown keeps its clearance; tighter than that the tree is left out.
+const CROWN_REACH={round:.85,tall:.45};
+function fitCrown(tree,edge,clear,kind='round'){const room=(edge-clear)/CROWN_REACH[kind];if(room<tree.width*.7)return false;tree.width=Math.min(tree.width,room);return true;}
 function composeTree(item,matrix,color){
  matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.width,item.height,item.width));
  color.setRGB(...item.color);
 }
-function treeColor(rand,dry=0){
- const pick=rand();
- // A few flowering ipês (yellow/pink) are part of the São Paulo landscape.
- if(pick<.012)return [.62,.44,.04];if(pick<.022)return [.52,.16,.3];
- const c=TREE_GREENS[Math.floor(rand()*TREE_GREENS.length)],k=.85+rand()*.3;
- return [c[0]*k+dry*.05,c[1]*k+dry*.01,c[2]*k];
+// mobile: the untextured lumps show their albedo bare, so they get a darker, greyer palette.
+function treeColor(rand,dry=0,mobile=false){
+ const pick=rand(),muted=(c,s,k)=>{const l=.2126*c[0]+.7152*c[1]+.0722*c[2];return c.map(v=>(l+(v-l)*s)*k);};
+ // A few flowering ipês (yellow, dusty pink) are part of the São Paulo landscape.
+ if(pick<.012)return muted([.62,.44,.04],mobile?.75:.9,mobile?.82:.95);if(pick<.022)return muted([.52,.16,.3],mobile?.42:.5,mobile?.82:1);
+ const c=TREE_GREENS[Math.floor(rand()*TREE_GREENS.length)],k=.85+rand()*.3,green=[c[0]*k+dry*.05,c[1]*k+dry*.01,c[2]*k];
+ return mobile?muted(green,.72,.93):green;
 }
 
 // Circuits from open data pass cover (data.scenery.cover: a class per terrain cell) and
@@ -812,12 +1149,13 @@ function treeColor(rand,dry=0){
 // an orthophoto; cityAngle points the distant skyline at the city (radians, track frame).
 // density: trees and houses per area against the standard build (the Gráficos tab's scenery level);
 // lod: how near a tree block shows its full crowns.
-export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban',density=1,lod=mobile?80:130,ground=null}){
+// lean: the cheapest scenery (Básico): plain near lumps and no shrubs.
+export function createLandscape({data,field,ortho=null,cover=null,buildings=null,cityAngle=Math.PI/2,mobile=false,style='urban',density=1,lod=mobile?80:130,ground=null,lean=false}){
  const root=new THREE.Group();root.name='Paisagem';const spread=1/Math.sqrt(density);
  const rand=random(data.samples.length*7919+17),stats={trees:0,houses:0,water:0};
  const trees=[],tall=[],houses=[],flats=[],lajes=[],rounds=[];
  const {x0,y0,width,height}=field;
- let bodies=[],simpleWater=null,simplePatch=null,lakes=null,shore=null,waves=null;terrainShore.shoreOn.value=0;terrainShore.shoreMap.value=null;
+ let bodies=[],simpleWater=null,simplePatch=null,lakes=null,shore=null,waves=null,woodAt=null;terrainShore.shoreOn.value=0;terrainShore.shoreMap.value=null;
  // Lakes for the car: the surface over a point (null on land), the nearest lake from the
  // bank, and the waves the car pushes (lake-waves.js), shown by a patch that follows it.
  const water={
@@ -831,7 +1169,7 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
   const body=shore.body(x,y);return !body||terrainHeight(data,x,y)>body.level+.35;
  };
  if(ortho){
-  bodies=findWater(field,ortho,data);field.upload();stats.water=bodies.length;
+  bodies=findWater(field,ortho,data);stats.runoffPaintCells=markRunoffPaint(field,ortho,data);field.upload();stats.water=bodies.length;
   if(bodies.length){
    shore=shoreField(field,bodies);stats.lakeBed=digLakeBeds(data.terrain,data.terrain.z,shore);
    terrainShore.shoreMap.value=shore.texture;terrainShore.shoreBounds.value.copy(shore.bounds);terrainShore.shoreOn.value=1;
@@ -839,15 +1177,15 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
    simpleWater=waterMesh(field,bodies,waves,shore);root.add(simpleWater);
    simplePatch=new THREE.Mesh(waves.patchGeometry(),simpleWaterMaterial(shore,waves,true));simplePatch.name='Lago_ondas';simplePatch.receiveShadow=true;simplePatch.visible=false;root.add(simplePatch);
   }
-  const spacing=(mobile?8.5:6)*spread;
+  const spacing=(mobile?8.5:6)*spread;woodAt=(x,y)=>{const i=ortho.index(x,y);return i<0?0:landCover(ortho,i).tree;};
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
    const px=x+(rand()-.5)*spacing*.9,py=y+(rand()-.5)*spacing*.9,i=ortho.index(px,py),cell=field.cell(px,py);
    if(i<0||cell<0||field.water[cell]||!dry(px,py,2.5))continue;const edge=field.edge[cell],cover=landCover(ortho,i);
    if(edge>9&&cover.tree>.45&&rand()<Math.pow(cover.tree,1.4)*.9){
     const h=(edge<25?6:7.5)+rand()*6.5,list=rand()<.22?tall:trees;
-    const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.45:h,width:(list===tall?.75:.9)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand)};
-    // The crown (about half the width across) stays 2 m clear of roads, garages and stands.
-    if(edge>tree.width/2+2)list.push(tree);
+    const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.45:h,width:(list===tall?.75:.9)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand,0,mobile)};
+    // The crown (about half the width across, more once shaped: fitCrown) stays 2 m clear of roads, garages and stands.
+    if(edge>tree.width/2+2&&fitCrown(tree,edge,2,list===tall?'tall':'round'))list.push(tree);
    }
   }
   // Houses follow the local street grid: the orientation of the photo's edges.
@@ -866,21 +1204,21 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
  }else if(cover){
   // Woods and scrub where the land-cover grid (ESA WorldCover, OSM woods) says so.
   const classAt=(x,y)=>{const i=Math.floor((x-cover.x0)/cover.step+.5),j=Math.floor((y-cover.y0)/cover.step+.5);return i<0||j<0||i>=cover.nx||j>=cover.ny?'0':cover.classes[j*cover.nx+i];};
-  const spacing=(mobile?9:6.5)*spread;
+  const spacing=(mobile?9:6.5)*spread;woodAt=(x,y)=>classAt(x,y)==='1'?1:0;
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
    const px=x+(rand()-.5)*spacing*.9,py=y+(rand()-.5)*spacing*.9,cell=field.cell(px,py),kind=classAt(px,py);
    if(cell<0||(kind!=='1'&&kind!=='2'))continue;const edge=field.edge[cell];
    if(edge<=9||rand()>(kind==='1'?.72:.22))continue;
    const h=kind==='1'?(edge<25?7:8.5)+rand()*7:3+rand()*3.5,list=kind==='1'&&rand()<.2?tall:trees;
-   const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.4:h,width:(list===tall?.75:.95)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand,kind==='2'?.7:0)};
-   if(edge>tree.width/2+2)list.push(tree);
+   const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.4:h,width:(list===tall?.75:.95)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand,kind==='2'?.7:0,mobile)};
+   if(edge>tree.width/2+2&&fitCrown(tree,edge,2,list===tall?'tall':'round'))list.push(tree);
   }
   // Trees mapped one by one (data.scenery.trees: the DF's isolated trees still standing in 2025).
   for(const [px,py] of data.scenery?.trees?.items??[]){
    const cell=field.cell(px,py);if(cell<0)continue;const edge=field.edge[cell];if(edge<=6)continue;
    const h=6+rand()*6,list=rand()<.2?tall:trees;
-   const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.35:h,width:(list===tall?.8:1)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand)};
-   if(edge>tree.width/2+1.5)list.push(tree);
+   const tree={x:px,y:py,z:terrainHeight(data,px,py)-.3,height:list===tall?h*1.35:h,width:(list===tall?.8:1)*h*(.8+rand()*.35),turn:rand()*Math.PI*2,color:treeColor(rand,0,mobile)};
+   if(edge>tree.width/2+1.5&&fitCrown(tree,edge,1.5,list===tall?'tall':'round'))list.push(tree);
   }
   // Real buildings: OSM and Microsoft footprints, each its own oriented rectangle; from a local
   // cadastre (the DF's) also apartment blocks ('predio') and round ones ('redondo', a drum).
@@ -899,31 +1237,74 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
   for(let y=y0+spacing/2;y<y0+height;y+=spacing)for(let x=x0+spacing/2;x<x0+width;x+=spacing){
    const px=x+(rand()-.5)*spacing,py=y+(rand()-.5)*spacing,cell=field.cell(px,py);if(cell<0||field.edge[cell]<55||field.inside[cell]&&field.edge[cell]<70)continue;
    if(rand()>.18+.5*smooth(.55,.8,Math.sin(px*.013)*Math.cos(py*.011)*.5+.5))continue;
-   const h=3.2+rand()*4.2;trees.push({x:px,y:py,z:terrainHeight(data,px,py)-.2,height:h,width:h*(1+rand()*.4),turn:rand()*Math.PI*2,color:treeColor(rand,.8)});
+   const h=3.2+rand()*4.2;trees.push({x:px,y:py,z:terrainHeight(data,px,py)-.2,height:h,width:h*(1+rand()*.4),turn:rand()*Math.PI*2,color:treeColor(rand,.8,mobile)});
   }
  }
- const treeMaterial=sceneryMaterial('tree',{foliage:!mobile}),build=mobile?treeGeometry:foliageTreeGeometry;
- // Trees are chunked in 200 m blocks; each block picks near or distant crowns every frame.
- const lodBlocks=[];
- for(const [list,kind,seed,name] of [[trees,'round',11,'Arvores'],[tall,'tall',23,'Arvores_altas']]){
-  if(!list.length)continue;const near=build(kind,seed,1),far=build(kind,seed,0);for(const item of list)item.kind=kind;
-  const group=chunked(name,near,treeMaterial,list,composeTree,{size:200});root.add(group);
-  for(const mesh of group.children){mesh.geometry=far;lodBlocks.push({mesh,near,far,center:mesh.boundingSphere.center.clone(),radius:mesh.boundingSphere.radius});}
+ // Forest edges: a woody understorey of shrubs and young crowns low on the open side of the edge
+ // trees, so their trunks do not stand in a bare row under one crown line. Shrubs are scenery
+ // only (no trunk to hit), from their own random so the trees keep their places; fewer on the light builds.
+ const shrubs=[];
+ if(woodAt&&!lean){
+  const r=random(trees.length*31+5),probe=9;
+  for(const t of trees){
+   // An edge tree has wood behind it and open ground on one side (a lone tree in a field has none).
+   let open=null,low=.3,openings=0;
+   for(let k=0;k<6;k++){const a=k*Math.PI/3,w=woodAt(t.x+Math.cos(a)*probe,t.y+Math.sin(a)*probe);if(w<.3)openings++;if(w<low){low=w;open=a;}}
+   if(open===null||openings>3||r()>(mobile?.22:.42))continue;
+   for(let n=r()<.2?2:1;n>0;n--){
+    const a=open+(r()-.5)*1.3,d=1.5+r()*4.5,px=t.x+Math.cos(a)*d,py=t.y+Math.sin(a)*d,cell=field.cell(px,py);
+    const h=1.5+r()*2.4,item={x:px,y:py,z:terrainHeight(data,px,py)-h*(.18+r()*.2),height:h,width:h*(1.3+r()*.8),turn:r()*Math.PI*2,color:treeColor(r,.15*r(),mobile),kind:'round',shrub:true};
+    if(cell<0||field.water[cell]||field.edge[cell]<=9||field.edge[cell]<=item.width/2+2||!dry(px,py,1.5)||!fitCrown(item,field.edge[cell],2))continue;
+    shrubs.push(item);
+   }
+  }
+ }
+ stats.shrubs=shrubs.length;
+ // Trees are chunked in 200 m blocks; each block shows its near or its distant crowns, picked every
+ // frame. The distant crowns are one mesh per block. Near, on the full builds, every kind has three
+ // crown forms and each tree wears the one its position picks: one mesh per form in the block (two
+ // more draws only in the near blocks, and no vertex work for crowns a tree does not wear).
+ const seeds={round:[11,37,59],tall:[23,71,97]},forms=mobile?1:3;
+ const treeMaterial=sceneryMaterial('tree',{foliage:!mobile,plain:lean}),treeShadow=treeDepthMaterial();
+ const lodBlocks=[],geometries=[],matrix=new THREE.Matrix4(),color=new THREE.Color();
+ for(const [list,kind,name] of [[[...trees,...shrubs],'round','Arvores'],[tall,'tall','Arvores_altas']]){
+  if(!list.length)continue;
+  const far=mobile?treeGeometry(kind,seeds[kind][0],0):foliageTreeGeometry(kind,seeds[kind][0],0);
+  const near=seeds[kind].slice(0,forms).map((seed,form)=>mobile?treeGeometry(kind,seed,1,lean):foliageTreeGeometry(kind,seed,1,form));geometries.push(far,...near);
+  const group=new THREE.Group(),blocks=new Map();group.name=name;root.add(group);
+  for(const item of list){item.kind=kind;item.form=Math.floor(hash2(item.x*.731,item.y*.917)*forms);const key=Math.floor(item.x/200)+':'+Math.floor(item.y/200);if(!blocks.has(key))blocks.set(key,[]);blocks.get(key).push(item);}
+  const instanced=(geometry,items,slot)=>{
+   const mesh=new THREE.InstancedMesh(geometry,treeMaterial,items.length);mesh.name=name+'_bloco';mesh.customDepthMaterial=treeShadow;mesh.castShadow=mesh.receiveShadow=true;
+   items.forEach((item,i)=>{composeTree(item,matrix,color);mesh.setMatrixAt(i,matrix);mesh.setColorAt(i,color);item[slot]={mesh,index:i};});
+   mesh.computeBoundingSphere();group.add(mesh);return mesh;
+  };
+  for(const items of blocks.values()){
+   const distant=instanced(far,items,'instance'),close=near.map((g,form)=>items.filter(item=>item.form===form)).map((own,form)=>own.length?instanced(near[form],own,'nearInstance'):null).filter(Boolean);
+   for(const mesh of close)mesh.visible=false;
+   lodBlocks.push({far:distant,near:close,center:distant.boundingSphere.center.clone(),radius:distant.boundingSphere.radius,close:false});
+  }
  }
  const lodDistance=lod;
  const houseMaterial=sceneryMaterial('house'),composeHouse=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);};
- if(houses.length)root.add(chunked('Casas',houseGeometry(false),houseMaterial,houses,composeHouse,{size:450}));
+ const houseShadow=houses.length||lajes.length?houseDepthMaterial():null;
+ if(houses.length)root.add(chunked('Casas',houseGeometry(false),houseMaterial,houses,composeHouse,{size:450,depth:houseShadow}));
  if(flats.length)root.add(chunked('Predios',houseGeometry(true),houseMaterial,flats,composeHouse,{size:900}));
- if(lajes.length)root.add(chunked('Casas_laje',houseGeometry('laje'),houseMaterial,lajes,composeHouse,{size:450}));
+ if(lajes.length)root.add(chunked('Casas_laje',houseGeometry('laje'),houseMaterial,lajes,composeHouse,{size:450,depth:houseShadow}));
  if(rounds.length)root.add(chunked('Predios_redondos',houseGeometry('round'),houseMaterial,rounds,composeHouse,{size:900}));
  // A circuit far out in the countryside (data.meta.horizon 'rural': Chapecó, 20 km from town) sees
  // farmland and the odd farmhouse to the horizon, not the city's rooftops and towers.
  const rural=data.meta?.horizon==='rural';
  const horizon=createHorizon(data,field,rand,{mobile,urban:style!=='cerrado'&&!rural,rural,cityAngle});root.add(horizon.root);
- // Only short grass belongs on maintained verges; aerial paved/built areas and
- // the lakes stay bare. Use the fitted visible ground supplied by the circuit.
+ // Only short grass belongs on maintained verges; aerial paved/built areas, painted run-offs and
+ // the lakes stay bare. Use the fitted visible ground supplied by the circuit. A tuft spreads its
+ // blades about a metre, so painted run-off a metre and a half away keeps it off too.
  const vegetated=(x,y)=>{
-  if(ortho){const i=ortho.index(x,y);if(i<0)return false;const c=landCover(ortho,i);return c.paved<.35&&c.roof<.3&&c.water<.4;}
+  if(ortho){
+   // Paint as the terrain draws it (field.paint), round the tuft's metre-wide spread too.
+   for(const [dx,dy] of [[0,0],[1.6,0],[-1.6,0],[0,1.6],[0,-1.6]]){const cell=field.cell(x+dx,y+dy);if(cell>=0&&field.paint[cell]>.1)return false;}
+   const i=ortho.index(x,y);if(i<0)return false;const c=landCover(ortho,i);
+   return c.paved<.35&&c.roof<.3&&c.water<.4;
+  }
   if(cover){const i=Math.floor((x-cover.x0)/cover.step+.5),j=Math.floor((y-cover.y0)/cover.step+.5);return i>=0&&j>=0&&i<cover.nx&&j<cover.ny&&!['4','5','6'].includes(cover.classes[j*cover.nx+i]);}
   return true;
  };
@@ -931,20 +1312,22 @@ export function createLandscape({data,field,ortho=null,cover=null,buildings=null
  if(verge)root.add(verge.root);stats.grassTufts=verge?.count??0;
  Object.assign(stats,{trees:trees.length+tall.length,houses:houses.length+flats.length+lajes.length+rounds.length+horizon.buildings,chunks:0});root.traverse(o=>{if(o.isInstancedMesh)stats.chunks++;});
  let realistic=false;
- return {root,stats,dispose(){for(const block of lodBlocks){block.near.dispose();block.far.dispose();}verge?.dispose();lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
+ return {root,stats,dispose(){for(const g of geometries)g.dispose();treeShadow.dispose();verge?.dispose();lakes?.dispose();shore?.texture.dispose();waves?.dispose();simplePatch?.geometry.dispose();simplePatch?.material.dispose();},update(dt,camera){
   shared.time.value+=dt;lakes?.update();
   if(waves){waves.sync();const patch=realistic?lakes?.patch:simplePatch;if(simplePatch)simplePatch.visible=false;if(lakes)lakes.patch.visible=false;if(patch&&waves.active){patch.visible=true;waves.placePatch(patch);}}
   if(!camera)return;
   verge?.update(camera);
-  for(const block of lodBlocks){const geometry=camera.position.distanceTo(block.center)-block.radius<lodDistance?block.near:block.far;if(block.mesh.geometry!==geometry)block.mesh.geometry=geometry;}
+  for(const block of lodBlocks){const close=camera.position.distanceTo(block.center)-block.radius<lodDistance;if(block.close===close)continue;block.close=close;block.far.visible=!close;for(const mesh of block.near)mesh.visible=close;}
  },
+ // Cars passing the verge grass push it (speed-particles.js wakeCars); none on the light builds.
+ setCars(cars){verge?.setCars(cars);},
  // Trees give way to later trackside structures (marshal posts, TV towers): points {x,y,r} in track metres.
  clearAround(points){
   verge?.clearAround(points);
   let removed=0;const zero=new THREE.Matrix4().makeScale(0,0,0),changed=new Set();
-  for(const item of [...trees,...tall]){
+  for(const item of [...trees,...tall,...shrubs]){
    if(item.removed||!item.instance||!points.some(q=>Math.hypot(item.x-q.x,item.y-q.y)<q.r+item.width*.45))continue;
-   item.removed=true;item.instance.mesh.setMatrixAt(item.instance.index,zero);changed.add(item.instance.mesh);removed++;
+   item.removed=true;for(const {mesh,index} of [item.instance,item.nearInstance].filter(Boolean)){mesh.setMatrixAt(index,zero);changed.add(mesh);}removed++;
   }
   for(const mesh of changed){mesh.instanceMatrix.needsUpdate=true;mesh.computeBoundingSphere();}
   stats.cleared=(stats.cleared??0)+removed;return removed;
@@ -1046,11 +1429,14 @@ function createHorizon(data,field,rand,{mobile,urban,rural=false,cityAngle=Math.
    const dist=12+Math.pow(rand(),1.6)*1200,x=b[0]+dx/dl*dist+(rand()-.5)*60,y=b[1]+dy/dl*dist+(rand()-.5)*60;
    const f=smooth(0,1400,dist),edgeZ=terrainHeight(data,b[0],b[1]),z=edgeZ*(1-f)+(base+22+hill(x,y)*38+dist*.012)*f;
    const floors=rand()<.08?3+Math.floor(rand()*6):1+Math.floor(rand()*2);
-   items.push({x,y,z:z-1.2,w:6+rand()*4,d:8+rand()*6,h:floors*3+1,turn:Math.round(rand()*4)*Math.PI/2+(rand()-.5)*.3,color:floors>2?[.4,.42,.44]:[.42+rand()*.14,.12+rand()*.05,.05]});
+   // Blocks of flats get a flat roof (with the towers), not a house's pyramid on top of five floors.
+   (floors>2?towers:items).push({x,y,z:z-1.2,w:6+rand()*4,d:8+rand()*6,h:floors*3+1,turn:Math.round(rand()*4)*Math.PI/2+(rand()-.5)*.3,color:floors>2?[.4,.42,.44]:[.42+rand()*.14,.12+rand()*.05,.05]});
   }
   for(let i=0;i<(mobile?90:220);i++){
    const angle=cityAngle+(rand()-.5)*2.4,dist=1700+rand()*2300,x=cx+Math.cos(angle)*dist,y=cy+Math.sin(angle)*dist+Math.max(0,dist-1500)*.2*Math.sin(cityAngle);
-   towers.push({x,y,z:base+15+hill(x,y)*38+dist*.012,w:14+rand()*18,d:14+rand()*18,h:28+Math.pow(rand(),2)*110,turn:rand()*Math.PI,color:[.26+rand()*.12,.29+rand()*.12,.33+rand()*.12]});
+   // Long slab blocks, slender towers and the ordinary ones between.
+   const shape=rand(),slab=shape<.25,slim=shape>.82;
+   towers.push({x,y,z:base+15+hill(x,y)*38+dist*.012,w:slab?30+rand()*26:14+rand()*18,d:slab?12+rand()*5:14+rand()*18,h:slab?24+rand()*30:slim?70+rand()*80:28+Math.pow(rand(),2)*95,turn:rand()*Math.PI,color:[.26+rand()*.12,.29+rand()*.12,.33+rand()*.12]});
   }
   const material=sceneryMaterial('house'),compose=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.w,item.h,item.d));color.setRGB(...item.color);};
   root.add(chunked('Horizonte_casas',houseGeometry(false),material,items,compose,{size:1100,shadows:false}));
@@ -1071,11 +1457,65 @@ function createHorizon(data,field,rand,{mobile,urban,rural=false,cityAngle=Math.
  return {root,buildings};
 }
 
-// Seated fans on every grandstand step found in the static scene. Each step is a
-// box; its top face gives the row. A step may also be {corners, face: [x, z]},
-// the direction its fans look. Instanced in one draw call per circuit.
+// Race-day shirts, linear albedo a little duller than paint: mostly white, black, grey and navy,
+// Brazil yellow and green, a few team colours; null: any muted colour. Fan clubs fill a sector
+// with their own colours: Brazil, a red team, a blue team.
+const SHIRTS={white:[.58,.58,.56],black:[.03,.03,.034],grey:[.24,.24,.24],navy:[.04,.06,.15],denim:[.16,.26,.38],yellow:[.52,.42,.08],green:[.05,.19,.08],red:[.33,.06,.05],orange:[.44,.2,.06],wine:[.17,.04,.06],sky:[.3,.44,.58]};
+const SHIRT_MIX=[['white',18],['black',13],['grey',8],['navy',10],['denim',5],['yellow',13],['green',7],['red',7],['orange',3],['wine',3],['sky',3],[null,10]];
+const FAN_CLUBS=[null,[['yellow',45],['green',30],['navy',10],['white',15]],[['red',45],['white',25],['black',30]],[['navy',35],['sky',25],['white',30],['yellow',10]]];
+const hash2=(i,j)=>{const h=Math.sin(i*127.1+j*311.7)*43758.5453;return h-Math.floor(h);};
+function valueNoise(x,y){const i=Math.floor(x),j=Math.floor(y),u=x-i,v=y-j,su=u*u*(3-2*u),sv=v*v*(3-2*v);return (hash2(i,j)*(1-su)+hash2(i+1,j)*su)*(1-sv)+(hash2(i,j+1)*(1-su)+hash2(i+1,j+1)*su)*sv;}
+function pickShirt(table,rand){
+ let r=rand()*table.reduce((s,[,w])=>s+w,0);
+ for(const [name,w] of table)if((r-=w)<=0){
+  if(name)return SHIRTS[name];
+  const c=[.08+rand()*.3,.08+rand()*.26,.08+rand()*.26],l=(c[0]+c[1]+c[2])/3;return c.map(v=>l+(v-l)*.7);
+ }
+ return SHIRTS.white;
+}
+// A seated fan facing +z (origin on the seat, limb ids for the pose in sceneryMaterial's FAN_POSE):
+// torso, arms resting on the thighs, legs down to the step below, head, and a small flag on a stick
+// in the right hand, folded away unless the fan waves it.
+function fanGeometry(mobile){
+ const parts=[],white=()=>[1,1,1],sides=mobile?4:6,limb=(r,from,to,mask,id)=>{
+  const a=new THREE.Vector3(...from),b=new THREE.Vector3(...to),d=b.clone().sub(a),len=d.length();
+  const g=new THREE.CylinderGeometry(r,r*.9,len,sides,1,true);
+  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize()));g.translate(...a.add(b).multiplyScalar(.5).toArray());
+  parts.push({geometry:g,mask,color:white,attrs:{limb:id}});
+ };
+ parts.push({geometry:new THREE.CylinderGeometry(.165,.14,.5,sides+2).scale(1,1,.62).translate(0,.53,0),mask:1,color:white,attrs:{limb:0}});
+ for(const x of [-1,1]){
+  // T-shirt sleeves, bare forearms.
+  limb(.055,[x*.2,.76,0],[x*.21,.47,.1],1,x<0?1:3);limb(.04,[x*.21,.47,.1],[x*.12,.35,.34],2,x<0?2:4);
+  limb(.075,[x*.09,.3,.02],[x*.1,.31,.36],3,5);limb(.06,[x*.1,.3,.38],[x*.1,-.08,.42],3,6);
+  parts.push({geometry:new THREE.BoxGeometry(.1,.08,.24).translate(x*.1,-.13,.47),mask:0,color:()=>[.05,.05,.055],attrs:{limb:6}});
+ }
+ parts.push({geometry:new THREE.CylinderGeometry(.05,.055,.1,6,1,true).translate(0,.81,0),mask:2,color:white,attrs:{limb:7}});
+ parts.push({geometry:new THREE.SphereGeometry(.105,mobile?6:8,mobile?4:6).scale(.92,1.12,1).translate(0,.95,.01),mask:2,color:white,attrs:{limb:7}});
+ parts.push({geometry:new THREE.SphereGeometry(.112,mobile?6:8,3,0,Math.PI*2,0,Math.PI*.42).scale(.94,1.1,1.02).translate(0,.97,-.01),mask:4,color:white,attrs:{limb:7}});
+ // The flag: the stick carries on from the forearm (raised, it points up), the cloth hangs from its
+ // top on both faces; colour data: distance from the stick and the face side, for the ripple.
+ const E=new THREE.Vector3(.21,.47,.1),H=new THREE.Vector3(.12,.35,.34),dir=H.clone().sub(E).normalize(),top=H.clone().addScaledVector(dir,.62);
+ const stick=new THREE.CylinderGeometry(.01,.01,.66,3,1,true);stick.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),dir));stick.translate(...H.clone().addScaledVector(dir,.29).toArray());
+ parts.push({geometry:stick,mask:0,color:()=>[.12,.1,.08],attrs:{limb:8}});
+ const across=new THREE.Vector3(1,0,0).addScaledVector(dir,-dir.x).normalize(),face=new THREE.Vector3().crossVectors(across,dir).normalize();
+ for(const s of [1,-1]){
+  const pos=[],nor=[],col=[],idx=[];
+  for(let v=0;v<2;v++)for(let u=0;u<3;u++){pos.push(...top.clone().addScaledVector(across,u/2*.46).addScaledVector(dir,-v*.31).toArray());nor.push(...face.clone().multiplyScalar(s).toArray());col.push(u/2,s,0);}
+  for(let u=0;u<2;u++)idx.push(...(s>0?[u,u+3,u+1,u+1,u+3,u+4]:[u,u+1,u+3,u+1,u+4,u+3]));
+  const g=new THREE.BufferGeometry();g.setAttribute('position',new THREE.Float32BufferAttribute(pos,3));g.setAttribute('normal',new THREE.Float32BufferAttribute(nor,3));g.setIndex(idx);
+  parts.push({geometry:g,mask:5,colors:new Float32Array(col),attrs:{limb:8}});
+ }
+ return merge(parts);
+}
+
+// Seated fans on every grandstand step found in the static scene. Each step is a box; its top face
+// gives the row. A step may also be {corners, face: [x, z], depth, sun}: the direction its fans look,
+// how deep the row sits under a roof (0 front, 1 back) and the share of it the sun reaches.
+// Friends sit together in one colour, fan clubs fill sectors, seats empty in patches; some fans
+// stand, cheer or wave a flag, and everyone moves on their own clock. One draw call per circuit.
 export function createCrowd(steps,{mobile=false}={}){
- const rand=random(steps.length*131+7),items=[];
+ const rand=random(steps.length*131+7),items=[],spacing=mobile?.98:.69;
  for(const step of steps){
   const corners=step.corners??step,face=step.face;
   // Order the four corners around the centre so consecutive points share an edge.
@@ -1086,72 +1526,98 @@ export function createCrowd(steps,{mobile=false}={}){
   if(row.l<4)continue;let ux=row.dx/row.l,uz=row.dz/row.l;
   // Fans look along (-uz, ux): turn the row so that is the requested direction.
   if(face&&face[1]*ux-face[0]*uz<0){ux=-ux;uz=-uz;}
-  const turn=Math.atan2(-uz,ux);
-  for(let t=-row.l/2+.4;t<row.l/2-.3;t+=mobile?.9:.62){
-   if(rand()<.22)continue;
-   // Race-day shirts: mostly white, black, grey and navy, many Brazil yellow and green, a few team colours.
-   const pick=rand(),shirt=pick<.2?[.72,.72,.7]:pick<.33?[.035,.035,.04]:pick<.41?[.3,.3,.3]:pick<.51?[.04,.07,.2]:pick<.65?[.66,.52,.05]:pick<.73?[.03,.22,.07]:pick<.8?[.45,.04,.03]:pick<.85?[.2,.38,.6]:pick<.88?[.62,.24,.04]:[.08+rand()*.3,.08+rand()*.25,.08+rand()*.25];
-   items.push({x:cx+ux*(t+(rand()-.5)*.12),y:-(cz+uz*(t+(rand()-.5)*.12)),z:y,turn,color:shirt,scale:.9+rand()*.2});
+  const turn=Math.atan2(-uz,ux),covered=step.depth!==undefined,sun=step.sun??1,sky=covered?.82-.48*Math.pow(step.depth,.75):1;
+  // Each row starts at its own offset and seats are not evenly spaced, so fans never line up in columns.
+  let group=0,shirt=null,standing=false;
+  for(let t=-row.l/2+.3+rand()*spacing*.8;t<row.l/2-.3;t+=spacing*(.82+rand()*.36)){
+   const px=cx+ux*t,pz=cz+uz*t;
+   if(valueNoise(px*.23+7.3,pz*.23+(step.depth??0)*2.6)<.17||rand()<.04){group=0;continue;}
+   const club=FAN_CLUBS[(n=>n<.27?1:n>.8?3:n>.7?2:0)(valueNoise(px/24+3.1,pz/24-1.7))];
+   if(group<=0){group=1+Math.floor(Math.pow(rand(),1.7)*5);shirt=pickShirt(club&&rand()<.6?club:SHIRT_MIX,rand);standing=rand()<.07;}
+   group--;
+   const own=rand()<.72?shirt:pickShirt(club&&rand()<.5?club:SHIRT_MIX,rand),bright=.8+rand()*.32,r=rand();
+   // Poses as in FAN_POSE: seated 0, folded 1, phone 2, elbows on knees 3, standing 4, cheering 5, flag 6/7.
+   const pose=standing?(r<.6?4:r<.84?5:7):r<.07?2:r<.19?1:r<.27?3:r<.31?5:r<.345?6:0;
+   const depth=(rand()-.5)*.14,along=t+(rand()-.5)*.1;
+   items.push({x:cx+ux*along-uz*depth,y:-(cz+uz*along+ux*depth),z:y,turn,color:own.map(v=>v*bright),scale:.93+rand()*.14,pose,seed:rand(),sun,sky:sky*(.93+rand()*.14)});
   }
  }
- const parts=[],white=()=>[1,1,1],limb=(r,from,to,mask,sides)=>{
-  const a=new THREE.Vector3(...from),b=new THREE.Vector3(...to),d=b.clone().sub(a),len=d.length();
-  const g=new THREE.CylinderGeometry(r,r*.9,len,sides,1,true);
-  g.applyQuaternion(new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0,1,0),d.normalize()));g.translate(...a.add(b).multiplyScalar(.5).toArray());
-  parts.push({geometry:g,mask,color:white});
- };
- // A seated fan facing +z: torso, arms resting on the thighs, legs down to the step below.
- const sides=mobile?4:6;
- parts.push({geometry:new THREE.CylinderGeometry(.165,.14,.5,sides+2).scale(1,1,.62).translate(0,.53,0),mask:1,color:white});
- for(const x of [-1,1]){
-  // T-shirt sleeves, bare forearms.
-  limb(.055,[x*.2,.76,0],[x*.21,.47,.1],1,sides);limb(.04,[x*.21,.47,.1],[x*.12,.35,.34],2,sides);
-  limb(.075,[x*.09,.3,.02],[x*.1,.31,.36],3,sides);limb(.06,[x*.1,.3,.38],[x*.1,-.08,.42],3,sides);
-  parts.push({geometry:new THREE.BoxGeometry(.1,.08,.24).translate(x*.1,-.13,.47),mask:0,color:()=>[.05,.05,.055]});
+ const geometry=fanGeometry(mobile),material=sceneryMaterial('crowd'),root=new THREE.Group(),matrix=new THREE.Matrix4(),color=new THREE.Color(),blocks=new Map();root.name='Torcida';
+ for(const item of items){const key=Math.floor(item.x/2000)+':'+Math.floor(item.y/2000);if(!blocks.has(key))blocks.set(key,[]);blocks.get(key).push(item);}
+ for(const list of blocks.values()){
+  // Each block its own geometry over the shared buffers, for its per-fan pose data.
+  const g=new THREE.BufferGeometry(),data=new Float32Array(list.length*4);for(const [k,v] of Object.entries(geometry.attributes))g.setAttribute(k,v);g.setIndex(geometry.index);g.boundingSphere=geometry.boundingSphere.clone();g.boundingSphere.radius+=1;
+  const mesh=new THREE.InstancedMesh(g,material,list.length);mesh.name='Torcida_bloco';
+  list.forEach((item,i)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.scale,item.scale,item.scale));mesh.setMatrixAt(i,matrix);mesh.setColorAt(i,color.setRGB(...item.color));data.set([item.pose,item.seed,item.sun,item.sky],i*4);});
+  g.setAttribute('fanData',new THREE.InstancedBufferAttribute(data,4));
+  mesh.computeBoundingSphere();mesh.castShadow=false;mesh.receiveShadow=true;root.add(mesh);
  }
- parts.push({geometry:new THREE.CylinderGeometry(.05,.055,.1,6,1,true).translate(0,.81,0),mask:2,color:white});
- parts.push({geometry:new THREE.SphereGeometry(.105,mobile?6:8,mobile?4:6).scale(.92,1.12,1).translate(0,.95,.01),mask:2,color:white});
- parts.push({geometry:new THREE.SphereGeometry(.112,mobile?6:8,3,0,Math.PI*2,0,Math.PI*.42).scale(.94,1.1,1.02).translate(0,.97,-.01),mask:4,color:white});
- const geometry=merge(parts),material=sceneryMaterial('crowd');
- const compose=(item,matrix,color)=>{matrix.compose(new THREE.Vector3(item.x,item.z,-item.y),new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,1,0),item.turn),new THREE.Vector3(item.scale,item.scale,item.scale));color.setRGB(...item.color);};
- const root=chunked('Torcida',geometry,material,items,compose,{size:2000,shadows:false});
  return {root,count:items.length};
 }
 
 // Static circuit buildings from the GLB and the Curvelo scene get world-mapped
-// concrete, ribbed garage doors and reflective glass instead of flat colours.
+// concrete, ribbed garage doors and reflective glass instead of flat colours; the painted
+// lines (GLB Pintura_branca, the open circuits' Pintura_borda) get wear.
 export function structureMaterial(material,textures,cache=new Map()){
  if(!material||Array.isArray(material))return material;
- const kind={Concreto:'concrete',Metal:'metal',Vidros_boxes:'glass',Boxes_azul:'roof'}[material.name];
+ const kind={Concreto:'concrete',Metal:'metal',Vidros_boxes:'glass',Boxes_azul:'roof',Pintura_branca:'paint',Pintura_borda:'paint'}[material.name];
  if(!kind)return material;
  const key=material.uuid;if(cache.has(key))return cache.get(key);
  const upgraded=material.clone();upgraded.name=material.name+'_v2';
  if(kind==='glass'){upgraded.color.setRGB(.02,.035,.045);upgraded.roughness=.06;upgraded.metalness=.4;upgraded.envMapIntensity=1.4;}
  else{
-  upgraded.roughness=kind==='metal'?.42:kind==='roof'?.55:.92;upgraded.metalness=kind==='metal'?.55:0;
+  upgraded.roughness=kind==='metal'?.42:kind==='roof'?.55:kind==='paint'?.62:.92;upgraded.metalness=kind==='metal'?.55:0;
   if(kind==='concrete')upgraded.color.setRGB(.56,.56,.54);
   upgraded.onBeforeCompile=shader=>{
    shader.uniforms.concreteMap={value:textures.concrete};
    shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec3 vStructWorld,vStructNormal;').replace('#include <begin_vertex>','#include <begin_vertex>\nvStructWorld=(modelMatrix*vec4(transformed,1.0)).xyz;vStructNormal=normalize(mat3(modelMatrix)*objectNormal);');
-   shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nuniform sampler2D concreteMap;varying vec3 vStructWorld,vStructNormal;').replace('#include <map_fragment>',`#include <map_fragment>
+   shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
+uniform sampler2D concreteMap;varying vec3 vStructWorld,vStructNormal;
+float structHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float structNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(structHash(i),structHash(i+vec2(1,0)),f.x),mix(structHash(i+vec2(0,1)),structHash(i+vec2(1,1)),f.x),f.y);}`).replace('#include <map_fragment>',`#include <map_fragment>
+#if STRUCTURE_KIND==4
+ // Painted lines, by world position (the GLB lines carry no UVs): brighter or duller at 0.3, 4 and
+ // 40 m, worn through to the asphalt in places (about a tenth), smudged with rubber where cars cross.
+ // The finer terms (3, 12 and 30 cm) give way to their average as a pixel grows over them (a line far ahead
+ // at a grazing look), the worn edge softens with it: MSAA does not filter shading, they would crawl.
+ vec2 paintW=vStructWorld.xz;float paintPx=length(fwidth(paintW));
+ diffuseColor.rgb*=mix(.8,1.03,structNoise(paintW*.25)*.6+structNoise(paintW*.025)*.4)*mix(.9,1.02,mix(.5,structNoise(paintW*3.3),1.0-smoothstep(.12,.35,paintPx)));
+ float paintThrough=smoothstep(.66-paintPx*.25,.8+paintPx*.25,structNoise(paintW*1.3+3.1)*.65+mix(.5,structNoise(paintW*8.0),1.0-smoothstep(.05,.15,paintPx))*.2+mix(.5,structNoise(paintW*31.0),1.0-smoothstep(.012,.04,paintPx))*.15);
+ float paintRubber=smoothstep(.5,.85,structNoise(paintW*.45+7.7))*.45;
+ diffuseColor.rgb=mix(diffuseColor.rgb*(1.0-paintRubber),vec3(.075,.073,.07),paintThrough*.85);
+#else
 vec3 blendN=pow(abs(normalize(vStructNormal)),vec3(4.0));blendN/=blendN.x+blendN.y+blendN.z;
 vec3 wall=texture2D(concreteMap,vStructWorld.zy/3.2).rgb*blendN.x+texture2D(concreteMap,vStructWorld.xz/3.2).rgb*blendN.y+texture2D(concreteMap,vStructWorld.xy/3.2).rgb*blendN.z;
+#endif
 #if STRUCTURE_KIND==1
  // Cast concrete, not gravel: soften the aggregate toward its average and add broad weathering.
  vec3 wallAvg=texture2D(concreteMap,vStructWorld.xz/3.2,9.0).rgb;
- wall=wallAvg+(wall-wallAvg)*.42;
+ wall=wallAvg+(wall-wallAvg)*.2;
  float weather=texture2D(concreteMap,vStructWorld.xz/41.0+vec2(vStructWorld.y*.021,0.0)).g/max(wallAvg.g,.01);
+ // Walls are cast in 3 m panels: each its own tone, sawn joints, rain streaks running down, broad stains.
+ vec3 sn=normalize(vStructNormal);
+ float panelAlong=abs(sn.x)>abs(sn.z)?vStructWorld.z:vStructWorld.x,upright=1.0-smoothstep(.5,.8,abs(sn.y));
+ float panelId=floor(panelAlong/3.0),panelTone=.93+.14*structHash(vec2(panelId,floor(vStructWorld.y/3.0)+.5));
+ float panelJoint=1.0-smoothstep(.008,.02+fwidth(panelAlong),(.5-abs(fract(panelAlong/3.0)-.5))*3.0);
+ float rainStreak=structNoise(vec2(panelAlong*1.7,vStructWorld.y*.12))*.6+structNoise(vec2(panelAlong*5.0,vStructWorld.y*.3))*.4;
+ float stain=structNoise(vec2(panelAlong*.08,vStructWorld.y*.16));
  diffuseColor.rgb*=wall*1.9*mix(.86,1.08,clamp(weather-.5,0.0,1.0))*(1.0-.12*blendN.y);
+ diffuseColor.rgb*=mix(1.0,panelTone*(1.0-panelJoint*.35)*mix(.88,1.04,rainStreak)*mix(.9,1.05,stain),upright);
 #elif STRUCTURE_KIND==2
  // Roller doors: horizontal ribs.
  float rib=smoothstep(.35,.5,abs(fract(vStructWorld.y*5.0)-.5));
  diffuseColor.rgb*=mix(.72,1.05,rib)*mix(vec3(1.0),wall*2.0,.35);
-#else
+#elif STRUCTURE_KIND==3
  diffuseColor.rgb*=mix(vec3(1.0),wall*2.0,.45);
+#endif`).replace('#include <roughnessmap_fragment>',`#include <roughnessmap_fragment>
+#if STRUCTURE_KIND==4
+ roughnessFactor=clamp(roughnessFactor+paintThrough*.25-paintRubber*.1,.3,1.0);
 #endif`);
+   // The lines lie in the cars' crisp shadow like the asphalt round them (car-shadow.js).
+   if(kind==='paint')carShadowPatch(shader);
   };
-  upgraded.defines={STRUCTURE_KIND:kind==='concrete'?1:kind==='metal'?2:3};
-  upgraded.customProgramCacheKey=()=>'structure-'+kind+'-v2';
+  upgraded.defines={STRUCTURE_KIND:kind==='concrete'?1:kind==='metal'?2:kind==='paint'?4:3};
+  upgraded.customProgramCacheKey=()=>'structure-'+kind+'-v3';
  }
  cache.set(key,upgraded);return upgraded;
 }

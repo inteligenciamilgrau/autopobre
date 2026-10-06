@@ -45,7 +45,7 @@ with sync_playwright() as p:
     g = info(page)
     check('desktop_auto_is_alto', g['level'] == 'alto' and g['auto'] and g['changed'] == [], g)
     page.click('#settingsButton'); page.click('#tab-graphics')
-    check('tab_visible', page.is_visible('#settings-graphics') and page.locator('.graphics-level').count() == 5 and page.locator('#graphicsControls select').count() == 17)
+    check('tab_visible', page.is_visible('#settings-graphics') and page.locator('.graphics-level').count() == 5 and page.locator('#graphicsControls select').count() == 19)
     check('high_refresh_choices', page.locator('#gfx-fpsLimit option[value="160"]').count() == 1 and page.locator('#gfx-targetFps option[value="144"]').count() == 1)
     check('race_tab_lost_old_controls', page.locator('#cinematicLevel').count() == 0 and page.locator('#realisticWater').count() == 0)
     page.locator('#settings').screenshot(path=str(OUT / 'aba_graficos_desktop.png'))

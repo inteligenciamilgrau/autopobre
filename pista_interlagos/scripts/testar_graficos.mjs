@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import {GRAPHICS_LEVELS,GRAPHICS_OPTIONS,GRAPHICS_PRESETS,SHADOW_LEVELS,VIEW_DISTANCES,SCENERY_LEVELS,MIRROR_SIZES,autoLevel,normalizeGraphics,resolveGraphics,setGraphicsValue,chooseGraphicsLevel,debugCorner,FrameLimiter,DisplayCadence,adaptivePixelRatio} from '../teste/graphics-settings.js';
+import {GRAPHICS_LEVELS,GRAPHICS_OPTIONS,GRAPHICS_PRESETS,SHADOW_LEVELS,VIEW_DISTANCES,SCENERY_LEVELS,MIRROR_SIZES,REFLECTION_LEVELS,autoLevel,normalizeGraphics,resolveGraphics,setGraphicsValue,chooseGraphicsLevel,debugCorner,FrameLimiter,DisplayCadence,adaptivePixelRatio} from '../teste/graphics-settings.js';
 import {gpuName,DebugOverlay} from '../teste/debug-overlay.js';
 import {CINEMATIC_FEATURES} from '../teste/cinematic.js';
 
@@ -15,7 +15,7 @@ for(let i=1;i<GRAPHICS_LEVELS.length;i++)for(const key of Object.keys(GRAPHICS_O
  assert.ok(rank(key,GRAPHICS_PRESETS[upper][key])>=rank(key,GRAPHICS_PRESETS[lower][key]),`${upper}.${key} is not lighter than ${lower}.${key}`);
 }
 // Every choice the engine reads has its engine values.
-for(const [key,table] of [['shadows',SHADOW_LEVELS],['viewDistance',VIEW_DISTANCES],['scenery',SCENERY_LEVELS],['mirrors',MIRROR_SIZES]])
+for(const [key,table] of [['shadows',SHADOW_LEVELS],['viewDistance',VIEW_DISTANCES],['scenery',SCENERY_LEVELS],['mirrors',MIRROR_SIZES],['reflections',REFLECTION_LEVELS]])
  for(const [value] of GRAPHICS_OPTIONS[key].choices)assert.ok(Object.hasOwn(table,value),`${key} ${value} has engine values`);
 for(const view of Object.values(VIEW_DISTANCES))assert.ok(view.fog[0]<view.fog[1]&&view.fog[1]<view.far,'fog ends before the far plane');
 assert.deepEqual(Object.keys(CINEMATIC_FEATURES).sort(),['ao','lens','motionBlur','samples']);

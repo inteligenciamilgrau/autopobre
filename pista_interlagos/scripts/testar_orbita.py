@@ -31,7 +31,8 @@ with sync_playwright() as p:
     def offset(s):
         return [a-b for a,b in zip(s['position'], s['target'])]
     try:
-        open_menu(page);enter_track(page)
+        # The orbit takes over the high Perseguição distante: zoomed in from there, it still reaches the gantry.
+        open_menu(page);race_options(page,camera='far');enter_track(page)
         # The grid starts ~70 m back; the gantry check needs the car on the timing line.
         page.evaluate('interlagos.reposition(0)')
         page.keyboard.down('KeyS')
@@ -98,12 +99,13 @@ with sync_playwright() as p:
                 frame()
                 ws=page.evaluate('interlagos.wheelSnapshot()')
                 check(f'{livery}_spin_{spin}_no_camber_or_yaw_reversal',all(abs(w['axle'][1])<1e-6 and abs(w['angle']-(.4 if w['front'] else 0))<1e-6 for w in ws))
-            enter_track(page)
+            # P holds the race on screen with no menu (no #resume): P again lets go.
+            page.keyboard.press('KeyP');wait_js(page,'!interlagos.state.paused')
         race_options(page,camera='chase');enter_track(page)
         modes=[]
-        for _ in range(7):
+        for _ in range(8):
             page.keyboard.press('KeyC'); modes.append(page.evaluate('interlagos.state.mode'))
-        check('camera_cycle',modes==['close','hood','cockpit','tv','aerial','orbit','chase'])
+        check('camera_cycle',modes==['close','far','hood','cockpit','tv','aerial','orbit','chase'])
         page.click('#orbitButton')
         check('orbit_button',page.evaluate("interlagos.state.mode==='orbit'"))
         check('no_browser_errors',not report['errors'])

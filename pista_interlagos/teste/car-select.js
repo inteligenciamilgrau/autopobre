@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {CAR_CHOICES,carEntry,MODEL_NAMES,CAR_MODELS,CAR_MODEL_DEFAULT,luminance,cssColor as css} from './race-roster.js';
 import {carWorkshop,FAR_PROFILE} from './immersive-visuals.js';
 import {fuscaCar,fuscaDispose,FUSCA_PROFILE} from './fusca.js';
+import {setCarEnvironment} from './car-finish.js';
 // Modo Corrida's car screen (#cars, between the opening and the track screen): two tabs, the Opala and the
 // Fusca (fusca.js), each with the grid's 15 cars (the Fusca in their colours) as cards and the chosen one
 // turning in a small studio. The studio is drawn by the game's own renderer on the page's canvas, which
@@ -67,7 +68,9 @@ class Studio {
  // rect: where the stage shows on the page (CSS pixels); the car is framed there.
  render(renderer,dt,rect){
   this.time+=dt;if(this.time>this.handUntil)this.yaw+=dt*.32;this.turntable.rotation.y=this.yaw;
-  if(!this.environment)this.bake(renderer);if(this.wanted!==this.shown)this.build();
+  // The cars share their materials with the race's (car-finish.js): here they reflect the studio's soft
+  // boxes, not the circuit's map (the race takes its own back at its next frame, car-reflections.js).
+  if(!this.environment)this.bake(renderer);setCarEnvironment(this.environment,'estudio');if(this.wanted!==this.shown)this.build();
   const size=renderer.getSize(new THREE.Vector2()),W=size.x,H=size.y,c=this.camera,half=Math.tan(THREE.MathUtils.degToRad(c.fov/2));
   // Far enough for the car (about 5 m seen three-quarters on, 1.6 m high) to fill most of the stage.
   const d=THREE.MathUtils.clamp(Math.max(5*H/(2*half*.9*Math.max(1,rect.width)),1.7*H/(2*half*.66*Math.max(1,rect.height))),6,40);

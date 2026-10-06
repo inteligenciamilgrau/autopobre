@@ -17,13 +17,15 @@ export const GRAPHICS_OPTIONS=Object.freeze({
  targetFps:{group:'imagem',label:'Meta da resolução dinâmica',hint:'Automática acompanha o ritmo estimado da tela. Uma meta maior troca nitidez por fluidez; não aumenta os Hz do monitor.',choices:[[0,'Automática · tela'],[60,'60 FPS'],[90,'90 FPS'],[120,'120 FPS'],[144,'144 FPS'],[160,'160 FPS']]},
  antialias:{group:'imagem',label:'Antisserrilhado (MSAA)',hint:'Suaviza os degraus nas bordas. No visual Simples vale ao recarregar a página.',choices:[[0,'Desligado'],[2,'2×'],[4,'4×']]},
  shadows:{group:'luz',label:'Sombras',hint:'Resolução e alcance das sombras do sol em volta do carro.',choices:[['off','Desligadas'],['baixa','Baixas'],['media','Médias'],['alta','Altas'],['ultra','Ultra']]},
+ reflections:{group:'luz',label:'Reflexos dos carros',hint:'O que a pintura, os vidros e os cromados refletem. Pista grava arquibancadas e asfalto uma vez na largada; Dinâmicos redesenham a cena em volta do carro aos poucos e pesam mais.',choices:[['ceu','Só o céu'],['pista','Pista'],['dinamico','Dinâmicos'],['dinamico_hd','Dinâmicos HD']]},
  post:{group:'luz',label:'Visual de cinema',hint:'Neblina de São Paulo, cor de filme e ajuste de exposição. Simples desenha direto na tela.',choices:[['off','Simples'],['lite','Leve'],['full','Completo']]},
  ao:{group:'luz',label:'Oclusão de ambiente',hint:'Sombra de contato nos cantos e sob os carros. Só no visual Completo.',choices:[[false,'Desligada'],[true,'Ligada']]},
  lens:{group:'luz',label:'Brilho e lente',hint:'Brilho das luzes fortes, reflexo do sol na lente e foco das câmeras de TV. Só no visual Completo.',choices:[[false,'Desligado'],[true,'Ligado']]},
- motionBlur:{group:'luz',label:'Desfoque de velocidade',hint:'Borra as bordas da imagem em alta velocidade, nas câmeras que andam com o carro.',choices:[[false,'Desligado'],[true,'Ligado']]},
+ motionBlur:{group:'luz',label:'Desfoque de velocidade',hint:'Borra o asfalto perto e as margens da pista conforme a câmera anda rápido; os carros ficam nítidos. Desligado no celular, a Sensação de velocidade Média ainda borra de leve o asfalto perto.',choices:[[false,'Desligado'],[true,'Ligado']]},
  materials:{group:'mundo',label:'Detalhe da pista',hint:'Relevo do asfalto, borracha, remendos, zebras e refletores. Baixo reduz o trabalho da placa de vídeo.',choices:[['baixo','Baixo'],['medio','Médio'],['alto','Alto'],['ultra','Ultra']]},
  cameraMotion:{group:'luz',label:'Movimento de câmera',hint:'Resposta à velocidade, frenagens e impactos. Reduzido é mais confortável; desligado remove essa resposta extra.',choices:[[0,'Desligado'],[.35,'Reduzido'],[1,'Completo']]},
  actionFeedback:{group:'luz',label:'Avisos de ação',hint:'Avisos curtos para disputas roda a roda, passagens por um triz e impactos.',choices:[[false,'Desligados'],[true,'Ligados']]},
+ speedEffects:{group:'luz',label:'Sensação de velocidade',hint:'Bandeirinhas que tremulam com o vento dos carros, rodas borradas, poeira e ar passando pela câmera, capim que deita e o vento mais agudo em alta. Leve fica com as bandeiras dos fiscais e da largada; Desligada mantém só o som e a vibração das zebras.',choices:[['off','Desligada'],['leve','Leve'],['media','Média'],['completa','Completa']]},
  scenery:{group:'mundo',label:'Cenário e vegetação',hint:'Árvores, casas e capim com vento nas margens. Vale na próxima largada.',next:true,choices:[['basico','Básico'],['leve','Leve'],['completo','Completo'],['denso','Denso']]},
  viewDistance:{group:'mundo',label:'Distância de visão',hint:'Até onde o horizonte aparece antes de sumir na neblina.',choices:[['curta','Curta'],['media','Média'],['longa','Longa'],['maxima','Máxima']]},
  water:{group:'mundo',label:'Água dos lagos',hint:'Realista reflete árvores, casas e céu e ondula com o vento: desenha a cena mais uma vez.',choices:[['simples','Simples'],['realista','Realista']]},
@@ -33,19 +35,26 @@ export const GRAPHICS_GROUPS=Object.freeze([['imagem','Imagem'],['luz','Luz e ef
 
 // Médio is what phones always had and Alto what computers had, before this tab existed.
 export const GRAPHICS_PRESETS=Object.freeze({
- baixo:Object.freeze({resolution:.75,dynamicResolution:true,fpsLimit:60,targetFps:0,antialias:0,shadows:'off',post:'off',ao:false,lens:false,motionBlur:false,materials:'baixo',cameraMotion:.35,actionFeedback:true,scenery:'basico',viewDistance:'curta',water:'simples',mirrors:'baixa'}),
- medio:Object.freeze({resolution:1,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:0,shadows:'baixa',post:'lite',ao:false,lens:false,motionBlur:false,materials:'medio',cameraMotion:.35,actionFeedback:true,scenery:'leve',viewDistance:'media',water:'simples',mirrors:'media'}),
- alto:Object.freeze({resolution:1.5,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:4,shadows:'alta',post:'full',ao:true,lens:true,motionBlur:true,materials:'alto',cameraMotion:1,actionFeedback:true,scenery:'completo',viewDistance:'longa',water:'simples',mirrors:'alta'}),
- ultra:Object.freeze({resolution:2,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:4,shadows:'ultra',post:'full',ao:true,lens:true,motionBlur:true,materials:'ultra',cameraMotion:1,actionFeedback:true,scenery:'denso',viewDistance:'maxima',water:'realista',mirrors:'alta'})
+ baixo:Object.freeze({resolution:.75,dynamicResolution:true,fpsLimit:60,targetFps:0,antialias:0,shadows:'off',reflections:'ceu',post:'off',ao:false,lens:false,motionBlur:false,materials:'baixo',cameraMotion:.35,actionFeedback:true,speedEffects:'leve',scenery:'basico',viewDistance:'curta',water:'simples',mirrors:'baixa'}),
+ medio:Object.freeze({resolution:1,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:0,shadows:'baixa',reflections:'pista',post:'lite',ao:false,lens:false,motionBlur:false,materials:'medio',cameraMotion:.35,actionFeedback:true,speedEffects:'media',scenery:'leve',viewDistance:'media',water:'simples',mirrors:'media'}),
+ alto:Object.freeze({resolution:1.5,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:4,shadows:'alta',reflections:'dinamico',post:'full',ao:true,lens:true,motionBlur:true,materials:'alto',cameraMotion:1,actionFeedback:true,speedEffects:'completa',scenery:'completo',viewDistance:'longa',water:'simples',mirrors:'alta'}),
+ ultra:Object.freeze({resolution:2,dynamicResolution:true,fpsLimit:0,targetFps:0,antialias:4,shadows:'ultra',reflections:'dinamico_hd',post:'full',ao:true,lens:true,motionBlur:true,materials:'ultra',cameraMotion:1,actionFeedback:true,speedEffects:'completa',scenery:'denso',viewDistance:'maxima',water:'realista',mirrors:'alta'})
 });
 
 // What each choice means to the engine (main.js applyGraphics, landscape.js).
-// Sun shadows: map size in pixels, metres covered round the car and the PCF softness.
-export const SHADOW_LEVELS=Object.freeze({off:null,baixa:{size:1024,reach:55,radius:2},media:{size:2048,reach:70,radius:2},alta:{size:4096,reach:85,radius:2},ultra:{size:8192,reach:120,radius:3}});
+// Sun shadows: map size in pixels, metres covered round the car and the PCF softness. car: the cars'
+// own crisp map (car-shadow.js), tile pixels and metres either side of a car, for the followed car
+// alone or with the nearest ones.
+export const SHADOW_LEVELS=Object.freeze({off:null,baixa:{size:1024,reach:55,radius:2},media:{size:2048,reach:70,radius:2},alta:{size:4096,reach:85,radius:2,car:{size:1024,reach:4.5,cars:1}},ultra:{size:8192,reach:120,radius:3,car:{size:1024,reach:4.5,cars:4}}});
 // Fog from near to far (metres) and the camera's far plane; past 'far' everything is fog colour.
 export const VIEW_DISTANCES=Object.freeze({curta:{fog:[300,1600],far:1900},media:{fog:[420,2400],far:6500},longa:{fog:[520,3300],far:6500},maxima:{fog:[700,4600],far:9000}});
 // Scenery: the light build (mobile), trees and houses per area, and how near a tree shows its full crown.
 export const SCENERY_LEVELS=Object.freeze({basico:{mobile:true,density:.7,lod:55},leve:{mobile:true,density:1,lod:80},completo:{mobile:false,density:1,lod:130},denso:{mobile:false,density:1.3,lod:220}});
+// Car reflections: where the paint, glass and chrome get their surroundings (car-reflections.js). sky:
+// the sky dome's own map; bake: the circuit seen once from the grid (cube face pixels; 256 as the sky's,
+// so no other shader programs on phones); probe: a cube that follows the player's car, 'faces' faces
+// redrawn per frame out to 'far' metres. finish: car-finish.js profile.
+export const REFLECTION_LEVELS=Object.freeze({ceu:{source:'sky',finish:'baixo'},pista:{source:'bake',bake:256,far:600,finish:'medio'},dinamico:{source:'probe',probe:128,faces:1,far:250,finish:'alto'},dinamico_hd:{source:'probe',probe:256,faces:2,far:400,finish:'ultra'}});
 // Cockpit mirror picture in pixels (null: not drawn).
 export const MIRROR_SIZES=Object.freeze({off:null,baixa:[340,57],media:[510,85],alta:[1020,170]});
 

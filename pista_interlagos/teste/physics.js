@@ -151,7 +151,7 @@ export class TestCar {
  resetGrid({back=GRID_START_BACK,lane=0}={}){const target=this.data.meta.reconstructed_xy_m-back;this.reset(Math.max(0,this.a.findIndex(p=>p[0]>=target)));if(lane){this.x+=this.surface.lx*lane;this.y+=this.surface.ly*lane;this.settle();}this.awaitingStart=true;}
  reset(index=0){this.awaitingStart=false;this.distance=0;this.clock=0;this.lapStart=0;this.laps=0;this.best=null;this.lastLap=null;this.checkpoints=new Set();this.nextCheckpoint=1;this.lapValid=true;this.lastLapValid=null;this.excursion=null;this.spin=0;this.rearSpin=0;this.shifts=0;this.rightings=0;this.rightedAt=null;this.invalidReason=null;this.lastInvalidReason=null;this.pitPenalty=null;this.beforeCross=null;this.recover(index);}
  // Put the car back at rest on the centre line, keeping its clock, laps and race progress.
- recover(index=this.index){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.burnout=0;this.rearSlipSpeed=0;this.steerInput=0;this.steerVisual=0;this.gear=1;this.manualGear=false;this.rpm=IDLE_RPM;this.shiftTimer=0;this.longAccel=0;this.latAccel=0;this.crashImpactSpeed=0;this.settle();}
+ recover(index=this.index){const p=this.a[index%this.n];this.x=p[1];this.y=p[2];this.heading=Math.atan2(p[8],p[7]);this.vx=0;this.vy=0;this.yaw=0;this.steer=0;this.index=index;this.burnout=0;this.rearSlipSpeed=0;this.rearWheelSpeed=undefined;this.steerInput=0;this.steerVisual=0;this.gear=1;this.manualGear=false;this.rpm=IDLE_RPM;this.shiftTimer=0;this.longAccel=0;this.latAccel=0;this.crashImpactSpeed=0;this.settle();}
  // Seat the body on its wheels at the current position and heading: level with
  // the ground under the four tyres, and clear of any bank under the body.
  settle(){
@@ -391,7 +391,8 @@ export class TestCar {
   // Tree trunks (tree-contact.js; main.js gives them to the player's car).
   if(this.posts){const hit=this.posts.collide(this);if(hit)this.wallImpactSpeed=Math.max(this.wallImpactSpeed,hit);}
   this.distance+=speed*dt;this.clock+=dt;this.spin+=v*dt/m.tyre;
-  this.rearSpin=(this.rearSpin??0)+(input.handbrake&&!burning?0:v+this.rearSlipSpeed)*dt/m.tyre;
+  // The rear tyres' surface speed: none while the handbrake locks them (contact-shadows.js blurs the wheels by it).
+  this.rearWheelSpeed=input.handbrake&&!burning?0:v+this.rearSlipSpeed;this.rearSpin=(this.rearSpin??0)+this.rearWheelSpeed*dt/m.tyre;
   // Upside down or on its side and at rest: after a pause the marshals right it.
   const resting=speed<1.5&&Math.abs(this.vz)<1.5&&Math.abs(this.yaw)+Math.abs(this.rollRate)+Math.abs(this.pitchRate)<1.2;
   if(this.upright<.45&&resting)this.overturned+=dt;else if(this.upright>.8)this.overturned=0;

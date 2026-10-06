@@ -13,6 +13,8 @@ assert.equal(new PlayerPreferences(storage).values.circuit,'interlagos');
 preferences.update({immersive:true});
 assert.equal(new PlayerPreferences(storage).values.immersive,true);
 assert.equal(new PlayerPreferences(storage).values.camera,'cockpit');
+// The old high chase is kept as Perseguição distante ('far'); saves keep it like any other view.
+preferences.update({camera:'far'});assert.equal(new PlayerPreferences(storage).values.camera,'far');preferences.update({camera:'cockpit'});
 // Car damage is opt-in and survives a reload; anything but a boolean falls back to off.
 preferences.update({damage:true});assert.equal(new PlayerPreferences(storage).values.damage,true);
 preferences.update({damage:'yes'});assert.equal(new PlayerPreferences(storage).values.damage,false);

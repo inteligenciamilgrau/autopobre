@@ -10,6 +10,9 @@ import {createRivalDriver,CABIN_DROP,sharedDriverMaterials} from './rival-driver
 import {createBrakeLights,sharedBrakeLights} from './brake-lights.js';
 import {podiumBanner,podiumPlate,podiumRibbon,signBoard} from './pit-textures.js';
 import {fuscaCar,rivalCabin,FUSCA_PROFILE,FUSCA_SEAT} from './fusca.js';
+import {finishMaterial,setCarDirt,setCarTone} from './car-finish.js';
+import {carContact} from './contact-shadows.js';
+import {trunkInside,showTrunkInside,liveryPlates,liveryMaterial,sharedLivery,LIVERY_SLOTS,liveryLook,rimMaterial,sharedRims,RIM_STYLES} from './car-livery.js';
 // V06 parts a rival never shows on track (engine and fuel cell stay under shut panels); the
 // exporter also flags every other hidden mesh (bay, trunk, hinges) with the extra "interno".
 const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior_do_jogo'];
@@ -18,12 +21,18 @@ const HIDDEN_ON_RIVALS=['Motor_CONJUNTO','Tanque_combustivel_CONJUNTO','Interior
 export const LIVERY_99=/^(Adesivo|Decal_|Pilotos_99_parabrisa|Invent_parabrisa|Jesus_|Logo_frontal|Stickers_vigia_|Branco$)/;
 // A team's colours on the 99's model (rivalCar; the player's car, car-livery.js): the body paint takes
 // the team's colour (and finish), the side stripe its stripe; one clone per material, kept in cache.
+// The clone gets the clear coat again (car-finish.js: a clone loses its shader patch), the team's
+// finish on top of it; dirt: a rival's road grime ([amount, seed], car-finish.js setCarDirt), none on the player's;
+// tone: its two-tone ([colour, height], setCarTone; car-livery.js LIVERY_PLANS).
 export const TEAM_PAINTS=Object.freeze(['Pintura_preta','Faixa_amarela']);
-export const teamPaint=(cache,{color,stripe,finish=null})=>m=>{
+export const teamPaint=(cache,{color,stripe,finish=null,dirt=null,tone=null})=>m=>{
  if(!TEAM_PAINTS.includes(m.name))return m;
- if(!cache.has(m)){const c=m.clone(),body=m.name==='Pintura_preta';c.color.setHex(body?color:stripe);if(body&&finish)Object.assign(c,finish);cache.set(m,c);}
+ if(!cache.has(m)){const c=m.clone(),body=m.name==='Pintura_preta';c.color.setHex(body?color:stripe);if(body&&finish)Object.assign(c,finish);finishMaterial(c,{rosterFinish:body?finish:null});if(dirt)setCarDirt(c,...dirt);if(body&&tone)setCarTone(c,...tone);cache.set(m,c);}
  return cache.get(m);
 };
+// A rival's grime, by its number: light, more on some cars than others (about one in five nearly clean), each its
+// own pattern (car-finish.js).
+export const rivalDirt=number=>{let h=7;for(const ch of String(number))h=(h*31+ch.charCodeAt(0))%1000003;const a=(h%997)/997,b=(h%613)/613;return [a<.2?.08:.22+.4*(a-.2),b*40];};
 // The number plates in numberPlates' order: both rear quarters, the roof, the tail.
 export const PLATE_NAMES=Object.freeze(['Numero_lateral_','Numero_lateral_','Numero_teto_','Numero_traseiro_']);
 // The distant rivals' side profile (farProxy; the car screen's card icons, car-select.js): metres in the
@@ -36,11 +45,18 @@ export const FAR_PROFILE=Object.freeze({
  glass:[[.9,.92],[.08,1.37],[-.97,1.37],[-1.7,.99]],axles:[1.55,-1.117],wheel:.316,
  width:1.84,track:.8,tail:{x:-2.37,y:.95,z:.55,w:.35,h:.08},head:{x:2.45,y:.63,z:.605,w:.25,h:.1},bumpers:[[2.47,.42],[-2.41,.45]],bumperWidth:1.8});
 const up=new THREE.Vector3(0,1,0);
+// A side profile's part below height y (one Sutherland-Hodgman pass): a two-tone's lower band on the distant model.
+export function clipBelow(points,y){
+ const out=[];for(let i=0;i<points.length;i++){const a=points[i],b=points[(i+1)%points.length],ina=a[1]<=y,inb=b[1]<=y;
+  if(ina)out.push(a);if(ina!==inb){const t=(y-a[1])/(b[1]-a[1]);out.push([a[0]+(b[0]-a[0])*t,y]);}}
+ return out;
+}
 // A car's number as the rivals carry it where the Opala 99 has its 99: white italic numerals outlined in
 // black, so they read on every paint (rivalCar; the player's car in another team's colours, car-livery.js).
+// Under the same clear coat as the paint (car-finish.js decal), not a matte patch on the gloss.
 export function numberSticker(number){
  const canvas=document.createElement('canvas');canvas.width=256;canvas.height=200;const ctx=canvas.getContext('2d');ctx.font='italic 900 170px Arial';ctx.textAlign='center';ctx.textBaseline='middle';ctx.lineJoin='round';ctx.lineWidth=16;ctx.strokeStyle='#101314';ctx.strokeText(number,128,108,228);ctx.fillStyle='#f4f3ee';ctx.fillText(number,128,108,228);
- const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;return new THREE.MeshStandardMaterial({map,transparent:true,depthWrite:false,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+ const map=new THREE.CanvasTexture(canvas);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;return finishMaterial(new THREE.MeshPhysicalMaterial({name:'Numero_colado',map,transparent:true,depthWrite:false,roughness:.35,clearcoat:.8,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
 }
 // The meshes a sticker is bent onto: what shows of the car under root, but the stickers themselves.
 // Meshes under a hidden group are left out: the brake lights' halos (brake-lights.js), hidden while
@@ -136,13 +152,13 @@ export class ImmersiveVisuals {
   // The pilot, out of the car in his cap; limbs listed left leg, left arm, right leg, right arm.
   this.hero=this.people.person(OUTFITS.driver);this.crowd.add(this.hero);const rig=this.hero.userData.rig.limbs;this.hero.userData.limbs=[rig[-1].leg,rig[-1].arm,rig[1].leg,rig[1].arm];
   this.heroStart=L.point(-1.5,L.spotD);this.heroYaw=L.heading;this.hero.position.copy(this.heroStart);this.hero.rotation.y=this.heroYaw;this.foot=footState(this.heroYaw,{floor:this.crowd.position.y+this.heroStart.y});
-  this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{driven:true,stripe:entry.stripe,finish:entry.finish});group.userData.entry=entry;this.root.add(group);return group;});
+  this.rivals=RIVAL_ROSTER.map(entry=>{const group=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{driven:true,stripe:entry.stripe,finish:entry.finish,dirt:true});group.userData.entry=entry;this.root.add(group);return group;});
   this.parked=[];
   if(pit){
    // The four teams nearest Box 99 park nose in at their garage doors.
    const {bay,team}=garageBays(pit,RIVAL_ROSTER.length);
    for(const [b,k] of [...team.entries()].sort((m,n)=>m[1]-n[1]).slice(0,4)){
-    const sv=pit.garages[0]+(b+.5)*bay,x=sv-pit.box99.s,d=pitPoint(pit,sv).hi+.35-2.75,entry=RIVAL_ROSTER[k],parked=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{stripe:entry.stripe,finish:entry.finish});
+    const sv=pit.garages[0]+(b+.5)*bay,x=sv-pit.box99.s,d=pitPoint(pit,sv).hi+.35-2.75,entry=RIVAL_ROSTER[k],parked=this.rivalCar(rivalTemplate,entry.color,entry.number,entry.shortName,{stripe:entry.stripe,finish:entry.finish,dirt:true});
     parked.position.copy(L.point(x,d));parked.rotation.y=L.heading+Math.PI/2;this.crowd.add(parked);this.parked.push({x,d});
    }
    const own=this.ownCar(rivalTemplate);own.position.copy(L.point(0,pit.box99.front+6.5,.05));own.rotation.y=L.heading-Math.PI/2;this.crowd.add(own);this.ownSpot={x:0,d:pit.box99.front+6.5};this.own=own;this.ownOpenings=new CarOpenings().attach(own);
@@ -164,7 +180,7 @@ export class ImmersiveVisuals {
   this.truck=this.truckModel();this.root.add(this.truck);
   this.strap=this.strapMesh();this.root.add(this.strap);
   this.damage=new THREE.Group();this.damage.visible=false;carRoot.add(this.damage);
-  this.tank=new THREE.Group();this.damage.add(this.tank);this.box(this.tank,[0,0,0],[.64,.17,.95],0x686b64);
+  this.tank=new THREE.Group();this.damage.add(this.tank);this.box(this.tank,[0,0,0],[.64,.17,.95],0x4a4842);
   for(const z of [-.31,.31])this.box(this.tank,[0,-.012,z],[.67,.185,.045],0x302c26);
   this.tankTethers=new THREE.LineSegments(new THREE.BufferGeometry().setAttribute('position',new THREE.BufferAttribute(new Float32Array(12),3)),new THREE.LineBasicMaterial({color:0x594f3e}));this.damage.add(this.tankTethers);
   this.crackCanvas=document.createElement('canvas');this.crackCanvas.width=1024;this.crackCanvas.height=512;this.crackTexture=new THREE.CanvasTexture(this.crackCanvas);
@@ -261,6 +277,18 @@ export class ImmersiveVisuals {
   list=[bend(V(-1.835,.667,-.86),V(-1,0,0),V(0,1,0),.57,.45,36),bend(V(-1.906,.67,.86),V(1,0,0),V(0,1,0),.57,.45,36),bend(V(-.19,1.3,0),V(-1,0,0),V(0,0,1),.94,.74),bend(V(-2.18,.69,-.29),V(0,0,1),V(0,1,0),.2,.156)];
   this.plateShapes.set(template,list);return list;
  }
+ // The livery's shapes on this model (car-livery.js LIVERY_SLOTS: bonnet, doors, fenders, quarters, windscreen
+ // banner, trunk lid, twin stripes), cast like the numbers, once per model; uv over 0..1, cut to the canvas per car.
+ liveryShapes(template,detail){
+  this.liveryCache??=new WeakMap();let shapes=this.liveryCache.get(template);if(shapes)return shapes;
+  detail.parent?.updateMatrixWorld(true);const body=bodyTriangles(detail,shownBody(detail)),V=a=>new THREE.Vector3(...a);shapes={};
+  for(const [name,S] of Object.entries(LIVERY_SLOTS)){
+   const [nx,ny]=S.grid??[14,5],at=V(S.at),right=V(S.right),across=right.clone();
+   const list=(S.stripes??[0]).map(off=>bendOnBody(body,at.clone().addScaledVector(across,off),right,V(S.up),S.w,S.h,nx,ny));
+   shapes[name]=list.length>1?mergeGeometries(list,false):list[0];if(list.length>1)list.forEach(g=>g.dispose());
+  }
+  this.liveryCache.set(template,shapes);return shapes;
+ }
  // A sponsor sticker on both doors of a rival (car 70's Old Stock ads): on the door skin below the
  // window (the V06 doors run from x -0.29 to 0.89 m, car frame), bent onto the body, with the
  // detailed model (hidden with it in the distance).
@@ -277,7 +305,8 @@ export class ImmersiveVisuals {
   // Parked in the garage and walked round, it carries the player's whole cockpit, still (cockpit.js
   // outsideCopy), not the light interior of the rivals.
   const cabin=this.carRoot.getObjectByName('Interior_Opala_99')?.userData.outsideCopy?.();root.add(cabin??this.lightInterior());
-  root.name='Opala_99_no_box';return root;
+  // Its trunk's inside shows only with the lid open (car-livery.js), as on the player's car.
+  root.userData.trunkInside=trunkInside(root);root.name='Opala_99_no_box';return root;
  }
  mat(color){return this.materials[color]??=(new THREE.MeshStandardMaterial({color,roughness:.76}));}
  // The car GLB carries no interior (the player's cockpit is built at runtime, cockpit.js): the
@@ -323,11 +352,14 @@ export class ImmersiveVisuals {
  }
  // ~250-triangle silhouette in the rival's colours, for distant cars: the Opala's, or another profile's
  // (FAR_PROFILE's fields; the Fusca's, fusca.js FUSCA_PROFILE, whose fenders take the second colour).
- farProxy(color,p=FAR_PROFILE,second=color){
+ // tone: a two-tone's lower colour ([colour, height], car-livery.js), the body below it in that colour.
+ farProxy(color,p=FAR_PROFILE,second=color,tone=null){
   const paint=new THREE.Color().setHex(color),parts=[];
   const add=(geometry,rgb)=>{let g=geometry.index?geometry.toNonIndexed():geometry;for(const key of Object.keys(g.attributes))if(key!=='position'&&key!=='normal')g.deleteAttribute(key);const c=new Float32Array(g.attributes.position.count*3);for(let i=0;i<c.length;i+=3){c[i]=rgb.r;c[i+1]=rgb.g;c[i+2]=rgb.b;}g.setAttribute('color',new THREE.BufferAttribute(c,3));parts.push(g);};
   const profile=(points,width,rgb)=>{const shape=new THREE.Shape(points.map(([x,y])=>new THREE.Vector2(x,y)));add(new THREE.ExtrudeGeometry(shape,{depth:width,bevelEnabled:false}).translate(0,0,-width/2),rgb);};
   profile(p.body,p.width,paint);
+  // Stretched .5% along about its middle: its tail and nose walls stand ~1 cm clear of the body's (coplanar, they z-fought).
+  if(tone){const lower=clipBelow(p.body,tone[1]),xs=lower.map(q=>q[0]),mid=(Math.min(...xs)+Math.max(...xs))/2;if(lower.length>2)profile(lower.map(([x,y])=>[mid+(x-mid)*1.005,y]),p.width+.02,new THREE.Color().setHex(tone[0]));}
   for(const fender of p.fenders??[])profile(fender,p.width+.02,new THREE.Color().setHex(second));
   profile(p.glass,p.width+.02,new THREE.Color(.02,.025,.03));
   const tyre=new THREE.Color(.025,.025,.025),trim=new THREE.Color(.05,.05,.05),r=p.wheel,{tail,head}=p;
@@ -335,7 +367,8 @@ export class ImmersiveVisuals {
   for(const side of [-1,1]){add(new THREE.BoxGeometry(.05,tail.h,tail.w).translate(tail.x,tail.y,side*tail.z),new THREE.Color(.5,.02,.02));add(new THREE.BoxGeometry(.04,head.h,head.w).translate(head.x,head.y,side*head.z),new THREE.Color(.8,.78,.6));}
   for(const [x,y] of p.bumpers??[])add(new THREE.BoxGeometry(.06,.14,p.bumperWidth).translate(x,y,0),trim);
   const geometry=mergeGeometries(parts,false);parts.forEach(g=>g.dispose());
-  this.materials.farCar??=new THREE.MeshStandardMaterial({name:'Rival_distante',vertexColors:true,roughness:.4,metalness:.1});
+  // Clear-coated as the detailed paint (car-finish.js), so the highlight does not drop at the 40 m swap.
+  this.materials.farCar??=finishMaterial(new THREE.MeshPhysicalMaterial({name:'Rival_distante',vertexColors:true,roughness:.4,metalness:.1,clearcoat:1}));
   const mesh=new THREE.Mesh(geometry,this.materials.farCar);mesh.name='Rival_distante';mesh.castShadow=mesh.receiveShadow=true;mesh.visible=false;return mesh;
  }
  // Swap detailed and distant rival models around the player.
@@ -384,7 +417,7 @@ export class ImmersiveVisuals {
  disposeCar(obj,template){
   const keep=new Set(),hold=root=>root?.traverse(o=>{if(o.geometry)keep.add(o.geometry);for(const m of [o.material??[]].flat())keep.add(m);});
   hold(template);hold(this.carRoot.getObjectByName('Estrutura_cabine_V04'));
-  for(const r of [...(this.plateShapes?.get(template)??[]),...Object.values(this.materials),...sharedBrakeLights(),...sharedDriverMaterials()])keep.add(r);
+  for(const r of [...(this.plateShapes?.get(template)??[]),...Object.values(this.materials),...sharedBrakeLights(),...sharedDriverMaterials(),...sharedLivery(),...sharedRims()])keep.add(r);
   obj.traverse(o=>{if(o.geometry&&!o.isSprite&&!keep.has(o.geometry))o.geometry.dispose();for(const m of [o.material??[]].flat())if(!keep.has(m)){if(m.map?.isCanvasTexture)m.map.dispose();m.dispose();}});
  }
  // driven: a rival out on track, with its driver (rival-driver.js) in the team's suit and helmet;
@@ -392,9 +425,9 @@ export class ImmersiveVisuals {
  // side stripe (race-roster.js), finish overrides the paint's metalness/roughness (gold). livery99: the
  // Opala 99 as loaded, its paint, sponsors and numbers (raced by Stevan Gaipo when the player takes
  // another car; color then only tints the distant model and the driver's suit).
- rivalCar(template,color,number,name='',{driven=false,stripe=0xe4e4d5,finish=null,livery99=false}={}){
+ rivalCar(template,color,number,name='',{driven=false,stripe=0xe4e4d5,finish=null,livery99=false,dirt=false}={}){
   if(!template)return this.car(color,number);
-  const root=template.clone(true),materials=new Map(),pivots=[];
+  const root=template.clone(true),materials=new Map(),pivots=[],look=livery99?{tone:null,rim:null}:liveryLook(number);
   const structure=this.carRoot.getObjectByName('Estrutura_cabine_V04');if(structure)root.add(structure.clone(true));
   for(const name of HIDDEN_ON_RIVALS)root.getObjectByName(name)?.removeFromParent();shutOpenings(root);root.add(this.lightInterior({wheel:!driven}));
   const inside=[];root.traverse(o=>{if(o.isMesh&&o.userData.interno)inside.push(o);});inside.forEach(o=>o.removeFromParent());
@@ -405,8 +438,10 @@ export class ImmersiveVisuals {
     // No sponsor, name or number of the 99 on the other cars: their own number replaces it.
     if(livery99)return;
     if(mats.some(m=>LIVERY_99.test(m.name))){o.visible=false;return;}
-    const recolor=teamPaint(materials,{color,stripe,finish});
+    const recolor=teamPaint(materials,{color,stripe,finish,dirt:dirt?rivalDirt(number):null,tone:look.tone});
     o.material=Array.isArray(o.material)?mats.map(recolor):recolor(o.material);
+    // Its rims' faces (car-livery.js RIM_STYLES): under a wheel pivot only (the bonnet's hinges share the metal).
+    if(look.rim&&o.material.name==='Aluminio_rodas'){let wheel=false;for(let q=o.parent;q&&!wheel;q=q.parent)wheel=q.name.startsWith('Roda_')&&q.name.includes('PIVO');if(wheel)o.material=rimMaterial(look.rim,o.material);}
    }
    if(!o.isMesh&&o.name.startsWith('Roda_')&&o.name.includes('PIVO'))pivots.push({obj:o,base:o.quaternion.clone()});
   });
@@ -418,16 +453,20 @@ export class ImmersiveVisuals {
   // Level of detail: beyond ~40 m the car is one vertex-coloured mesh (one draw call).
   const detail=new THREE.Group();detail.name='Rival_detalhe';while(root.children.length)detail.add(root.children[0]);root.add(detail);
   if(driven){const driver=createRivalDriver({color,number});detail.add(driver.root);root.userData.driver=driver;}
-  const far=this.farProxy(color);root.add(far);root.userData.detail=detail;root.userData.far=far;
+  const far=this.farProxy(color,FAR_PROFILE,color,look.tone);root.add(far);root.userData.detail=detail;root.userData.far=far;
   // Brake lights on both levels of detail, lit while its driver brakes (userData.brake).
   const lamps=[createBrakeLights(),createBrakeLights({far:true})];detail.add(lamps[0]);far.add(lamps[1]);root.userData.brake=v=>{for(const l of lamps)l.userData.set(v);};
   const label=name?this.tag(root,name,[0,2.08,0],2.7,.30,'#fff','#172a2ddb'):null;
   // The rival's own number where the Opala 99 carries its 99 (those stickers are
   // hidden): big on both rear quarters and on the roof, small on the tail; one texture each.
   // The Opala 99 itself (livery99) keeps its own.
+  // The spinning wheels' disc takes the rims' style (contact-shadows.js).
+  root.userData.rimStyle=RIM_STYLES[look.rim]?.style??0;
   if(livery99){root.userData.wheels=pivots;root.userData.nameLabel=label;return root;}
-  const sticker=numberSticker(number);
-  this.numberPlates(template,detail).forEach((g,i)=>{const decal=new THREE.Mesh(g,sticker);decal.name=PLATE_NAMES[i]+number;decal.renderOrder=2;detail.add(decal);});
+  // Its livery (car-livery.js): sponsors and stripes merged into the four number stickers, one material for the field.
+  const plates=this.numberPlates(template,detail),livery=liveryPlates({number,stripe},plates,this.liveryShapes(template,detail));
+  const material=livery?liveryMaterial():numberSticker(number);
+  (livery?.plates??plates).forEach((g,i)=>{const decal=new THREE.Mesh(g,material);decal.name=PLATE_NAMES[i]+number;decal.renderOrder=2;detail.add(decal);});
   root.userData.wheels=pivots;root.userData.nameLabel=label;return root;
  }
  // The tow strap: a flat ribbon along the 25 points of its path (immersive-state.js strapPath),
@@ -548,11 +587,13 @@ export class ImmersiveVisuals {
  }
  // focus: the car the cameras watch (main.js, recon lap), else the player's: name tags show round it.
  // A short field (solo practice, 1x1) races some of the cars: each rival drives its roster place's car.
- updateFree(rivals,dt){this.time+=dt;this.leoDoor?.scale.setScalar(1);this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);const focus=this.focus??this.carRoot.position,short=rivals.length<this.rivals.length;this.rivals.forEach((obj,i)=>{const r=short?rivals.find(r=>r.rosterIndex===i):rivals[i];if(!r){obj.visible=false;return;}const c=r.car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-focus.x,c.y+focus.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(r.input?.brake??0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));});}
+ updateFree(rivals,dt){this.time+=dt;this.leoDoor?.scale.setScalar(1);this.root.visible=true;this.damage.visible=false;this.carRoot.visible=true;for(const child of this.root.children)child.visible=this.rivals.includes(child);const focus=this.focus??this.carRoot.position,short=rivals.length<this.rivals.length;this.rivals.forEach((obj,i)=>{const r=short?rivals.find(r=>r.rosterIndex===i):rivals[i];if(!r){obj.visible=false;return;}const c=r.car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-focus.x,c.y+focus.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(r.input?.brake??0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-c.spin));this.groundContact(obj,c);});}
+ // Its contact shadow on both levels of detail, its wheels' blur close up (contact-shadows.js).
+ groundContact(obj,c){carContact.car(obj,c,obj.userData.fusca?'fusca':'opala',obj.userData.detail?.visible?obj.userData.wheels:null);}
  update(state,car,dt,rivals,projectile,towOrigin){
-  this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;this.ownOpenings?.update(dt);
+  this.time+=dt;this.root.visible=this.damage.visible=state.active;if(!state.active)return;this.ownOpenings?.update(dt);showTrunkInside(this.own?.userData.trunkInside,this.ownOpenings);
   const staged=['crowd','podium'].includes(state.phase);this.stage.visible=state.phase==='podium';this.crowd.visible=state.phase==='crowd';this.podium.visible=state.phase==='podium';this.carRoot.visible=!staged||!!this.inCar;if(this.own)this.own.visible=!this.inCar;if(this.inCar)this.hero.visible=false;
-  this.rivals.forEach((obj,i)=>{obj.visible=['starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(state.phase==='race'?rivals[i].input?.brake??0:0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));}});
+  this.rivals.forEach((obj,i)=>{obj.visible=['starting','grid','race'].includes(state.phase);if(obj.visible){const c=rivals[i].car;if(obj.userData.nameLabel)obj.userData.nameLabel.visible=Math.hypot(c.x-this.carRoot.position.x,c.y+this.carRoot.position.z)<45;this.setCarPose(obj,c);this.lean(obj,c);this.detailLevel(obj);obj.userData.brake?.(state.phase==='race'?rivals[i].input?.brake??0:0);obj.userData.driver?.update(c,dt,obj.userData.detail.visible);for(const w of obj.userData.wheels||[])w.obj.quaternion.copy(w.base).multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0,0,1),-rivals[i].progress/.31595));this.groundContact(obj,c);}});
   // The sign (seen through walls) fades out as the camera comes within a few metres of it.
   if(this.deskMarker){const m=this.deskMarker,show=state.phase==='crowd'&&!this.inCar&&!state.desk,pulse=.5+.5*Math.sin(this.time*3.2);m.marker.visible=m.sign.visible=show;
    if(show){m.beam.material.opacity=.36+.24*pulse;m.ring.material.opacity=.7+.3*pulse;m.arrow.position.y=2.2+.1*Math.sin(this.time*2.4);m.arrow.rotation.y=this.time*1.6;
@@ -567,6 +608,9 @@ export class ImmersiveVisuals {
   // The café's sign shows the way while the pilot walks the paddock, fading as the camera comes near.
   if(this.cafe){const sign=this.cafe.sign,show=state.phase==='crowd'&&!this.inCar&&!state.cafe&&!this.nearCafe();sign.visible=show;
    if(show){const far=this.viewCamera?this.viewCamera.position.distanceTo(sign.getWorldPosition(this.signPosition??=new THREE.Vector3())):99;sign.material.opacity=THREE.MathUtils.clamp((far-5)/4,0,1);sign.visible=far>5;}}
+  // The fuel cell only shows here once its mount gives way and it drags behind: fitted, it is the model's own, in the
+  // trunk (car-livery.js trunkInside); this stand-in under the bumper read as a pale crate from the grid's low camera.
+  this.tank.visible=!!state.tankDetached;
   this.tank.position.set(state.tankDetached?-2.22:-1.56,state.tankDetached?.06+Math.abs(Math.sin(this.time*29))*.025:.19,state.tankDetached?Math.sin(this.time*8)*.08:0);this.tank.rotation.set(state.tankDetached?.12:0,0,state.tankDetached?-.19:0);
   this.tankTethers.visible=state.tankDetached;const ta=this.tankTethers.geometry.attributes.position;for(let i=0;i<2;i++){ta.setXYZ(i*2,-1.6,.24,(i-.5)*.6);ta.setXYZ(i*2+1,this.tank.position.x+.24,this.tank.position.y,(i-.5)*.6);}ta.needsUpdate=true;
   this.drawCracks(state.glass);this.crackedGlass.visible=state.glass>0;

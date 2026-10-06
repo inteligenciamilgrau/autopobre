@@ -19,17 +19,21 @@ import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar,clamp,wrap,recognitionInput,RIGHTING_DELAY,OPALA_BODY,FUSCA_BODY} from './physics.js?v=20260923-capotagem';
 import {PLAYER_ENTRY,ACE_NUMBER,playerGridSlot,carEntry,fieldRoster,duelRivalFor,cssColor,MODEL_NAMES} from './race-roster.js';
 import {CarSelect} from './car-select.js';
-import {CarLivery} from './car-livery.js';
+import {CarLivery,trunkInside,showTrunkInside} from './car-livery.js';
+import {finishMesh,finishMaterial} from './car-finish.js';
+import {CarReflections} from './car-reflections.js';
 import {FuscaBody,prepareFusca,FUSCA_URL,FUSCA_SEAT,FUSCA_EYE,FUSCA_HOOD_EYE,FUSCA_WHEEL_TRAVEL,FUSCA_WHEEL_BUMP} from './fusca.js';
 import {createTrackSurface,createGuardrails,createCurbs,createTrackBranding} from './track-surface.js';
 import {createCockpit} from './cockpit.js?v=20260927-omp-retrovisores';
 import {CarOpenings} from './car-openings.js';
 import {SideMirrors} from './side-mirrors.js';
-import {createBrakeLights} from './brake-lights.js';
+import {createBrakeLights,lampUVs} from './brake-lights.js';
 import {CameraReturn,LookBack,turnHead,neckTwist,HEAD_YAW_COCKPIT,HEAD_YAW_HOOD} from './camera-return.js';
+import {CameraRig,CAMERA_FRAMES,FOLLOW_FRAMES,baseFov,speedFov as lensFov,easeLens,dolly,frameFor,topSpeed,vibration,carPoints,carScale} from './camera-rig.js';
+import {clearView} from './on-foot.js';
 import {createDriver} from './driver.js?v=20260923-controls';
 import {SkidMarks} from './skid-marks.js?v=20260923-capotagem';
-import {TyreSmoke} from './tyre-smoke.js?v=20260927-visibilidade';
+import {TyreSmoke} from './tyre-smoke.js?v=20261005-poeira-folhas';
 import {ImmersiveMode} from './immersive-mode.js';
 import {MobileControls} from './mobile-controls.js';
 import {GamepadControls} from './gamepad-controls.js';
@@ -40,12 +44,14 @@ import {setupSettings} from './settings.js';
 import {CarAudio} from './car-audio.js?v=20260913-immersive';
 import {PlayerPreferences,CAMERA_MODES,LAPS} from './player-preferences.js';
 import {createSky,SUN_DIRECTION} from './sky.js';
-import {createCinematic} from './cinematic.js';
-import {createLandscape,loadTerrainTextures,buildTrackField,readOrtho,terrainMaterial,structureMaterial,createCrowd} from './landscape.js';
+import {createCinematic,SMEAR_CARS} from './cinematic.js';
+import {SunPlacement} from './sun-light.js';import {CarShadow} from './car-shadow.js';
+import {createLandscape,loadTerrainTextures,buildTrackField,readOrtho,looseGround,terrainMaterial,structureMaterial,createCrowd} from './landscape.js';
 import {LakeContact} from './lake-contact.js';
 import {fitGround,applyGroundHeights,groundHeight} from './track-clearance.js';
 import {createGrandstands} from './interlagos-stands.js';
 import {createTrackside} from './trackside.js';
+import {createFlagField} from './trackside-flags.js';
 import {updatePeople,hitPeople,takePeopleEvents,tumbleInfo} from './pit-crew.js';
 import {TreeField} from './tree-contact.js';
 import {TvCamera} from './tv-camera.js';
@@ -56,6 +62,10 @@ import {DebugOverlay} from './debug-overlay.js';
 import {RaceAction,ActionNotice} from './race-action.js';
 import {GhostRecorder,loadGhost,saveGhost} from './ghost-lap.js';
 import {GhostCar} from './ghost-car.js';
+import {carContact} from './contact-shadows.js';
+import {prepareWheels,setTyreDetail} from './car-wheels.js';
+import {createSpeedEffects,releaseWakeCars} from './speed-particles.js';
+import {rideKerbs,kerbSound} from './kerb-contact.js';
 const $=id=>document.getElementById(id);
 const touchDevice=matchMedia('(pointer:coarse)').matches||navigator.maxTouchPoints>0;let mobile;
 const preferences=new PlayerPreferences();
@@ -142,9 +152,14 @@ function chooseImmersive(value){
 }
 const scene=new THREE.Scene();scene.background=new THREE.Color('#a8c8dd');
 let sky,landscape,landscapeField,terrainTextures,lakeContact=null,treeField=null,cinematic,trackside=null,tvCamera=null;const tvVelocity=new THREE.Vector3();
+// Flags that fly in the cars' wake, corner rods and brake boards (trackside-flags.js).
+let flags=null;
 // Film-style opening shots before the free race's 3-2-1 and when the story begins.
 const intro=new CinematicIntro();let introHidden=null;
 let renderer;
+// What the cars' paint, glass and chrome reflect (car-reflections.js; the Gráficos tab's Reflexos dos carros).
+// Its captures leave out the player's car, the ghost and the sprites sized for the screen.
+let carReflections=null;const probeAt=new THREE.Vector3(),reflectionHide=()=>[carRoot,ghostCar.root,tyreSmoke?.mesh,lakeContact?.mesh,treeField?.points,speedFx?.root];
 const camera=new THREE.PerspectiveCamera(58,innerWidth/innerHeight,.1,6500);
 const orbit=new OrbitControls(camera,$('view'));
 const ORBIT_MAX_DISTANCE=45;
@@ -154,6 +169,8 @@ orbit.rotateSpeed=.8;orbit.zoomSpeed=.8;
 const orbitTarget=new THREE.Vector3(),orbitDelta=new THREE.Vector3();
 const hoodEye=new THREE.Vector3(1.1,1.25,0),fuscaHoodEye=new THREE.Vector3(...FUSCA_HOOD_EYE),followOffset=new THREE.Vector3();let followInitialized=false;
 const cameraObstacles=[],cameraRay=new THREE.Raycaster(),cameraRayDirection=new THREE.Vector3();
+// Chase, close and far ride on camera-rig.js springs; followReach: how far the eye may sit from the car past walls.
+const rig=new CameraRig(),camDir=new THREE.Vector3(),camRight=new THREE.Vector3(),camShake={pitch:0,yaw:0,roll:0},rayFrom=new THREE.Vector3(),rayProbe=new THREE.Vector3(),screenPoint=new THREE.Vector3();let followReach=null,followBlock=Infinity,followObstacles=null;
 const obstacleMaterial=new THREE.MeshBasicMaterial({side:THREE.DoubleSide});
 const cameraModes=CAMERA_MODES;
 const cameraReturn=new CameraReturn(),orbitSphere=new THREE.Spherical(),orbitHome=new THREE.Spherical(),orbitSeen=new THREE.Spherical();
@@ -185,15 +202,30 @@ let mouseFreed=false;
 const isInside=()=>mode==='cockpit'||mode==='hood';
 // Look-back (B or the touch button): driving from the cockpit only, not on foot, in the pit stop or menus.
 const lookBackAllowed=()=>mode==='cockpit'&&ready&&!paused&&!cockpitView&&!pitstop?.opened&&!immersive?.onFoot()&&!gridPreview()&&!$('settings').open;
-// Sky light comes mostly from the environment map; the hemisphere only lifts deep shadows.
-// Late-afternoon key light: warm sun, a weaker sky fill so shade keeps its depth.
-scene.add(new THREE.HemisphereLight('#c4d8f2','#4c4a38',.52));
-const sun=new THREE.DirectionalLight('#ffe2bf',3.7);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:4096,touchDevice?1024:4096);const shadowReach=touchDevice?55:85;Object.assign(sun.shadow.camera,{left:-shadowReach,right:shadowReach,top:shadowReach,bottom:-shadowReach,near:1,far:340});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;sun.shadow.radius=2;scene.add(sun,sun.target);
+// Sky light comes mostly from the environment map (sky.js); the hemisphere lifts the shade a little more.
+// Clear early-afternoon key light: a strong, barely warm sun against the open sky's fill, about 5:1 on
+// the ground like a sunny day (the fill was half that and a car's shadow went black), so shade under cars
+// and stands reads dark and crisp but keeps its skylight (eye adaptation keeps the exposure).
+const skyFill=new THREE.HemisphereLight('#c4d8f2','#4c4a38',.45);scene.add(skyFill);
+const sun=new THREE.DirectionalLight('#fff1e2',7);sun.castShadow=true;sun.shadow.mapSize.set(touchDevice?1024:4096,touchDevice?1024:4096);const shadowReach=touchDevice?55:85;Object.assign(sun.shadow.camera,{left:-shadowReach,right:shadowReach,top:shadowReach,bottom:-shadowReach,near:1,far:340});sun.shadow.bias=-.0004;sun.shadow.normalBias=.03;sun.shadow.radius=2;scene.add(sun,sun.target);
 const sunOffset=SUN_DIRECTION.clone().multiplyScalar(140);
+// The shadow box leans toward what the camera sees and moves in whole texels (sun-light.js); the
+// cars get a crisp map of their own on Alto and Ultra (car-shadow.js).
+const sunPlacement=new SunPlacement(SUN_DIRECTION),sunView=new THREE.Vector3(),carShadow=new CarShadow(SUN_DIRECTION),shadowRoots=[];
+function placeSun(p,view=null,dt=1){const c=sunPlacement.place(p,view,{reach:sun.shadow.camera.right,size:sun.shadow.mapSize.x,dt});sun.target.position.copy(c);sun.position.copy(c).add(sunOffset);sun.target.updateMatrixWorld();}
+// The followed car (the watched rival in the recon lap) first, then the nearest cars within 30 m of it;
+// none when the camera is far from it (TV camera, the pilot on foot away from the car).
+function carShadowRoots(){
+ const cars=SHADOW_LEVELS[graphics.values.shadows]?.car?.cars??0,first=watchedRival()?.obj??carRoot;shadowRoots.length=0;if(!cars||!ready||first.position.distanceToSquared(camera.position)>6400)return shadowRoots;shadowRoots.push(first);
+ if(cars>1)shadowRoots.push(...[carRoot,...(immersive?.visual?.rivals??[])].filter(o=>o!==first&&o.visible&&o.position.distanceToSquared(first.position)<900).sort((a,b)=>a.position.distanceToSquared(first.position)-b.position.distanceToSquared(first.position)).slice(0,cars-1));
+ return shadowRoots;
+}
 const loader=new GLTFLoader(),carRoot=new THREE.Group();scene.add(carRoot);
 // Sprung mass: body, cabin, cockpit and driver roll and pitch on the suspension;
 // the wheels are counter-rotated so they stay planted on the ground.
 const carBody=new THREE.Group();carBody.name='Carroceria_suspensao';carRoot.add(carBody);
+// Contact shadows and wheel blur of every car (contact-shadows.js): kept with carRoot, placed in world space.
+carRoot.add(carContact.root);
 // Doors, hood, trunk lid and filler caps of the V06 Opala, on their hinges (car-openings.js).
 const openings=new CarOpenings();
 // Which interior shows (cockpit.js setView). The game's controls sit in the V06 body, as in its
@@ -211,6 +243,8 @@ function cabinVisibility(){
 const suspension={roll:0,rollRate:0,pitch:0,pitchRate:0},bodyPivot=new THREE.Vector3(.3,.38,0),bodyTilt=new THREE.Quaternion(),bodyTiltInverse=new THREE.Quaternion(),bodyEuler=new THREE.Euler(),wheelOffset=new THREE.Vector3();
 function springTo(key,target,dt,frequency,damping){const rate=key+'Rate';suspension[rate]+=((target-suspension[key])*frequency*frequency-2*damping*frequency*suspension[rate])*dt;suspension[key]+=suspension[rate]*dt;}
 let cockpit,skidMarks,tyreSmoke,sideMirrors,fuscaMirrors;
+// Air, dust and pushed grass that sell the speed (speed-particles.js), built with each circuit.
+let speedFx=null;
 // The player's Opala on the sprung body: its model, cabin structure (setLivery) and brake lights
 // (brake-lights.js), hidden together while the player races a Fusca (fuscaBody, showFusca).
 const opalaShell=new THREE.Group();opalaShell.name='Opala_do_jogador';carBody.add(opalaShell);
@@ -279,10 +313,12 @@ function toggleGhost(){
 function initializeRenderer(){
  if(renderer)return;
  // The screen's own antialiasing serves the Simples film look; it is fixed when the page loads.
- renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:graphics.values.antialias>0});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=1.05;
+ // Simples has no eye adaptation: its exposure is set for the strong sun (and no sun shadows on Baixo).
+ renderer=new THREE.WebGLRenderer({canvas:$('view'),antialias:graphics.values.antialias>0});renderer.setPixelRatio(Math.min(devicePixelRatio,touchDevice?1:1.5));renderer.setSize(innerWidth,innerHeight,false);renderer.shadowMap.enabled=true;renderer.shadowMap.type=THREE.PCFShadowMap;renderer.toneMapping=THREE.ACESFilmicToneMapping;renderer.toneMappingExposure=.78;
  sky=createSky(renderer,scene,{mobile:SCENERY_LEVELS[graphics.values.scenery].mobile,detail:graphics.values.scenery});
  // Film look: linear HDR scene, then occlusion, haze, bloom, lens and grade (cinematic.js).
  cinematic=createCinematic(renderer,{mobile:touchDevice,level:cinematicLevel(),quality:graphics.level,features:cinematicFeatures()});cinematic.setSun(SUN_DIRECTION);
+ carReflections=new CarReflections(renderer,sky,cinematic);
  cockpit=createCockpit(renderer);carBody.add(cockpit.root);
  // The door mirrors show the same picture of the road behind (side-mirrors.js); a Fusca's too, and its rear-view mirror.
  sideMirrors=new SideMirrors(cockpit.mirrorTarget.texture);fuscaMirrors=new SideMirrors(cockpit.mirrorTarget.texture);fuscaBody.mirror=cockpit.mirrorTarget.texture;
@@ -306,24 +342,38 @@ function applyGraphics(){
   const size=Math.min(shadow.size,renderer.capabilities.maxTextureSize);if(sun.shadow.mapSize.x!==size){sun.shadow.mapSize.set(size,size);sun.shadow.map?.dispose();sun.shadow.map=null;}
   Object.assign(sun.shadow.camera,{left:-shadow.reach,right:shadow.reach,top:shadow.reach,bottom:-shadow.reach});sun.shadow.camera.updateProjectionMatrix();sun.shadow.radius=shadow.radius;
  }
+ // Alto/Ultra: the cars' crisp map (uniforms only: the ground shaders always carry the lookup).
+ carShadow.configure(shadow?.car??null);
  cinematic.setLevel(cinematicLevel());cinematic.setQuality(graphics.level);cinematic.setFeatures(cinematicFeatures());
  roadSurface?.setQuality(g.materials);roadRails?.setQuality(g.materials);roadCurbs?.userData.setQuality(g.materials);
+ // The cars' finish and reflections (car-reflections.js); another map size, the flake or a capture in the
+ // Simples look means other programs (precompiled below).
+ const reflectionPrograms=carReflections.setLevel(g.reflections);
+ flags?.setQuality(g.speedEffects);
+ speedFx?.setLevel(g.speedEffects);
  const view=VIEW_DISTANCES[g.viewDistance];[scene.fog.near,scene.fog.far]=view.fog;camera.far=view.far;camera.updateProjectionMatrix();
  // The cockpit mirror's picture; switched off it goes dark (the door mirrors hide).
  const mirror=MIRROR_SIZES[g.mirrors];
  if(mirror)cockpit.mirrorTarget.setSize(...mirror);else{renderer.setRenderTarget(cockpit.mirrorTarget);renderer.clear();renderer.setRenderTarget(null);}
  sky.setDetail(g.scenery);
  landscape?.setRealisticWater(g.water==='realista');
- if(ready&&(materialQualityChanged||wasOff!==(cinematic.level==='off')||hadShadows!==sun.castShadow))precompileGraphics();
+ // Contact shadows by the sun shadows and AO in force, wheel blur by Sensação de velocidade; the tyres' lettering
+ // goes with the track detail (off on Baixo), whose change already precompiles below.
+ carContact.setQuality(g);setTyreDetail(g.materials!=='baixo');
+ if(ready&&(reflectionPrograms||materialQualityChanged||wasOff!==(cinematic.level==='off')||hadShadows!==sun.castShadow))precompileGraphics();
 }
 // The Simples look (other tone mapping) and shadows on or off need every material's program again:
 // compiled the first time on the next frame, that froze the page for seconds. They compile in
-// parallel instead while the picture and the game hold (frame), and the tab says so.
+// parallel instead, a slice at a time (cinematic.js compileInSlices), while the picture and the game
+// hold (frame), and the tab says so.
 let graphicsCompiling=null;
 function precompileGraphics(){
  const token=graphicsCompiling={};graphicsPanel.busy(true);
- // Never held for good: after 8 s the picture comes back and whatever is left compiles as before.
- Promise.race([cinematic.compile(scene,camera),new Promise(done=>setTimeout(done,8000))]).catch(err=>console.warn(err)).finally(()=>{if(graphicsCompiling!==token)return;graphicsCompiling=null;graphicsPanel.busy(false);});
+ // Never held for good: after 30 s the picture comes back and whatever is left compiles as before. Not
+ // sooner: the page answers meanwhile, and a busy machine took over 8 s for the Simples look's hundred
+ // programs; coming back then built the rest inside one frame, the very freeze this avoids. The cars'
+ // reflection captures (Simples look: linear programs of their own) wait for theirs in car-reflections.js.
+ Promise.race([Promise.all([cinematic.compile(scene,camera),carReflections.compile(scene)]),new Promise(done=>setTimeout(done,30000))]).catch(err=>console.warn(err)).finally(()=>{if(graphicsCompiling!==token)return;graphicsCompiling=null;graphicsPanel.busy(false);});
 }
 reducedMotion.addEventListener('change',()=>{if(cinematic)cinematic.setFeatures(cinematicFeatures());});
 const cinematicFeatures=()=>({ao:graphics.values.ao,lens:graphics.values.lens,motionBlur:graphics.values.motionBlur&&!reducedMotion.matches,samples:graphics.values.antialias});
@@ -334,7 +384,7 @@ function debugLines(){
   ['Densidade',`máx. ${ratio(resolution.max)}× · ${g.dynamicResolution?`dinâmica (mín. ${ratio(resolution.min)}×)`:'fixa'}${frameCap.limit?` · limite ${frameCap.limit} FPS`:''}`]];
  rows.push(['Fluidez',`meta ${dynamicTarget()} FPS · ritmo do navegador ${displayCadence.measured?'≈':'estimado '}${displayCadence.hz} Hz`],['Materiais',GRAPHICS_LEVEL_NAMES[g.materials]]);
  if(c)rows.push(['Visual',c.level==='off'?'Simples':`${c.level==='full'?'Completo':'Leve'} · ${c.passes} passes · MSAA ${c.samples}×${c.ao?' · oclusão':''}${c.lens?' · lente':''}`]);
- rows.push(['Sombras',shadow&&renderer?`${sun.shadow.mapSize.x} px · ${shadow.reach} m`:'desligadas'],['Visão',`neblina até ${scene.fog?.far??'-'} m · ${GRAPHICS_OPTIONS.water.choices.find(([v])=>v===g.water)[1].toLowerCase()} nos lagos`]);
+ rows.push(['Sombras',shadow&&renderer?`${sun.shadow.mapSize.x} px · ${shadow.reach} m${shadow.car?` · carros ${shadow.car.size} px × ${shadow.car.cars}`:''}`:'desligadas'],['Visão',`neblina até ${scene.fog?.far??'-'} m · ${GRAPHICS_OPTIONS.water.choices.find(([v])=>v===g.water)[1].toLowerCase()} nos lagos`]);
  if(ready)rows.push(['Cenário',`${GRAPHICS_OPTIONS.scenery.choices.find(([v])=>v===sceneryBuilt)?.[1]??'-'} · ${landscape?.stats.trees??0} árvores · ${(immersive?.visual?.rivals?.length??0)+1} carros`],['Pista',`${circuit.name} · câmera ${$('camera').querySelector(`option[value="${mode}"]`)?.textContent??mode}`]);
  return rows;
 }
@@ -359,7 +409,7 @@ let sessionStarted=false,loading=false,loadedCircuit=null;
 // Only /dev/ publishes it: the main link's build (preparar_publicacao.py without --multiplayer) turns this off.
 const MULTIPLAYER=true;
 const roomWanted=MULTIPLAYER&&new URLSearchParams(window.location.hash.slice(1)).has('desafio');let multiplayer=null;
-let pitstop,immersive,car,data,roadSurface,roadRails,roadCurbs,driver,wheels=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
+let pitstop,immersive,car,data,roadSurface,roadRails,roadCurbs,driver,wheels=[],trunkInterior=[],model,carStructure,paused=true,automatic=false,mode='chase',ready=false,loadToken=0,activeLivery='';
 // The car raced now ('99', or Modo Corrida's choice), the car at the back of its grid whose driver
 // sits out (the same, or a multiplayer host's: seatCar), whether it is the recon lap, its paint on
 // the player's model, and the track branding's Old Stock ads that car 70 carries on its doors.
@@ -416,12 +466,17 @@ async function setLivery(value){
  if(token!==loadToken)return;
  carLivery.clear();if(model)opalaShell.remove(model);model=gltf.scene;wheels=[];
  // Meshes inside the shut body (engine bay, trunk, hinges: glTF extra "interno") cast no shadow.
- model.traverse(o=>{if(o.isMesh){o.castShadow=!o.userData.interno;o.receiveShadow=true;
+ // Clear coat, glass, chrome and rubber by material name: car-finish.js (rivals clone these).
+ model.traverse(o=>{if(o.isMesh){o.castShadow=!o.userData.interno;o.receiveShadow=true;finishMesh(o);
   for(const m of Array.isArray(o.material)?o.material:[o.material]){if(m.name==='Policarbonato_fume'){m.transparent=true;m.opacity=.19;m.depthWrite=false;o.castShadow=false;}
    // Blender's glass (transmission: the V06 headlamp lenses, turn signals, translucent plastics) would make
    // three.js draw the whole scene a second time every frame; here they are plain see-through materials.
    if(m.transmission>0){m.transparent=true;m.opacity=Math.min(m.opacity,1-.65*m.transmission);m.transmission=0;m.depthWrite=false;}}
  }if(o.name.startsWith('Roda_')&&o.name.includes('PIVO')){const front=o.name.includes('Dianteira');wheels.push({obj:o,front,index:(front?0:2)+(o.position.z>0?1:0),base:o.quaternion.clone(),basePosition:o.position.clone()});}});
+ // Slicks with lettered sidewalls on the template (car-wheels.js): every clone made from it shares them.
+ prepareWheels(model,'opala');
+ // The tail lamps' lens rings (brake-lights.js); the trunk's inside shown only with the lid open (car-livery.js).
+ lampUVs(model);trunkInterior=trunkInside(model);
  openings.attach(model);
  // These solid Blender panels close the cabin seen from outside. The detailed
  // cockpit has its own floor, walls and rear cabin, so they hide with the body
@@ -477,7 +532,7 @@ async function cycleLivery(){
 }
 // At the box the crew and the pilot on foot (action key) open the hinged parts; what was opened by
 // hand shuts as the car moves off.
-function updateOpenings(dt){if(Math.hypot(car.vx,car.vy)>1.5)openings.release('manual');openings.update(dt);}
+function updateOpenings(dt){if(Math.hypot(car.vx,car.vy)>1.5)openings.release('manual');openings.update(dt);showTrunkInside(trunkInterior,openings);}
 // nearest (R key): only the player's car goes back on track; rivals, laps and fuel carry on.
 function reset(nearest=false){action.reset();mobile?.setHandbrake(false);wheelSet=0;openings.closeAll(true);if(nearest)car.recover();else{ghostRecorder.reset();car.resetGrid(playerGridSlot(immersive?.lineup?.length));if(immersive&&!immersive.active)immersive.resetField();cockpit.resetPhone();}driver?.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();automatic=false;followInitialized=false;cameraReturn.reset(performance.now());headLook.yaw=headLook.pitch=0;lookBack.reset();updateCar(1);updateCamera(1);}
 const names=[[0,'Reta dos boxes'],[280,'S do Senna · T1–T2'],[490,'Curva do Sol · T3'],[700,'Reta Oposta'],[1500,'Descida do Lago · T4–T5'],[1810,'Subida para a Ferradura'],[1990,'Ferradura · T6–T7'],[2230,'Laranjinha · T8'],[2430,'Pinheirinho · T9'],[2660,'Bico de Pato · T10'],[2840,'Mergulho · T11'],[3120,'Junção · T12'],[3250,'Subida dos boxes · T13'],[3570,'Café · T14'],[3960,'T15 · Reta dos boxes']];
@@ -497,8 +552,13 @@ function drawMap(){
 const roughRotation=new THREE.Quaternion(),roughEuler=new THREE.Euler(),chaseForward=new THREE.Vector3(1,0,0),chaseTarget=new THREE.Vector3(1,0,0);let roughRide=0;
 function updateCar(dt){
  cabinVisibility();
- const p=car.surface,speed=Math.hypot(car.vx,car.vy),roughTarget=p.onRoad||!car.wheelsDown?0:clamp(speed/22,0,1);
- roughRide=dt>=1?0:roughRide+(roughTarget-roughRide)*(1-Math.exp(-dt*9));
+ // A paused race holds the car still (dt 1, a placement, still snaps): a sprung body still settling would
+ // carry the cockpit and photo cameras with it for a couple of seconds.
+ const live=paused&&dt<1?0:dt;
+ // Wheels on the kerbs (kerb-contact.js): car.kerbRide for the cameras; a kerb under the body is no rough grass.
+ rideKerbs(car,live);
+ const p=car.surface,speed=Math.hypot(car.vx,car.vy),roughTarget=p.onRoad||car.kerbCentre||!car.wheelsDown?0:clamp(speed/22,0,1);
+ roughRide=dt>=1?0:roughRide+(roughTarget-roughRide)*(1-Math.exp(-live*9));
  // Distance-based suspension motion stops at rest and fades on returning to asphalt.
  const bump=roughRide*(Math.sin(car.distance*2.1)*.025+Math.sin(car.distance*4.7)*.012);
  // The physics body carries heave, pitch, roll, jumps and rollovers; the
@@ -507,12 +567,14 @@ function updateCar(dt){
  forward.set(pose.forward[0],pose.forward[2],-pose.forward[1]);up.set(pose.up[0],pose.up[2],-pose.up[1]);right.crossVectors(forward,up).normalize();
  matrix.makeBasis(forward,up,right);
  roughEuler.set(Math.sin(car.distance*2.7)*roughRide*.008,0,Math.sin(car.distance*1.9)*roughRide*.006);
+ // On a kerb the side on its crown sits a few centimetres up and the body buzzes over the ridges (less with calmer camera motion).
+ const kerbBuzz=(speedFx?.profile.kerbBuzz?car.kerbRide:0)*(reducedMotion.matches?0:graphics.values.cameraMotion)*(Math.sin(car.distance*15.7)*.6+Math.sin(car.distance*9.1+1)*.4);roughEuler.x+=car.kerbTilt*.022+kerbBuzz*.004;carRoot.position.y+=Math.abs(car.kerbTilt)*.02+kerbBuzz*.006;
  carRoot.quaternion.setFromRotationMatrix(matrix).multiply(roughRotation.setFromEuler(roughEuler));
  // Springs and anti-roll bars now tilt the physics body; this adds the rest of
  // the visible roll outward in corners, dive under braking and squat under power.
  const rollTarget=clamp((car.latAccel??0)*.0022,-.03,.03),pitchTarget=clamp((car.longAccel??0)*.002,-.025,.015);
  if(dt>=1){suspension.roll=rollTarget;suspension.pitch=pitchTarget;suspension.rollRate=suspension.pitchRate=0;}
- else for(let left=dt;left>1e-6;left-=1/120){const h=Math.min(left,1/120);springTo('roll',rollTarget,h,8.5,.5);springTo('pitch',pitchTarget,h,9.5,.55);}
+ else for(let left=live;left>1e-6;left-=1/120){const h=Math.min(left,1/120);springTo('roll',rollTarget,h,8.5,.5);springTo('pitch',pitchTarget,h,9.5,.55);}
  setBodyTilt(suspension.roll,suspension.pitch);
  // Cameras and bodywork must use the same rendered orientation.
  forward.set(1,0,0).applyQuaternion(carRoot.quaternion);up.set(0,1,0).applyQuaternion(carRoot.quaternion);right.set(0,0,1).applyQuaternion(carRoot.quaternion);
@@ -536,6 +598,9 @@ function updateCar(dt){
   wheelOffset.copy(w.basePosition);wheelOffset.y+=fuscaBody.active?Math.min(FUSCA_WHEEL_BUMP,travel*FUSCA_WHEEL_TRAVEL):travel;
   w.obj.position.copy(wheelOffset.sub(bodyPivot).applyQuaternion(bodyTiltInverse).add(bodyPivot));
  }
+ // The frame's contact shadows start with this car's (fading in the air and on its side), and its wheels blur at speed.
+ const wheelsShown=fuscaBody.active?!!fuscaBody.car?.visible:!!model?.visible&&opalaShell.visible;
+ carContact.begin();carContact.car(carRoot,car,fuscaBody.active?'fusca':'opala',wheelsShown?(fuscaBody.active?fuscaBody.wheels:wheels):null);
 }
 function setBodyTilt(roll,pitch){
  bodyTilt.setFromEuler(bodyEuler.set(roll,0,pitch));bodyTiltInverse.copy(bodyTilt).invert();
@@ -559,7 +624,7 @@ function setCameraMode(value,chosen=false){
  cabinVisibility();
  document.body.classList.toggle('cockpit-mode',value==='cockpit');
  $('cockpitButton').classList.toggle('active',value==='cockpit');$('cockpitButton').setAttribute('aria-pressed',String(value==='cockpit'));
- if(!keepView)camera.fov=value==='cockpit'?74:58;camera.near=value==='cockpit'?.025:.1;camera.updateProjectionMatrix();
+ if(!keepView)camera.fov=baseFov(value,camera.aspect);camera.near=value==='cockpit'?.025:.1;camera.updateProjectionMatrix();
  if(value!=='cockpit')camera.up.set(0,1,0);
  $('orbitButton').classList.toggle('active',orbit.enabled);
  $('orbitButton').setAttribute('aria-pressed',String(orbit.enabled));
@@ -577,7 +642,7 @@ function setCameraMode(value,chosen=false){
   orbit.maxDistance=keepView&&previous==='aerial'?Math.max(ORBIT_MAX_DISTANCE,camera.position.distanceTo(orbit.target)):ORBIT_MAX_DISTANCE;
   camera.getWorldDirection(aimView);orbitTilt();orbit.update();
   if(keepView)aimOffset(aimToCar.subVectors(orbit.target,camera.position).normalize(),aimView,orbitAim);else orbitAim.yaw=orbitAim.pitch=0;
-  aimOrbit();orbitSeen.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));orbitSpeedFov=keepView&&(previous==='chase'||previous==='close');
+  aimOrbit();orbitSeen.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));orbitSpeedFov=keepView&&FOLLOW_FRAMES.includes(previous)?previous:false;
  }
 }
 // Mouse, wheel and touch turn the current view into the orbit; C still moves on from that view.
@@ -667,30 +732,116 @@ function watchNext(step=1){
  cabinVisibility();hud();
 }
 // Follow cameras sit behind the smoothed heading and look ahead of the car.
-const followsCar=m=>m==='chase'||m==='close'||m==='aerial';
-function followPose(m,p,vel,ahead=chaseForward){
+const followsCar=m=>m==='chase'||m==='close'||m==='far'||m==='aerial';
+// A follow view's place at rest (camera-rig.js CAMERA_FRAMES, for this car and screen): where the orbit returns to.
+function followPose(m,p,ahead=chaseForward,body=car.body){
  if(m==='aerial'){desired.copy(p).addScaledVector(ahead,-40).add(new THREE.Vector3(0,95,35));look.copy(p).addScaledVector(ahead,22);}
- else if(m==='close'){desired.copy(p).addScaledVector(ahead,-5.6-Math.min(vel*.02,1)).add(new THREE.Vector3(0,2.2,0));look.copy(p).addScaledVector(ahead,9).add(new THREE.Vector3(0,.9,0));}
- else{desired.copy(p).addScaledVector(ahead,-9-Math.min(vel*.035,2)).add(new THREE.Vector3(0,3.8,0));look.copy(p).addScaledVector(ahead,13).add(new THREE.Vector3(0,1,0));}
+ else{const f=frameFor(m,{body,aspect:camera.aspect});desired.copy(p).addScaledVector(ahead,-f.back);desired.y+=f.up;look.copy(p).addScaledVector(ahead,f.ahead);look.y+=f.lookUp;}
+}
+// Walls between the car and a follow camera: a copy of the list per circuit (on-foot.js clearView caches its cut
+// pieces per list, and cameraObstacles is refilled in place for the next circuit).
+function followWalls(){if(followObstacles?.data!==data||followObstacles.count!==cameraObstacles.length){followObstacles=[...cameraObstacles];followObstacles.data=data;followObstacles.count=cameraObstacles.length;}return followObstacles;}
+// Keeps the eye (desired) in front of the first wall between it and the car's roof, easing back out over
+// a quarter second once clear, and above the ground. Checked every other frame.
+function clearFollow(p,subject,dt){
+ rayFrom.copy(p);rayFrom.y+=1.1;const full=desired.distanceTo(rayFrom);
+ if(followReach===null||renderedFrame%2===0){rayProbe.copy(desired);followBlock=clearView(rayFrom,rayProbe,followWalls())?rayProbe.distanceTo(rayFrom):Infinity;}
+ let reach=followReach??full;reach=reach<full?reach+(full-reach)*(1-Math.exp(-dt*4)):full;followReach=reach=Math.min(reach,followBlock);
+ if(reach<full-.01)desired.sub(rayFrom).multiplyScalar(reach/full).add(rayFrom);
+ // Pulled in past the car's tail (a wall right behind it), the eye rises over the roof instead of entering the body.
+ const tail=(subject.body?.rear??2.35)+1.2,flat=Math.hypot(desired.x-p.x,desired.z-p.z);if(flat<tail)desired.y+=1.3*Math.min(1,(tail-flat)/1.2);
+ desired.y=Math.max(desired.y,subject.sample(desired.x,-desired.z).z+.35);
+}
+// Chase, close and far (camera-rig.js): springs behind the car, a lens that opens with speed while the eye comes
+// in (dolly), a look into the corners, clear of walls and ground, and vibration as small turns of the view.
+function rideCamera(dt,p,subject,ahead,motion,top){
+ if(!followInitialized){rig.reset();followReach=null;followInitialized=true;}
+ const vel=Math.hypot(subject.vx,subject.vy),still=paused&&dt<1;
+ const r=rig.update({dt:still?0:dt,mode,aspect:camera.aspect,body:subject.body,heading:Math.atan2(-ahead.z,ahead.x),pitch:Math.asin(clamp(ahead.y,-1,1)),travel:Math.atan2(subject.vy,subject.vx),
+  speed:vel,yawRate:subject.yaw??0,longAccel:subject.longAccel??0,heave:p.y-subject.sample(p.x,-p.z).z,tumbling:subject.upright<.6,motion,gear:subject.gear,keep:dolly(baseFov(mode,camera.aspect),camera.fov)});
+ camDir.set(Math.cos(r.pitch)*Math.cos(r.yaw),Math.sin(r.pitch),-Math.cos(r.pitch)*Math.sin(r.yaw));camRight.set(Math.sin(r.yaw),0,Math.cos(r.yaw));
+ desired.copy(p).addScaledVector(camDir,-r.back);desired.y+=r.up+r.lift;
+ look.copy(p).addScaledVector(camDir,r.ahead).addScaledVector(camRight,-r.side);look.y+=r.lookUp+r.lift;
+ clearFollow(p,subject,still?0:dt);
+ camera.position.copy(desired);camera.up.set(0,1,0);camera.lookAt(look);
+ if(still||motion<=0)return;
+ const rough=subject===car?roughRide:subject.surface?.onRoad===false?clamp(vel/22,0,1):0;
+ vibration(performance.now()/1000,{u:vel/top,motion,rough,kerb:subject.kerbRide||0,impact:action.impact},camShake);camera.rotateX(camShake.pitch);camera.rotateY(camShake.yaw);camera.rotateZ(camShake.roll);
+}
+// The story's grid: a low rear three-quarter shot of the car (a racing game's grid), from the side away from the
+// pits, looking across the car toward them; while the countdown runs it slowly swings in behind the car.
+let gridHeroStart=0,gridHeroSeen=0;
+function gridHero(p){
+ const s=carScale(car.body),side=data.pit?.reversed?-1:1,now=performance.now();if(now-gridHeroSeen>500)gridHeroStart=now;gridHeroSeen=now;
+ const motion=reducedMotion.matches?0:graphics.values.cameraMotion,swing=motion*.08*Math.exp(-(now-gridHeroStart)/6000),c=Math.cos(swing),k=-side*Math.sin(swing);
+ camera.fov=baseFov('grid',camera.aspect);camera.updateProjectionMatrix();
+ const back=-4.6*s,across=1.4*s*side;desired.copy(p).addScaledVector(forward,back*c-across*k).addScaledVector(right,across*c+back*k);desired.y+=1.02;
+ look.copy(p).addScaledVector(forward,7.5).addScaledVector(right,-1.05*side);look.y+=.72;
+ followReach=null;clearFollow(p,car,0);camera.position.copy(desired);camera.up.set(0,1,0);camera.lookAt(look);
+}
+// Where the car's outline (camera-rig.js carPoints) is on screen, as fractions from the top left (checks).
+function carOnScreen(){
+ carRoot.updateMatrixWorld(true);camera.updateMatrixWorld();let x0=Infinity,x1=-Infinity,y0=Infinity,y1=-Infinity;
+ // (null while part of the car is behind the lens)
+ for(const [f,l,h] of carPoints(car.body)){screenPoint.set(f,h,-l).applyMatrix4(carRoot.matrixWorld).applyMatrix4(camera.matrixWorldInverse);if(screenPoint.z>-camera.near)return null;screenPoint.applyMatrix4(camera.projectionMatrix);const x=(screenPoint.x+1)/2,y=(1-screenPoint.y)/2;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);}
+ const r=v=>Math.round(v*1e4)/1e4;return {x0:r(x0),x1:r(x1),y0:r(y0),y1:r(y1),width:r(x1-x0),height:r(y1-y0)};
+}
+// The cars riding with the camera, kept sharp by the speed smear (cinematic.js smearCars): the followed car and the
+// nearest others within 70 m, each its outline's screen box (the followed car's is the whole screen while part of it
+// is behind the lens: the bonnet, the cockpit) and the road under it in view space. Composed from the pose, no matrix walk of the models.
+const smearCars=Array.from({length:SMEAR_CARS},()=>({box:[0,0,0,0],plane:[0,1,0,0],far:0})),smearList=[],smearNear=[],smearRiders=[],smearPose=new THREE.Matrix4(),smearClip=new THREE.Matrix4(),smearUp=new THREE.Vector3(),smearAt=new THREE.Vector3(),smearOutline=new WeakMap();
+const nearSmear=(a,b)=>a.d-b.d;
+function ridingCars(subjectObj,subjectCar){
+ smearList.length=0;smearNear.length=0;camera.updateMatrixWorld();smearClip.multiplyMatrices(camera.projectionMatrix,camera.matrixWorldInverse);
+ const rivalObjs=immersive?.visual?.root.visible?immersive.visual.rivals:null,field=rivalObjs?immersive.rivals:null,count=2+(field?.length??0);
+ // (pooled entries: a frame allocates nothing here; the last candidate is the ghost lap, shaped as the player's car.
+ // Each field rival finds its car by rosterIndex, as ImmersiveVisuals.updateFree poses it: a 1x1 or short field keeps
+ // only the entrants, so the k-th rival is not the k-th car.)
+ for(let k=0;k<count;k++){const ghost=k===count-1,r=!ghost&&k?field[k-1]:null,o=ghost?ghostCar.body:r?rivalObjs[r.rosterIndex]:carRoot,c=ghost?car:r?r.car:car;if(!o||o===subjectObj||!(ghost?ghostCar.root.visible:o.visible)||!c)continue;const d=o.position.distanceToSquared(camera.position);if(d>=4900)continue;
+  const e=smearRiders[smearNear.length]??(smearRiders[smearNear.length]={d:0,o:null,c:null});e.d=d;e.o=o;e.c=c;smearNear.push(e);}
+ // Slots left over from a fuller frame let go of their cars (an old circuit's rivals and track data, after a reload).
+ for(let i=smearNear.length;i<smearRiders.length&&smearRiders[i].o;i++)smearRiders[i].o=smearRiders[i].c=null;
+ smearNear.sort(nearSmear);
+ // Down the list until the slots are full: a car wholly behind the lens or off screen gives its slot to the next.
+ for(let k=0;k<=smearNear.length&&smearList.length<SMEAR_CARS;k++){
+  const o=k?smearNear[k-1].o:subjectObj,c=k?smearNear[k-1].c:subjectCar,points=c.body?smearOutline.get(c.body)??smearOutline.set(c.body,carPoints(c.body)).get(c.body):carPoints(null);
+  const out=smearCars[smearList.length];smearPose.compose(o.position,o.quaternion,o.scale);let x0=1,y0=1,x1=0,y1=0,far=0,behind=false;
+  for(const [f,l,h] of points){
+   smearAt.set(f,h,-l).applyMatrix4(smearPose);far=Math.max(far,smearAt.distanceTo(camera.position));smearAt.applyMatrix4(smearClip);
+   // (applyMatrix4 divides by w: a point behind the lens has w<=0, its box is the whole screen)
+   if(smearAt.z>1||smearAt.z<-1){behind=true;continue;}const x=smearAt.x*.5+.5,y=smearAt.y*.5+.5;x0=Math.min(x0,x);x1=Math.max(x1,x);y0=Math.min(y0,y);y1=Math.max(y1,y);
+  }
+  // Another car across the lens (tucked in behind, passing the camera): the box of its part in front, run out to the
+  // screen's edges on its side (a whole-screen box switched the phones' road smear off all through close racing).
+  if(behind&&!k){x0=y0=-1;x1=y1=2;}
+  else{if(x1<x0)continue;const mx=(x1-x0)*.04+.004,my=(y1-y0)*.04+.004;x0-=mx;x1+=mx;y0-=my;y1+=my;
+   if(behind){smearAt.copy(o.position).applyMatrix4(camera.matrixWorldInverse);if(smearAt.x<0)x0=-1;else x1=2;if(smearAt.y<0)y0=-1;else y1=2;}}
+  if(x1<=0||x0>=1||y1<=0||y0>=1)continue;
+  smearUp.set(0,1,0).applyQuaternion(o.quaternion).transformDirection(camera.matrixWorldInverse);smearAt.copy(o.position).applyMatrix4(camera.matrixWorldInverse);
+  out.box[0]=x0;out.box[1]=y0;out.box[2]=x1;out.box[3]=y1;out.plane[0]=smearUp.x;out.plane[1]=smearUp.y;out.plane[2]=smearUp.z;out.plane[3]=smearUp.dot(smearAt);out.far=far+1;smearList.push(out);
+ }
+ return smearList;
 }
 function updateCamera(dt){
  if(pitstop?.opened)return;
- if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)&&!immersive.inCar){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
+ if(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)&&!immersive.inCar){const p=immersive.visual.hero.getWorldPosition(new THREE.Vector3());placeSun(p,null,dt);return;}
  const rival=watchedRival(),subject=rival?.car??car,p=rival?rival.obj.position:carRoot.position,vel=Math.hypot(subject.vx,subject.vy);
  // A watched rival's nose, smoothed as chaseForward is for the player's car.
  if(rival){rival.obj.updateMatrixWorld(true);watchTarget.set(1,0,0).applyQuaternion(rival.obj.quaternion);if(subject.upright<.6&&vel>2)watchTarget.set(subject.vx,0,-subject.vy).normalize();watchForward.lerp(watchTarget,dt>=1?1:1-Math.exp(-dt*30)).normalize();}
  const ahead=rival?watchForward:chaseForward,heading=rival?watchTarget:forward;if(immersive?.visual)immersive.visual.focus=rival?.obj.position??null;
- if(gridPreview()){wasGridPreview=true;camera.fov=58;camera.updateProjectionMatrix();camera.position.copy(p).addScaledVector(forward,-8.5).add(new THREE.Vector3(0,3.5,0));camera.up.set(0,1,0);camera.lookAt(p.clone().addScaledVector(forward,16).add(new THREE.Vector3(0,1,0)));sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();return;}
- if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
+ // The opening shots place the sun themselves (runFrame), once a frame: here it would ease the lean twice.
+ if(gridPreview()){wasGridPreview=true;gridHero(p);if(!intro.active)placeSun(p,forward,dt);return;}
+ if(wasGridPreview){wasGridPreview=false;followInitialized=false;camera.fov=baseFov(mode,camera.aspect);camera.updateProjectionMatrix();}
  // Holding B counts as looking around: the 3 s return waits until it is let go.
  const photo=mode==='cockpit'&&!rival?cockpitView:null,lookingBack=lookBackAllowed()&&pressed('KeyB');
  if(lookingBack)cameraReturn.manual(performance.now());
  const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
- // Speed widens the view a little; rough ground and very high speed add a fine shake.
- const motion=reducedMotion.matches?0:graphics.values.cameraMotion;
- const speedFov=photo?photo.fov:(mode==='cockpit'?74:58)+(mode==='aerial'||mode==='orbit'&&!orbitSpeedFov?0:motion*(clamp((vel-12)/45,0,1)*(mode==='cockpit'?5:10)+action.surge*1.1));
- if(mode!=='tv'&&Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1||photo?speedFov:camera.fov+(speedFov-camera.fov)*(1-Math.exp(-dt*3));camera.updateProjectionMatrix();}
- const shakeTime=performance.now()/1000,shake=photo||paused||mode==='aerial'||mode==='orbit'?0:motion*(roughRide*.05+clamp((vel-42)/18,0,1)*.01+action.impact*.075);
+ // Speed widens the view (camera-rig.js: by the share of the car's top speed, near misses punch it); inside
+ // the car rough ground, kerbs and very high speed add a fine shake (the follow views turn instead).
+ const motion=reducedMotion.matches?0:graphics.values.cameraMotion,top=topSpeed(subject.mechanics);
+ const speedFov=photo?photo.fov:lensFov(mode==='orbit'?orbitSpeedFov||'orbit':mode,camera.aspect,{speed:vel,top,motion,surge:action.surge,punch:FOLLOW_FRAMES.includes(mode)?rig.punch:0});
+ if(mode!=='tv'&&Math.abs(camera.fov-speedFov)>.01){camera.fov=dt>=1||photo?speedFov:easeLens(camera.fov,speedFov,dt);camera.updateProjectionMatrix();}
+ const shakeTime=performance.now()/1000,shake=photo||paused||!isInside()?0:motion*(roughRide*.05+clamp((vel/top-.7)/.25,0,1)*.01+action.impact*.075+(subject.kerbRide||0)*.03);
  if(centering&&isInside()){headLook.yaw*=1-blend;headLook.pitch*=1-blend;}
  lookBack.update(dt,lookingBack,headLook,headView);
  if(mode==='cockpit'||mode==='hood'){
@@ -716,7 +867,7 @@ function updateCamera(dt){
   if(centering){
    // The mouse only looked around a follow camera: return to that camera's own place. Otherwise go behind the car.
    if(followsCar(orbitFrom)){
-    followPose(orbitFrom,p,vel,ahead);
+    followPose(orbitFrom,p,ahead,subject.body);
     // That camera frames the road ahead, not the car: blend the aim to its framing too.
     aimOffset(aimToCar.subVectors(orbit.target,desired).normalize(),aimView.subVectors(look,desired).normalize(),orbitHomeAim);
     orbitAim.yaw+=wrap(orbitHomeAim.yaw-orbitAim.yaw)*blend;orbitAim.pitch+=(orbitHomeAim.pitch-orbitAim.pitch)*blend;
@@ -739,14 +890,16 @@ function updateCamera(dt){
   aimOrbit();orbitSeen.setFromVector3(orbitDelta.subVectors(camera.position,orbit.target));
  } else if(mode==='tv'){
   tvCamera.update(camera,p,subject.surface.s,tvVelocity.set(subject.vx,0,-subject.vy),dt);
- } else {
- followPose(mode,p,vel,ahead);
+ } else if(mode==='aerial'){
+ followPose(mode,p,ahead);
  // Smooth the offset, not the world position: frame-rate changes must not
  // make the car surge back and forth relative to its following camera.
  desired.sub(p);if(!followInitialized){followOffset.copy(desired);followInitialized=true;}else followOffset.lerp(desired,1-Math.exp(-dt*5));
- camera.position.copy(p).add(followOffset);if(!paused&&mode!=='aerial')camera.position.addScaledVector(ahead,motion*action.braking*.24);camera.position.y+=Math.sin(shakeTime*37)*shake;camera.position.x+=Math.sin(shakeTime*31+.7)*shake*.6;camera.up.set(0,1,0);camera.lookAt(look);
- }
- sun.position.copy(p).add(sunOffset);sun.target.position.copy(p);sun.target.updateMatrixWorld();
+ camera.position.copy(p).add(followOffset);camera.up.set(0,1,0);camera.lookAt(look);
+ } else rideCamera(dt,p,subject,ahead,motion,top);
+ // The shadow box leans toward the riding cameras' view ('far' included); orbit, TV, aerial, looking back and reversing keep it centred.
+ const riding=!['orbit','tv','aerial'].includes(mode)&&!lookingBack&&!photo&&subject.vx*heading.x-subject.vy*heading.z>-1;
+ if(!intro.active)placeSun(p,riding?camera.getWorldDirection(sunView):null,dt);
 }
 // (a controller's button held through the menu or a pause, which let go of the keys, still holds its
 // key; Space only latches the handbrake, keyboard or controller)
@@ -804,7 +957,7 @@ intro.onEnd=kind=>{
  // Back to the player's own camera; the 3-2-1 beeps now.
  if(!immersive)return;
  if(kind==='race'&&!immersive.active&&immersive.freeCountdown>0)immersive.state.emitSound('countdown');
- camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();followInitialized=false;
+ camera.fov=baseFov(mode,camera.aspect);camera.updateProjectionMatrix();followInitialized=false;
  if(introHidden){for(const o of introHidden)o.visible=true;introHidden=null;}
 };
 // Film look: the Gráficos tab's choice; ?cinema=full|lite|off overrides it for one visit.
@@ -870,7 +1023,7 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  if(!paused&&!frozen){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);recordGhost();accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
- tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[1.2,5.5]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused||frozen?0:dt,renderer.domElement.height);if(!paused&&!frozen)for(const r of immersive?.rivals??[])if(r.broken?.smokeLeft>0)tyreSmoke.plume(r.car,dt);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
+ tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[.6,Math.max(2,(CAMERA_FRAMES[mode]?.back??9)*.45)]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused||frozen?0:dt,renderer.domElement.height);if(!paused&&!frozen)for(const r of immersive?.rivals??[])if(r.broken?.smokeLeft>0)tyreSmoke.plume(r.car,dt);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
  const actionImpact=Math.max(frameImpact,immersive?.takeKnock()??0);
  const actionActive=!paused&&!frozen&&!intro.active&&!automatic&&!watchedRival()&&!gridPreview()&&!pitstop?.opened&&!immersive?.onFoot()&&(immersive?.active?immersive.state.phase==='race':!immersive.freeCountdown&&!immersive.freeResultReady);
  action.update(paused||frozen?0:dt,{car,rivals:immersive?.rivals??[],impact:actionImpact,active:actionActive});
@@ -881,16 +1034,20 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  const rivalSound=heard!==car?immersive.rivalSound(heard):null;
  const braking=driveCommand.engineOff?0:driveCommand.brake;brakeLamps.userData.set(model?.visible?braking:0);fuscaBody.brake(braking);
  carAudio.update(heard,rivalSound?.command??driveCommand,rivalSound?.skid??skid,paused||frozen,mode);
- carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,camera:mode},immersive?.state.takeSounds()??[],dt);
+ carAudio.updateScene({...immersive?.audioScene(heard),speed:Math.hypot(heard.vx,heard.vy),onRoad:heard.surface.onRoad,...speedFx?.sound(heard===car?car:null),camera:mode},immersive?.state.takeSounds()??[],dt);
  sky.update(paused?0:dt);landscape?.update(paused?0:dt,camera);
  // A watched rival is posed by immersive.update below: its camera follows after that.
  updateOpenings(paused?0:dt);updateCar(dt);if(!watchedRival())updateCamera(dt);const dash=cockpit.update(car,paused?0:dt,heard===car?carAudio.state:null),phoneArrived=dash.phoneArrived;if(phoneArrived)carAudio.notifyPhone();fuscaBody.update(dash.speed,dash.rpm,(immersive?.active?immersive.state.fuel:immersive?.freeFuel??12)/12);driver.update(car,paused?0:dt,{command:driveCommand,impact:frameImpact,phoneArrived});gamepad.bump(actionImpact);frameImpact=0;lapBanner(paused?0:dt);lastHud+=dt;if(lastHud>.07){hud();lastHud=0;}
  if(immersive?.visual)immersive.visual.renderAhead=renderAhead();immersive?.update(paused?0:dt,camera);if(watchedRival())updateCamera(dt);
  pitstop?.update(paused?0:dt,camera,sessionStarted&&!paused);updateGhost(dt);
+ // Specks in the air, the rivals' dust and the pushed verge grass; the pad buzzes on the kerbs.
+ speedFx?.update(paused||frozen?0:dt,camera,{cars:[car,...(immersive?.rivals??[]).map(r=>r.car)],landscape,inside:isInside(),viewport:[renderer.domElement.width,renderer.domElement.height]});gamepad.kerb(paused||frozen?0:car.kerbRide);
  // Marshals, cameramen, crews, the terrace and the café idle; passing cars catch their eye.
  // Anyone the Opala runs over goes flying (a cartoon, not a crash): the car barely notices.
  if(!paused&&hitPeople(car)){car.vx*=.97;car.vy*=.97;}for(const e of takePeopleEvents())carAudio.effect(e.sound,{strength:e.strength});
  updatePeople(paused?0:dt,camera,[carRoot,...(immersive?.visual?.rivals??[])]);
+ // The flags' whoosh follows the car heard (N watching a rival); the player's car still stirs the cloth.
+ flags?.update(paused?0:dt,camera,heard,heard===car?immersive?.rivals:[{car},...(immersive?.rivals??[]).filter(r=>r.car!==heard)]);
  // A championship round is scored before its result sheet is first drawn, paused or not.
  recordChampionshipRound();
  // Modo História: going to the box before the judge's inspection takes the round's points away.
@@ -900,13 +1057,15 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  // The broadcast camera shows the race without the game's floating name tags.
  if(mode==='tv')for(const rival of immersive.visual.rivals)if(rival.userData.nameLabel)rival.userData.nameLabel.visible=false;
  if(intro.update(paused?0:dt,camera,paused)){
-  sun.position.copy(carRoot.position).add(sunOffset);sun.target.position.copy(carRoot.position);sun.target.updateMatrixWorld();
+  placeSun(carRoot.position,null,dt);
   // Name tags and money signs are game interface: the opening shots go without them.
   if(!introHidden){introHidden=[];scene.traverse(o=>{if(o.isSprite&&o.visible)introHidden.push(o);});}
   for(const o of introHidden)o.visible=false;
  }
  // The results sheet is opaque; avoid spending mobile GPU time behind it.
  if(!raceResults.root.hidden)return;
+ // The cars' crisp shadow tiles (Alto/Ultra) before any pass that draws the ground.
+ holdLightPhoto();carShadow.update(renderer,carShadowRoots());
  // Render the reflection from this frame's car pose before displaying the cockpit.
  // A simulation-time timer made the mirror visibly stutter, especially at low FPS.
  const watchedCar=watchedRival();
@@ -929,9 +1088,26 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
   mirrors.show(true);mirrors.update(camera.position,carBody,cockpit.rearCamera);
   renderer.shadowMap.autoUpdate=oldShadowUpdate;cockpit.root.visible=cockpitShown;driver.root.visible=true;if(model)model.visible=bodyShown;if(fuscaBody.car)fuscaBody.car.visible=true;
  }else mirrors.show(false);
+ // The cars take the race's reflections back (the car screen's studio lends them its own) and the probe
+ // redraws its next faces round the player's car; in the story's paddock the grid's picture would lie.
+ carReflections.update(scene,probeAt.copy(carRoot.position).setY(carRoot.position.y+1),{onTrack:!(immersive?.active&&immersive.state.phase==='crowd'),hide:reflectionHide(),rivals:immersive?.visual?.rivals,data});
  // Long lenses (broadcast camera, opening shots) get depth of field focused on their subject.
  const subject=watchedCar?.car??car,dof=intro.active?intro.dof:mode==='tv'?{focus:camera.position.distanceTo(watchedCar?.obj.position??carRoot.position),amount:.35}:null;
- cinematic.render(scene,camera,{dt:paused?0:dt,speed:Math.hypot(subject.vx,subject.vy),mode,hazeBase:hazeBase(),dof});
+ // The speed smear rides on the camera's own motion, only while it drives with a car (not the opening shots, the
+ // grid, the café, on foot, the podium or a cockpit photo); the cars riding along stay sharp. Phones (the lite film
+ // look) with the full smear off get the light road smear of their Sensação de velocidade instead.
+ const smearMode=intro.active||gridPreview()||pitstop?.opened||immersive?.onFoot()||(immersive?.active&&['crowd','podium'].includes(immersive.state.phase)&&!immersive.inCar)||(mode==='cockpit'&&cockpitView&&!watchedCar)?'still':mode;
+ // The phones' road smear only behind the car: in the bonnet and cockpit views the own car's box is the whole screen,
+ // every tap would be thrown away and the pass would cost its time for nothing.
+ const behindCar=smearMode==='chase'||smearMode==='close'||smearMode==='far';
+ const roadSmear=behindCar&&!graphics.values.motionBlur&&cinematic.level==='lite'&&!!speedFx?.profile.roadSmear&&!reducedMotion.matches;
+ // The near asphalt's speed cue has one owner: the film's smear where it reaches the road (the full one in the views
+ // riding with a car, the phones' road smear behind it), else the asphalt shader's streak (track-surface.js setMotion,
+ // no extra pass: the TV and orbit cameras, the phones' bonnet and cockpit, Baixo), as strong as Sensação de
+ // velocidade asks (none on Leve, which keeps only the flags). Never both on the same pixels, never in a still shot.
+ const filmRoad=cinematic.level!=='off'&&(graphics.values.motionBlur&&(behindCar||smearMode==='hood'||smearMode==='cockpit')||roadSmear);
+ roadSurface?.setMotion(camera,paused||frozen?0:dt,reducedMotion.matches||smearMode==='still'||filmRoad?0:speedFx?.profile.roadStreak??0);
+ cinematic.render(scene,camera,{dt:paused?0:dt,topSpeed:topSpeed(subject.mechanics),mode:smearMode,hazeBase:hazeBase(),dof,roadSmear,smearCars:(graphics.values.motionBlur||roadSmear)&&smearMode!=='still'?ridingCars(watchedCar?.obj??carRoot,subject):null});
 }
 function renderClassification(){
  const rows=[...(immersive.freeOrder??[])];
@@ -1046,6 +1222,20 @@ window.interlagosGraficos={
   compiling:!!graphicsCompiling,mirror:cockpit?[cockpit.mirrorTarget.width,cockpit.mirrorTarget.height]:null,cinematic:cinematic?(({look,...rest})=>rest)(cinematic.info()):null,scenery:sceneryBuilt,water:landscape?.waterInfo().realistic??null,debug:debugOverlay.info()}),
  set:value=>{preferences.update({graphics:value});applyGraphics();return window.interlagosGraficos.info();}
 };
+// For checks and tuning: the sun, the fill, where the shadow box lies and the cars' crisp map; set()
+// changes the light live ({sun, sunColor, fill, fillColor, fillGround, environment, exposure}: a test, not saved); photo()
+// holds the camera at {from, at} metres in the car's frame (x ahead, y up), {fov}; null lets go.
+let lightPhoto=null;const lightPhotoAt=new THREE.Vector3();
+function holdLightPhoto(){if(!lightPhoto)return;carRoot.updateMatrixWorld();camera.position.set(...lightPhoto.from).applyMatrix4(carRoot.matrixWorld);camera.up.set(0,1,0);camera.lookAt(lightPhotoAt.set(...lightPhoto.at).applyMatrix4(carRoot.matrixWorld));camera.fov=lightPhoto.fov??40;camera.updateProjectionMatrix();}
+window.interlagosLuz={
+ info:()=>({sun:{intensity:sun.intensity,color:'#'+sun.color.getHexString(),direction:SUN_DIRECTION.toArray()},fill:skyFill.intensity,fillColor:'#'+skyFill.color.getHexString(),fillGround:'#'+skyFill.groundColor.getHexString(),environment:scene.environmentIntensity,exposure:renderer?.toneMappingExposure??null,box:sunPlacement.info(),car:carShadow.info()}),
+ set:({sun:i,sunColor,fill,fillColor,fillGround,environment,exposure,carShadow:look}={})=>{if(i!=null)sun.intensity=i;if(sunColor)sun.color.set(sunColor);if(fill!=null)skyFill.intensity=fill;if(fillColor)skyFill.color.set(fillColor);if(fillGround)skyFill.groundColor.set(fillGround);if(environment!=null)scene.environmentIntensity=environment;if(exposure!=null&&renderer)renderer.toneMappingExposure=exposure;if(look)carShadow.look(look);return window.interlagosLuz.info();},
+ photo:pose=>{lightPhoto=pose?{from:pose.from,at:pose.at,fov:pose.fov}:null;if(!pose){followInitialized=false;camera.fov=baseFov(mode,camera.aspect);camera.updateProjectionMatrix();}return !!lightPhoto;}
+};
+// The cars' reflections in that info (source, map size, faces, captures, who lends the map now) and, in
+// a race, interlagos.carPaintInfo(): the finish in force and the paint of the player's car and a rival's.
+{const info=window.interlagosGraficos.info;window.interlagosGraficos.info=()=>({...info(),reflections:carReflections?.info()??null});window.interlagosGraficos.reflectionSnapshot=()=>carReflections?.snapshot()??null;}
+const carPaintInfo=()=>carReflections.paintInfo({player:fuscaBody.car??model,rivals:immersive?.visual?.rivals,far:immersive?.visual?.materials.farCar});
 // Championship (championship.js): one per mode and calendar (Todas as pistas, Old Stock 2026 and, in
 // Modo Corrida, the Copa Fusca 2026), the panel's tab picks the calendar (remembered; Modo História
 // shows Todas as pistas for a calendar it does not offer). championshipRace is the round on track; storyRound, a
@@ -1279,10 +1469,13 @@ function clearCircuit(){
  camera.clearViewOffset();
  if(immersive){immersive.dispose();immersive.visual.damage.removeFromParent();retired.push(immersive.visual.damage);immersive=null;}
  if(car)delete car.condition;
+ // The grid's reflection goes with its circuit; the cars wear the sky's map until the next one.
+ carReflections?.clearCircuit();
  const keepRoots=new Set([carRoot,ghostCar.root,skidMarks?.mesh,tyreSmoke?.mesh,sun,sun.target,sky?.dome]);
  for(const root of [...scene.children])if(!root.isLight&&!keepRoots.has(root)){scene.remove(root);retired.push(root);}
  const collect=roots=>{const geometries=new Set(),materials=new Set(),textures=new Set();for(const root of roots)root?.traverse(o=>{if(o.geometry)geometries.add(o.geometry);for(const m of o.material?(Array.isArray(o.material)?o.material:[o.material]):[]){materials.add(m);for(const value of Object.values(m))if(value?.isTexture)textures.add(value);}});return {geometries,materials,textures};};
  const keep=collect([...keepRoots]),old=collect(retired);
+ for(const texture of carReflections?.textures()??[])keep.textures.add(texture);
  for(const root of retired)root.traverse(o=>{if(o.isInstancedMesh)o.dispose();});
  if(roadSurface){old.materials.add(roadSurface.material);for(const value of Object.values(roadSurface.material))if(value?.isTexture)old.textures.add(value);}
  for(const key of ['geometries','materials','textures'])for(const resource of old[key])if(!keep[key].has(resource))resource.dispose();
@@ -1310,18 +1503,18 @@ async function loadCircuit(){
  projectMap=mapProjection(data.samples,260,300,touchDevice?0:40);$('map').height=projectMap.height??300;car=new TestCar(data);ghostRecorder.reset();
  roadSurface=await createTrackSurface(renderer,data,{quality:graphics.values.materials});
  if(!driver){driver=await createDriver(cockpit);carBody.add(driver.root);}
- terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];
+ terrainTextures??=await loadTerrainTextures(renderer);landscapeField=buildTrackField(data);let standTops=[];tyreSmoke.soft=null;smearRiders.length=0;releaseWakeCars();
  if(circuit.id==='curvelo'){
   const groundMaterial=terrainMaterial(terrainTextures,landscapeField,{mobile:scenery.mobile});groundMaterial.userData.terrain=true;
   standTops=flattenStatic(createCurveloScene(data,roadSurface,{groundMaterial,gravelMap:terrainTextures.gravel}));
-  landscape=createLandscape({data,field:landscapeField,mobile:scenery.mobile,density:scenery.density,lod:scenery.lod,style:'cerrado'});
+  landscape=createLandscape({data,field:landscapeField,mobile:scenery.mobile,density:scenery.density,lod:scenery.lod,lean:sceneryLevel==='basico',style:'cerrado'});
  }else if(data.scenery){
   // Cascavel, ECPA: terrain, asphalt and gantry from the open-data track file (open-circuit.js);
   // woods from the land-cover grid and the real building footprints (landscape.js).
   const groundFit=fitGround(data);
   const open=await createOpenCircuit(data,roadSurface,{heights:groundFit.heights,textures:terrainTextures,field:landscapeField,groundUrl:circuit.ground,label:`${circuit.track} · AUTO-POBRE RACING`,mobile:scenery.mobile});
   scene.add(open.root);cameraObstacles.push(...open.obstacles);
-  landscape=createLandscape({data,field:landscapeField,ground:(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y),cover:data.scenery.cover,buildings:data.scenery.buildings,cityAngle:data.meta.city_angle??Math.PI/2,mobile:scenery.mobile,density:scenery.density,lod:scenery.lod,style:'urban'});
+  landscape=createLandscape({data,field:landscapeField,ground:(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y),cover:data.scenery.cover,buildings:data.scenery.buildings,cityAngle:data.meta.city_angle??Math.PI/2,mobile:scenery.mobile,density:scenery.density,lod:scenery.lod,lean:sceneryLevel==='basico',style:'urban'});
   const stands=createGrandstands(data,terrainTextures,(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y));scene.add(stands.root);cameraObstacles.push(...stands.obstacles);standTops=stands.rows;
   Object.assign(landscape.stats,{ground:groundFit.stats,stands:stands.stats,circuit:open.stats});
  }else{
@@ -1332,7 +1525,9 @@ async function loadCircuit(){
   track.scene.traverse(o=>{if(!o.isMesh||o.material?.name!=='GeoSampa_Ortofoto_2020')return;const photo=o.material;ortho=readOrtho(photo.map,o.geometry);if(!applyGroundHeights(o.geometry,data,groundFit.heights))console.warn('Terreno do GLB fora da grade de pista.json; relevo sem ajuste.');o.material=terrainMaterial(terrainTextures,landscapeField,{ortho:photo.map,mobile:scenery.mobile});o.material.userData.terrain=true;photo.map=null;photo.dispose();});
   // Lakes come out of the orthophoto: their beds, already dug in the physics ground, are dug into the
   // visible terrain too, before flattenStatic copies it into the static batches.
-  landscape=createLandscape({data,field:landscapeField,ortho,ground:(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y),mobile:scenery.mobile,density:scenery.density,lod:scenery.lod});
+  landscape=createLandscape({data,field:landscapeField,ortho,ground:(x,y)=>groundHeight(data.terrain,groundFit.heights,x,y),mobile:scenery.mobile,density:scenery.density,lod:scenery.lod,lean:sceneryLevel==='basico'});
+  // Tyres throw dirt only off the photo's paving and the painted run-off: those smoke like asphalt.
+  if(ortho)tyreSmoke.soft=looseGround(landscapeField,ortho);
   if(landscape.digLakeBeds(groundFit.heights))track.scene.traverse(o=>{if(o.material?.userData.terrain)applyGroundHeights(o.geometry,data,groundFit.heights);});
   if(landscape.stats.water){lakeContact=new LakeContact({water:landscape.water,mobile:scenery.mobile,onSound:(name,options)=>carAudio.effect(name,options)});scene.add(lakeContact.mesh);}
   const legacyStands=flattenStatic(track.scene).length;
@@ -1351,12 +1546,16 @@ async function loadCircuit(){
  const branding=await createTrackBranding(data);scene.add(branding.root);
  // Race-day dressing: sponsor banners on the rails, marshal posts and TV towers (trackside.js).
  trackside=createTrackside(data);scene.add(trackside.root);landscape.clearAround(trackside.clearings);landscape.stats.trackside=trackside.stats;
+ // Flags, corner rods and brake boards: built at every level (before the compile below), shown per Sensação de velocidade.
+ // A pole flicking past is heard from the riding cameras only, muffled inside the car.
+ flags=createFlagField(data,{level:graphics.values.speedEffects,onWhoosh:e=>{if(isInside()||mode==='chase'||mode==='close')carAudio.effect('passBy',{pan:e.pan,strength:e.strength*(isInside()?.55:1)});}});scene.add(flags.root);landscape.clearAround(flags.clearings);landscape.stats.flags=flags.stats;
  // Broadcast view: the towers and low verge cameras film the car with a long lens.
  const tvProbe=new TestCar(data),tvObstacles=[...cameraObstacles];branding.root.traverse(o=>{if(o.isMesh)tvObstacles.push(o);});
  tvCamera=new TvCamera(data,trackside.towers,(x,y,i)=>{tvProbe.index=i;return tvProbe.sample(x,y).z;},tvObstacles);
  landscape.clearAround(tvCamera.cameras.filter(c=>!c.tower).map(c=>({x:c.position.x,y:-c.position.z,r:3.5})));
  // The trees left standing are posts the Opala can hit.
  treeField=new TreeField(landscape.trunks(),{mobile:scenery.mobile});scene.add(treeField.points);car.posts=treeField;
+ speedFx=createSpeedEffects({smoke:tyreSmoke,level:graphics.values.speedEffects});scene.add(speedFx.root);
  restBodyPose();
  carLivery.clear();
  immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();wheelSet=0;mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
@@ -1378,11 +1577,15 @@ async function loadCircuit(){
  landscape.setRealisticWater(graphics.values.water==='realista');
  const kleber=immersive.visual.rivals.find(o=>o.userData.entry.number==='70');
  // Car 70's Old Stock ads sit on its doors, bent onto the body.
- oldStockMaterial=new THREE.MeshStandardMaterial({map:branding.oldStock,roughness:.55,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+ oldStockMaterial=finishMaterial(new THREE.MeshPhysicalMaterial({name:'OldStock_portas',map:branding.oldStock,roughness:.35,clearcoat:.8,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
  for(const decal of immersive.visual.doorStickers(kleber,oldStockMaterial))decal.name='OldStock_no_Opala70';
  showRoster();
  // Compile the new programs while the loading label is still shown, instead of
  // freezing the first race frame (D3D shader compilation is slow on Windows).
+ carShadow.compile(renderer,[carRoot,...immersive.visual.rivals.slice(0,1)]);
+ // The cars wear the race's reflections while they compile (a probe's map means other programs); the
+ // circuit seen from its grid (Pista) is drawn at the first race frame, once the track shows (car-reflections.js).
+ carReflections.useRaceMap();await carReflections.compile(scene);
  updateCar(1);updateCamera(1);landscape.revealWaves(true);try{await cinematic.compile(scene,camera);await landscape.compileWater(renderer,scene,camera);}catch(err){console.warn(err);}finally{landscape.revealWaves(false);}
  ready=true;loadedCircuit=circuit.id;sceneryBuilt=sceneryLevel;setCameraMode(preferences.values.camera);$('skinButton').disabled=false;updateCar(1);cockpit.update(car,0);driver.update(car,0);updateCamera(1);cameraHint();hud();$('start').disabled=false;
  window.interlagos={ready:true,circuit:circuit.id,car,renderAhead,telemetry:()=>car.telemetry(),setLivery,reset:()=>reset(),reposition:index=>{car.reset(index);driver.reset();skidMarks.breakTrails();tyreSmoke.reset();carAudio.reset();cockpit.resetPhone();updateCar(1);updateCamera(1);},setTour:value=>{if(immersive.active)return;automatic=value;menu(false);},
@@ -1418,12 +1621,16 @@ async function loadCircuit(){
    }else cockpitView=null;
    // The driver's group also carries the wheel, levers and pedals he works: only his body is hidden.
    const hide=!!cockpitView?.hideDriver;if(hide!==photoHidDriver){const controls=new Set([cockpit.wheel,...cockpit.controls.parts]);for(const part of driver.root.children)if(!controls.has(part))part.visible=!hide;photoHidDriver=hide;}
-   if(!cockpitView){camera.fov=mode==='cockpit'?74:58;camera.updateProjectionMatrix();}
+   if(!cockpitView){camera.fov=baseFov(mode,camera.aspect);camera.updateProjectionMatrix();}
    lookBack.reset();return cockpitView&&structuredClone(cockpitView);
   },
-  cameraSnapshot:()=>({position:camera.position.toArray(),direction:camera.getWorldDirection(new THREE.Vector3()).toArray(),fov:camera.fov,roll:Math.asin(clamp(new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion).y,-1,1)),target:orbit.target.toArray(),car:carRoot.position.toArray(),distance:camera.position.distanceTo(orbit.target),ground:car.sample(camera.position.x,-camera.position.z).z}),
+  cameraSnapshot:()=>({position:camera.position.toArray(),direction:camera.getWorldDirection(new THREE.Vector3()).toArray(),fov:camera.fov,roll:Math.asin(clamp(new THREE.Vector3(1,0,0).applyQuaternion(camera.quaternion).y,-1,1)),target:orbit.target.toArray(),car:carRoot.position.toArray(),distance:camera.position.distanceTo(orbit.target),ground:car.sample(camera.position.x,-camera.position.z).z,
+    // The lens with no speed widening (camera-rig.js baseFov), the follow frame drawn and where the player's car is on screen.
+    baseFov:baseFov(gridPreview()?'grid':mode==='orbit'?orbitSpeedFov||'orbit':mode,camera.aspect),aspect:camera.aspect,frame:gridPreview()?'grid':FOLLOW_FRAMES.includes(mode)?mode:null,carScreen:carOnScreen(),rig:{...rig.out}}),
   wheelSnapshot:()=>{carRoot.updateMatrixWorld(true);const inverse=carRoot.getWorldQuaternion(new THREE.Quaternion()).invert();return wheels.map(w=>{const axle=new THREE.Vector3(0,0,1).applyQuaternion(w.obj.getWorldQuaternion(new THREE.Quaternion())).applyQuaternion(inverse);return {name:w.obj.name,front:w.front,angle:Math.atan2(axle.x,axle.z),axle:axle.toArray()};});},
   get state(){return {paused,automatic,mode,livery:activeLivery,wheels:wheels.length,drawCalls:renderer.info.render.calls};}};
+ window.interlagos.carPaintInfo=carPaintInfo;
+ window.interlagos.speedInfo=()=>({...speedFx.info(),particles:tyreSmoke.info().speedFx,kerb:kerbSound(car),kerbWheels:car.kerbWheels??0,kerbTilt:car.kerbTilt??0});
  return true;
  }catch(err){console.error(err);ready=false;clearCircuit();status('Não foi possível carregar a pista. Clique em começar para tentar novamente.');return false;}
  finally{loading=false;pendingMode=null;$('start').disabled=false;$('storyStart').disabled=false;$('singleRace').disabled=$('soloRace').disabled=$('duelRace').disabled=false;$('championshipStart').disabled=false;$('tour').disabled=false;$('livery').disabled=false;for(const button of document.querySelectorAll('[data-circuit]'))button.disabled=false;updateMenuLabels();}

@@ -69,8 +69,8 @@ export class TvCamera{
   this.aim.lerp(lead,1-Math.exp(-dt*7));
   const t=this.time,shake=.012*Math.min(1,distance/40);
   camera.up.set(0,1,0);camera.lookAt(this.aim.x+Math.sin(t*1.3)*shake*distance*.02,this.aim.y+Math.sin(t*1.7+1)*shake*distance*.02,this.aim.z);
-  // Long lens: keep the car about a sixth of the frame tall.
-  const fov=THREE.MathUtils.clamp(2*Math.atan(5.5/Math.max(distance,1))*180/Math.PI,4.5,50);
+  // Long lens: keep the car about a fifth of the frame tall (the paint reads, as on a race broadcast).
+  const fov=THREE.MathUtils.clamp(2*Math.atan(4.5/Math.max(distance,1))*180/Math.PI,4.5,50);
   camera.fov+=(fov-camera.fov)*(1-Math.exp(-dt*5));if(dt>=1)camera.fov=fov;camera.updateProjectionMatrix();
  }
  info(){return {cameras:this.cameras.length,towers:this.cameras.filter(c=>c.tower).length,current:this.current?{s:this.current.s,tower:this.current.tower,heli:!!this.current.heli}:null,cuts:this.cuts,skipped:this.skipped,sees:this.current&&this.target?this.sees(this.current,this.target):null,obstacles:this.obstacles.length};}

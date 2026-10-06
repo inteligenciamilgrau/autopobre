@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {structureMaterial} from './landscape.js';
 import {STAND,standLayout,standPoint,roofHeight} from './track-clearance.js';
+import {SUN_DIRECTION} from './sky.js';
 
 // Main grandstand of Interlagos, on the outside of the main straight: stepped
 // concrete blocks built into the bank, benches split by aisles, and a roof on
@@ -13,13 +14,25 @@ const SECTIONS=[-10.5,-3.5,3.5,10.5],SECTION_LENGTH=6.2;
 export function createGrandstands(data,textures,ground=null){
  const blocks=standLayout(data),root=new THREE.Group();root.name='Arquibancadas_Interlagos';
  if(!blocks.length)return {root,rows:[],obstacles:[],stats:{blocks:0,rows:0}};
- const concrete=structureMaterial(new THREE.MeshStandardMaterial({name:'Concreto',color:0x8f918b,roughness:.9}),textures);
+ const concrete=structureMaterial(new THREE.MeshStandardMaterial({name:'Concreto',color:0x8f918b,roughness:.9}),textures);concrete.vertexColors=true;
  const steel=structureMaterial(new THREE.MeshStandardMaterial({name:'Metal',color:0x9aa2a6,metalness:.5,roughness:.45}),textures);
  const roofMaterial=new THREE.MeshStandardMaterial({name:'Cobertura_arquibancada',color:0xe8eae6,roughness:.55,metalness:.2,side:THREE.DoubleSide});
+ // Trapezoidal steel deck: ribs down the slope every 25 cm (faded before they alias), grime toward
+ // the edges, and a shaded underside that only sees the ground.
+ roofMaterial.onBeforeCompile=shader=>{
+  shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 vDeck;varying float vDeckDown;').replace('#include <begin_vertex>','#include <begin_vertex>\nvDeck=uv;vDeckDown=step(normalize(mat3(modelMatrix)*normal).y,-.5);');
+  shader.fragmentShader=shader.fragmentShader.replace('#include <common>','#include <common>\nvarying vec2 vDeck;varying float vDeckDown;').replace('#include <color_fragment>',`#include <color_fragment>
+float deckRib=vDeck.x*${((STAND.length+.3)/.25).toFixed(1)},deckFade=1.0-smoothstep(.25,.6,fwidth(deckRib));
+float deckEdge=smoothstep(.3,0.0,min(vDeck.y,1.0-vDeck.y));
+diffuseColor.rgb*=(1.0-.14*deckFade*smoothstep(.2,.5,abs(fract(deckRib)-.5)))*(1.0-.18*deckEdge)*mix(1.0,.62,vDeckDown);`);
+ };
+ roofMaterial.customProgramCacheKey=()=>'stand-roof-deck-v1';
  const fasciaMaterial=new THREE.MeshStandardMaterial({name:'Faixa_cobertura',color:0x12463b,roughness:.6});
  const seatMaterial=new THREE.MeshStandardMaterial({name:'Assentos_arquibancada',vertexColors:true,roughness:.5});
  const parts={body:[],seats:[],roof:[],fascia:[],steel:[]},rows=[],up=new THREE.Vector3(0,1,0);
  const tint=(g,rgb)=>{const n=g.attributes.position.count,c=new Float32Array(n*3);for(let i=0;i<n;i++)c.set(rgb,i*3);g.setAttribute('color',new THREE.BufferAttribute(c,3));return g;};
+ // The stand's extent along the track (from the first block's centre), for rays that leave under a neighbour's roof.
+ const sun=SUN_DIRECTION,along0=blocks.map(b=>blocks[0].tx*(b.x-blocks[0].x)+blocks[0].ty*(b.y-blocks[0].y)),standSpan=[Math.min(...along0)-STAND.length/2-.15,Math.max(...along0)+STAND.length/2+.15];
  blocks.forEach((b,index)=>{
   // Block frame: x along the track, y up, z away from it (right-handed), origin at the apron level.
   const frame=new THREE.Matrix4().makeBasis(new THREE.Vector3(b.tx,0,-b.ty),up,new THREE.Vector3(b.rx,0,-b.ry)).setPosition(b.x,b.base,-b.y);
@@ -35,13 +48,22 @@ export function createGrandstands(data,textures,ground=null){
   // Extruded along z, then turned so z runs along the track (a = L/2 - z keeps the winding).
   const length=b.length+.2,body=new THREE.ExtrudeGeometry(shape,{depth:length,bevelEnabled:false});
   body.applyMatrix4(new THREE.Matrix4().set(0,0,-1,length/2,0,1,0,0,1,0,0,0,0,0,0,1));
+  // Deeper under the roof the steps see less sky: they darken toward the back (vertex colour, z = l here). Only
+  // the faces that look up or toward the track (treads, risers; one face per vertex here): the outer back wall
+  // and the end walls face open sky and the sun, which stands behind the grandstand.
+  const under=l=>{const t=Math.max(0,Math.min(1,(l-b.front-1)/(b.back-b.front-1)));return 1-.42*t*t*(3-2*t);},pos=body.attributes.position,nor=body.attributes.normal,shadeAt=new Float32Array(pos.count*3);
+  for(let i=0;i<pos.count;i++)shadeAt.fill(nor.getY(i)>.5||nor.getZ(i)<-.5?under(pos.getZ(i)):1,i*3,i*3+3);body.setAttribute('color',new THREE.BufferAttribute(shadeAt,3));
   body.deleteAttribute('uv');parts.body.push(body.applyMatrix4(frame));
-  // Benches at the back of each row, with aisles between the sections.
-  const color=SEAT_COLORS[index%SEAT_COLORS.length];
+  // Benches at the back of each row, with aisles between the sections. Each row also says how deep
+  // it sits under the roof and how much of it the sun reaches past the roof (a ray from a seated
+  // chest), for the crowd's light.
+  const color=SEAT_COLORS[index%SEAT_COLORS.length],sa=sun.x*b.tx-sun.z*b.ty,sl=sun.x*b.rx-sun.z*b.ry,offset=b.tx*(b.x-blocks[0].x)+b.ty*(b.y-blocks[0].y);
   for(const [r,row] of b.rows.entries())for(const a of SECTIONS){
-   const shade=r%2?.9:1;tint(box(parts.seats,SECTION_LENGTH,.36,.46,a,rel(row.top)+.18,row.to-.3),color.map(v=>v*shade));
+   const shade=(r%2?.9:1)*under(row.to);tint(box(parts.seats,SECTION_LENGTH,.36,.46,a,rel(row.top)+.18,row.to-.3),color.map(v=>v*shade));
    const corners=[[-1,-1],[1,-1],[1,1],[-1,1]].map(([u,v])=>local(a+u*SECTION_LENGTH/2,rel(row.top)+.36,row.to-.3+v*.23));
-   rows.push({corners,face:[-b.rx,b.ry]});
+   let lit=0;
+   for(let u=-2.5;u<=2.5;u+=1){const l0=row.to-.3,k=(roofHeight(b,l0)-(row.top+1.1))/(sun.y+b.roof.slope*sl),l=l0+sl*k,along=a+u+sa*k+offset;if(!(k>0&&l>b.roof.from&&l<b.roof.to&&along>standSpan[0]&&along<standSpan[1]))lit++;}
+   rows.push({corners,face:[-b.rx,b.ry],depth:b.rows.length>1?r/(b.rows.length-1):0,sun:lit/6});
   }
   // Roof: one slab per block, rising toward the track, with a fascia on its front edge.
   const {from,to}=b.roof,span=to-from,tilt=Math.atan(b.roof.slope),mid=(from+to)/2;

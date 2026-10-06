@@ -15,6 +15,58 @@ function geometryFrom(positions,uvs,indices,extra){
  for(const [name,values,size] of extra??[])g.setAttribute(name,new THREE.Float32BufferAttribute(values,size));
  if(indices)g.setIndex(indices);g.computeVertexNormals();return g;
 }
+// Chain-link debris fence, drawn from the wire's own geometry instead of a texture (uv in metres:
+// along the wall, height): every wire is antialiased at its true width, a wire thinner than a pixel
+// dims to its share of grey instead of breaking into beads, and from about 30 m on the fence fades
+// to a flat translucent veil, so no sub-pixel wires crawl. Coverage goes out as alpha: through
+// alpha-to-coverage on multisampled targets (no sorting, depth per sample), blended in the main view
+// without MSAA (the material then rides in the transparent list), cut by a screen-fixed dither in any
+// other pass without it (mirrors, reflection probes). It writes no depth, so the occlusion pass and the
+// film look see the ground behind it, not a sieve of wire samples; drawn after the opaque world
+// (renderOrder 1), what stands behind it is already there. One double-sided pass even when blended
+// (forceSinglePass): a thin sheet needs no back-then-front split, whose two extra programs compiled on
+// the first frame without MSAA (Médio, Baixo), long after the load-time compile.
+export const FENCE_MESH={diamond:.1,wire:.0075,veil:[28,42]};
+export function chainLinkMaterial(){
+ const uniforms={fenceMode:{value:1}};
+ const material=new THREE.MeshStandardMaterial({name:'Alambrado_boxes',color:0xbcc3c5,roughness:.42,metalness:.55,side:THREE.DoubleSide,forceSinglePass:true,alphaToCoverage:true,depthWrite:false});
+ material.onBeforeCompile=shader=>{
+  Object.assign(shader.uniforms,uniforms);
+  shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nvarying vec2 vFence;').replace('#include <begin_vertex>','#include <begin_vertex>\nvFence=uv;');
+  const D=FENCE_MESH.diamond,w=(FENCE_MESH.wire/(D*Math.SQRT1_2)).toFixed(5),[near,far]=FENCE_MESH.veil;
+  shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
+uniform float fenceMode;
+varying vec2 vFence;
+// One family of parallel wires, c in wire spacings: coverage of a wire of width w (spacings) in this pixel.
+float fenceWire(float c,float w){
+ float d=max(fwidth(c),1e-5),drawn=clamp(w,d,.5),dist=abs(fract(c+.5)-.5);
+ float line=(1.0-smoothstep(drawn*.5-d*.75,drawn*.5+d*.75,dist))*clamp(w/drawn,0.0,1.0);
+ return mix(line,w,clamp(d*2.0-1.0,0.0,1.0));
+}`).replace('#include <alphatest_fragment>',`{
+  // A wire is a round strand: looking along the fence its width stays while the gaps between wires
+  // close up, so the mesh thickens into a grey band at a grazing look (c: how square-on the view is).
+  vec3 fenceN=normalize(cross(dFdx(vViewPosition),dFdy(vViewPosition)));
+  float c=max(abs(dot(fenceN,normalize(vViewPosition))),.12),wide=min(${w}*sqrt(1.0+c*c)/(c*1.4142),.42);
+  // Two families of wires at 45 degrees make the diamonds; past the veil distance only their share.
+  vec2 q=vec2(vFence.x+vFence.y,vFence.x-vFence.y)/${D.toFixed(4)};
+  float a=1.0-(1.0-fenceWire(q.x,wide))*(1.0-fenceWire(q.y,wide)),veil=1.0-(1.0-wide)*(1.0-wide);
+  a=mix(a,min(veil*1.1,.62),smoothstep(${near.toFixed(1)},${far.toFixed(1)},length(vViewPosition)));
+  if(fenceMode>1.5)a=a>fract(52.9829189*fract(dot(gl_FragCoord.xy,vec2(.06711056,.00583715))))?1.0:0.0;
+  if(a<.004)discard;
+  diffuseColor.a=a;
+ }`);
+ };
+ material.customProgramCacheKey=()=>'alambrado-v3';
+ // Per pass: multisampled (alpha to coverage), blended (main view without MSAA) or dithered. The main
+ // view also decides which list the fence rides in from the next frame on.
+ material.userData.onPass=(renderer)=>{
+  const target=renderer.getRenderTarget(),msaa=target?target.samples>0:!!renderer.getContextAttributes()?.antialias;
+  if(!target||target.isMainView)material.transparent=!msaa;
+  uniforms.fenceMode.value=msaa?1:material.transparent?0:2;
+ };
+ return material;
+}
+
 // labels: the circuit's names on Box 99 (pit-box99.js); Interlagos keeps its own defaults.
 export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
  const pit=data.pit,c=Object.fromEntries(pit.columns.map((k,i)=>[k,i])),a=pit.samples,n=a.length;
@@ -67,7 +119,8 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
  for(const [list,material] of [[paints.white,white],[paints.yellow,yellow]]){const g=mergeGeometries(list,false);const m=new THREE.Mesh(g,material);m.receiveShadow=true;m.name=material.name;root.add(m);list.forEach(x=>x.dispose());}
  // Painted chevrons in the gore between the track and the pit entry.
  {
-  const map=canvasTexture((ctx,w,h)=>{ctx.fillStyle='#51b89f';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#e8f4d8';ctx.lineWidth=h*.16;for(let k=-1;k<3;k++){ctx.beginPath();ctx.moveTo(0,k*h/2+h*.1);ctx.lineTo(w/2,k*h/2+h*.45);ctx.lineTo(w,k*h/2+h*.1);ctx.stroke();}},128,128);
+  // Paint faded like the run-offs (landscape.js), not a fresh teal.
+  const map=canvasTexture((ctx,w,h)=>{ctx.fillStyle='#62786a';ctx.fillRect(0,0,w,h);ctx.strokeStyle='#d6d9cc';ctx.lineWidth=h*.16;for(let k=-1;k<3;k++){ctx.beginPath();ctx.moveTo(0,k*h/2+h*.1);ctx.lineTo(w/2,k*h/2+h*.45);ctx.lineTo(w,k*h/2+h*.1);ctx.stroke();}},128,128);
   map.wrapS=map.wrapT=THREE.RepeatWrapping;
   const positions=[],uvs=[],indices=[];let k=0;
   // From the lane's entry to the nose of the pit wall (the stations' end on a reversed block).
@@ -86,9 +139,8 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
  }
  // --- Walls: extruded along the surveyed polylines.
  const concrete=structureMaterial(mat('Concreto',0x8f918b,{side:THREE.DoubleSide}),textures),metal=structureMaterial(mat('Metal',0x2c3136,{metalness:.5,roughness:.45}),textures);
- const fenceMap=canvasTexture((ctx,w,h)=>{ctx.clearRect(0,0,w,h);ctx.strokeStyle='rgba(205,212,214,.9)';ctx.lineWidth=2;for(let k=-h;k<w+h;k+=16){ctx.beginPath();ctx.moveTo(k,0);ctx.lineTo(k+h,h);ctx.stroke();ctx.beginPath();ctx.moveTo(k,h);ctx.lineTo(k+h,0);ctx.stroke();}},128,128);
- fenceMap.wrapS=fenceMap.wrapT=THREE.RepeatWrapping;
- const fence=new THREE.MeshStandardMaterial({name:'Alambrado_boxes',map:fenceMap,transparent:true,alphaTest:.3,side:THREE.DoubleSide,roughness:.5,metalness:.4});
+ // The debris fence: chain-link wire drawn from its own geometry (chainLinkMaterial).
+ const fence=chainLinkMaterial();
  const wallParts=[],fenceParts=[],posts=[];
  // Along the garage fronts the outer wall lies where the doors are: the doors show and
  // its data still stops the cars, so only the stretches beyond the building are drawn.
@@ -107,7 +159,7 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
    if(i){const b=(i-1)*4;for(let f=0;f<3;f++)indices.push(b+f,b+f+4,b+f+1,b+f+1,b+f+4,b+f+5);}
    // The debris fence stands on the track-side edge of the wall.
    const fx=x+nx*fenceSide*Math.max(0,half-.15),fy=y+ny*fenceSide*Math.max(0,half-.15);
-   if(wall.fence){for(const h of [wall.height,wall.height+wall.fence]){fencePos.push(fx,z+h,-fy);fenceUv.push(run/1.6,h/1.6);}if(i){const b=(i-1)*2;fenceIdx.push(b,b+2,b+1,b+1,b+2,b+3);}
+   if(wall.fence){for(const h of [wall.height,wall.height+wall.fence]){fencePos.push(fx,z+h,-fy);fenceUv.push(run,h);}if(i){const b=(i-1)*2;fenceIdx.push(b,b+2,b+1,b+1,b+2,b+3);}
     if(i%2===0)posts.push({x:fx,y:fy,z:z+wall.height+wall.fence/2,h:wall.fence});}
   }
   // End caps.
@@ -116,7 +168,7 @@ export function createInterlagosPit(data,roadSurface,textures,labels=undefined){
   if(wall.fence)fenceParts.push(geometryFrom(fencePos,fenceUv,fenceIdx));
  }
  const walls=new THREE.Mesh(mergeGeometries(wallParts,false),concrete);walls.name='Muro_boxes';walls.castShadow=walls.receiveShadow=true;root.add(walls);obstacles.push(walls);
- if(fenceParts.length){const f=new THREE.Mesh(mergeGeometries(fenceParts,false),fence);f.name='Alambrado_muro_boxes';root.add(f);}
+ if(fenceParts.length){const f=new THREE.Mesh(mergeGeometries(fenceParts,false),fence);f.name='Alambrado_muro_boxes';f.renderOrder=1;f.onBeforeRender=renderer=>fence.userData.onPass(renderer);root.add(f);}
  if(posts.length){const inst=new THREE.InstancedMesh(new THREE.BoxGeometry(.08,1,.08),metal,posts.length),m=new THREE.Matrix4();posts.forEach((p,i)=>{m.makeScale(1,p.h,1).setPosition(p.x,p.z,-p.y);inst.setMatrixAt(i,m);});inst.name='Postes_alambrado';inst.castShadow=true;inst.computeBoundingSphere();root.add(inst);}
  // --- Garage row, Box 99 with the Lanchonete da Tia, crew and people (pit-building.js).
  const {box}=createPitBuildings({pit,c,lerp,at,root,obstacles,textures,labels});

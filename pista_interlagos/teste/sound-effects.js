@@ -20,7 +20,7 @@ export class Synth {
  stop(tag=null,fade=.025){const t=this.ctx.currentTime;for(const v of this.voices){if(tag&&v.tag!==tag)continue;v.level.gain.cancelScheduledValues(t);v.level.gain.setTargetAtTime(0,t,fade/3);try{v.source.stop(t+fade);}catch{}}}
 }
 
-export const EFFECT_NAMES=Object.freeze(['pitRepair','pitCoffee','click','paint','crowdWelcome','talk','donation','badJoke','noDonation','paper','fuelFill','denied','ignition','engineCatch','countdown','raceGo','flooded','batteryDead','fuelEmpty','breakdown','collision','debrisFly','debrisMiss','glassHit','glassBreak','tankDrop','towArrive','towBrake','strapSnag','strapFree','towWarning','finish','judgeStart','judgeCheck','judgeApprove','disqualified','podiumWin','podiumLoss','blazer','footstep','reserve','sip','bite','splash','wade','bonk','boing']);
+export const EFFECT_NAMES=Object.freeze(['pitRepair','pitCoffee','click','paint','crowdWelcome','talk','donation','badJoke','noDonation','paper','fuelFill','denied','ignition','engineCatch','countdown','raceGo','flooded','batteryDead','fuelEmpty','breakdown','collision','debrisFly','debrisMiss','glassHit','glassBreak','tankDrop','towArrive','towBrake','strapSnag','strapFree','towWarning','finish','judgeStart','judgeCheck','judgeApprove','disqualified','podiumWin','podiumLoss','blazer','footstep','reserve','sip','bite','splash','wade','bonk','boing','passBy']);
 
 export class SoundEffects {
  constructor(ctx,world,ui,noise){
@@ -28,7 +28,7 @@ export class SoundEffects {
   // Recorded effects: the starter cranking comes from car_trying_to_start.mp3 once it has
   // loaded; until then, or without the file, the synthesized loop stands in.
   this.samples={};this.loadSample('starter','./assets/audio/car_trying_to_start.mp3');
-  for(const [name,wave,hz,cut] of [['starter','sawtooth',95,700],['tow','sawtooth',45,550],['rival0','sawtooth',90,1100],['rival1','sawtooth',85,900],['crowd','noise',0,460],['gravel','noise',0,1400],['wind','noise',0,650],['scrape','noise',0,2700],['leak','noise',0,700]]){
+  for(const [name,wave,hz,cut] of [['starter','sawtooth',95,700],['tow','sawtooth',45,550],['rival0','sawtooth',90,1100],['rival1','sawtooth',85,900],['crowd','noise',0,460],['gravel','noise',0,1400],['wind','noise',0,650],['scrape','noise',0,2700],['leak','noise',0,700],['kerb','square',60,520]]){
    const source=wave==='noise'?ctx.createBufferSource():ctx.createOscillator();
    if(wave==='noise'){source.buffer=noise;source.loop=true;}else{source.type=wave;source.frequency.value=hz;}
    const filter=ctx.createBiquadFilter();filter.type=wave==='noise'?'bandpass':'lowpass';filter.frequency.value=cut;filter.Q.value=.7;
@@ -56,7 +56,7 @@ export class SoundEffects {
  }
  play(name,options={},ui=false){
   if(!EFFECT_NAMES.includes(name))return false;
-  const t=this.ctx.currentTime,minGap={collision:.3,glassHit:.15,footstep:.2,click:.06,towBrake:1.5,towWarning:2.5,splash:.35,wade:.22}[name]??.08;
+  const t=this.ctx.currentTime,minGap={collision:.3,glassHit:.15,footstep:.2,click:.06,towBrake:1.5,towWarning:2.5,splash:.35,wade:.22,passBy:.11}[name]??.08;
   if(t-(this.last[name]??-100)<minGap)return false;
   this.last[name]=t;this.counts[name]=(this.counts[name]||0)+1;
   const rack=ui?this.ui:this.world,pan=clamp(options.pan??0,-1,1),strength=clamp(options.strength??1,.2,1.5);
@@ -116,6 +116,9 @@ export class SoundEffects {
    // a rubbery boing each time they bounce off the ground.
    case 'bonk':note(150,.12,.16,'triangle',0,70,900);noise(.08,.12,700);note(520,.75,.05,'sine',.08,1900,4000);break;
    case 'boing':note(140,.38,.09,'sine',0,360,1400);note(95,.3,.05,'triangle',.02,210,900);break;
+   // A pole, rod or board flicking past the window at speed (trackside-flags.js): a short swell of air
+   // falling in pitch, on its side.
+   case 'passBy':for(const [delay,duration,gain,filter,side] of [[0,.13,.1,2600,1],[.03,.17,.085,1350,.8],[.07,.2,.055,700,.5]])rack.note({at:t+delay,hz:440,duration,gain:gain*strength,type:'noise',filter,q:.9,pan:pan*side,attack:.04});break;
   }
   return true;
  }
@@ -129,8 +132,13 @@ export class SoundEffects {
   else level('starter',starting?.075*(.7+.3*Math.sin(t*43))*(1-sag*.4):0,80+(scene.pressure||0)*60);
   level('tow',towing?.06+(scene.truckSpeed||0)*.012:0,40+(scene.truckSpeed||0)*9,.15);
   level('crowd',['crowd','podium'].includes(scene.phase)?.024*(.8+.2*Math.sin(t*1.3)):0);
-  level('gravel',scene.onRoad===false?Math.min(.19,speed*.005):0);
+  // Kerbs are not dirt: with the wheels' surfaces known (kerb-contact.js) the gravel waits for two of them off the kerb.
+  level('gravel',(scene.kerb?scene.kerb.dirt>=.5:scene.onRoad===false)?Math.min(.19,speed*.005):0);
+  // The kerb's ridges under the tyres (0.4 m apart): a buzz at their rate, on the kerb's side.
+  level('kerb',scene.kerb?.level>.02?(.05+.06*scene.kerb.level)*Math.min(1,speed/12):0,scene.kerb?.hz,scene.kerb?.pan??0);
   level('wind',scene.driving?Math.min(.075,speed*.0014):0);
+  // The rush of air brightens and rises with speed (650 Hz standing, about 2.4 kHz flat out; 'Sensação de velocidade' Leve and up).
+  this.loops.wind.filter.frequency.setTargetAtTime(scene.windSweep?650+Math.min(speed,62)**1.35*7:650,t,.12);
   level('scrape',scene.tankDetached?Math.min(.15,speed*.012):0);
   level('leak',scene.tankDetached&&scene.fuel>0?.025:0);
   for(let i=0;i<2;i++){const r=scene.rivals?.[i];level('rival'+i,r?Math.max(0,1-r.distance/95)**2*.23:0,r?65+r.speed*4:65,r?.pan||0);}

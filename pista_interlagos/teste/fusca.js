@@ -2,6 +2,8 @@ import * as THREE from 'three';
 import {numberSticker,bodyTriangles,bendOnBody} from './immersive-visuals.js';
 import {BRAKE_ON} from './brake-lights.js';
 import {FuscaCockpit} from './fusca-cockpit.js';
+import {finishCar,finishMaterial} from './car-finish.js';
+import {prepareWheels} from './car-wheels.js';
 // The Fusca (Modo Corrida's car screen, its Fusca tab): modelo_3d/fusca_v2, modelled from the Type 1's
 // measurements and exported by modelo_3d/scripts/exportar_fusca_jogo.py in the Opala's frame (+X forward, -Z the
 // driver's side, tyres on y=0, its 2.40 m wheelbase centred on the Opala's). In a Fusca race the whole field races
@@ -57,6 +59,11 @@ export function prepareFusca(scene){
    else if(m.transmission>0){m.transparent=true;m.opacity=Math.min(m.opacity,1-.65*m.transmission);m.transmission=0;m.depthWrite=false;}
   }
  });
+ // Its tyres lettered as the Opala's (car-wheels.js), shared by every Fusca cloned from here; before
+ // the finish, so the lettered tyre is the one car-finish.js registers for the reflection levels.
+ prepareWheels(scene,'fusca');
+ // Clear coat, glass and chrome as the Opala's (car-finish.js).
+ finishCar(scene);
  scene.name='Fusca_V2';return scene;
 }
 // A Fusca in a team's colours (entry: race-roster.js): a clone of the template sharing its geometries and
@@ -71,7 +78,8 @@ export function fuscaCar(template,entry){
    if(PAINTED.includes(m.name)||m.name===FENDERS){c=m.clone();c.color.setHex(m.name===FENDERS?entry.stripe:entry.color);if(entry.finish)Object.assign(c,entry.finish);}
    else if(m.name==='Lanterna_fusca'){c=lamp=m.clone();c.emissive.setRGB(1,.05,.02);c.emissiveIntensity=0;}
    else if(m.name==='Placa'&&m.map===null){c=m.clone();c.map=plateTexture(entry.number);c.color.setHex(0xffffff);}
-   if(c!==m)own.push(c);swap.set(m,c);
+   // A clone loses its shader patch: the coat goes on again, the team's finish over it (car-finish.js).
+   if(c!==m){finishMaterial(c,{rosterFinish:entry.finish});own.push(c);}swap.set(m,c);
   }
   return swap.get(m);
  };

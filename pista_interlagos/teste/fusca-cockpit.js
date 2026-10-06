@@ -2,6 +2,7 @@ import * as THREE from 'three';
 import {autoMeterFace,canvasTexture} from './cockpit-materials.js';
 import {needleAngle} from './cockpit-instruments.js';
 import {clamp} from './physics.js';
+import {finishMaterial} from './car-finish.js';
 
 // The player's Fusca, seen from the driver's seat (fusca.js FuscaBody): the dials the exporter made in its dash
 // (modelo_3d/scripts/fusca_cabine.py, with UVs) get their faces and live needles, the rear-view mirror's glass
@@ -76,7 +77,7 @@ export class FuscaCockpit {
   };
   dial('Mostrador_velocimetro',vdoFace(512),{speed:{length:.86,tail:.18,width:.03,material:white},fuel:{length:.44,tail:0,width:.022,material:red}});
   dial('Mostrador_contagiros',autoMeterFace('tach',512),{tach:{length:.86,tail:.2,width:.028,material:red}});
-  const lens=found.Luz_troca?.[0];if(lens){this.lamp=lens.material=make(lens.material.clone());}
+  const lens=found.Luz_troca?.[0];if(lens){this.lamp=lens.material=make(finishMaterial(lens.material.clone()));}
  }
  // Each frame: speed (km/h), rpm and the fuel left (0-1).
  update(speed,rpm,fuel=1){

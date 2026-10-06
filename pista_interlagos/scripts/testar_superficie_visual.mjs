@@ -1,9 +1,14 @@
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import * as THREE from '../teste/node_modules/three/build/three.module.js';
-import {createTrackSurface,createGuardrails,createCurbs,TRACK_DETAIL} from '../teste/track-surface.js';
+import {createTrackSurface,createGuardrails,createCurbs,TRACK_DETAIL,ASPHALT_PROFILES,asphaltProfile} from '../teste/track-surface.js';
 
 const data=JSON.parse(fs.readFileSync(new URL('../dados/pista.json',import.meta.url)));data.meta.id='interlagos';
+// Each circuit's asphalt has its own age: new roads darker with few sealed cracks, old ones greyer.
+assert.deepEqual(asphaltProfile(data),ASPHALT_PROFILES.interlagos,'Interlagos keeps the reference asphalt');
+assert(asphaltProfile({meta:{id:'chapeco'}}).tone<1&&asphaltProfile({meta:{id:'chapeco'}}).tar<0&&asphaltProfile({meta:{id:'piracicaba'}}).tar>0,'new roads darker, old ones sealed');
+assert.equal(asphaltProfile({meta:{id:'chapeco',asphalt:{tone:.5}}}).tone,.5,'meta.asphalt overrides the profile');
+assert.deepEqual(asphaltProfile({meta:{id:'nova'}}),ASPHALT_PROFILES.interlagos,'an unknown circuit falls back to the reference');
 // Textures themselves are browser assets. Mock only the loader so the same material,
 // geometry and live quality transitions run without a DOM or graphics driver.
 const original=THREE.TextureLoader.prototype.loadAsync;

@@ -23,26 +23,53 @@ export const CINEMATIC_QUALITY=Object.freeze({
 export const LOOK={
  exposure:1.0,
  // Eye adaptation: the mean scene brightness it aims for, how far it may push the exposure
- // (dark cockpit, garages) and how fast it follows, per second.
- adaptKey:.14,adaptRange:[.85,1.65],adaptSpeed:1.35,
- // Afternoon white balance: a warm key light, slightly cooler shadows.
- whiteBalance:[1.025,1.0,.975],
- saturation:.96,greenSaturation:.9,contrast:1.075,
+ // (dark cockpit, garages; down for wide sunlit views under the strong sun) and how fast it
+ // follows, per second.
+ adaptKey:.16,adaptRange:[.72,1.65],adaptSpeed:1.35,
+ // Clear-day white balance: a touch warm in the sun, slightly cooler shadows; a clean, saturated,
+ // contrasty picture like a race broadcast on a sunny day.
+ whiteBalance:[1.015,1.0,.985],
+ saturation:1.06,greenSaturation:.9,contrast:1.16,
+ // toe: below mid grey the contrast eases into black, reaching it at this slope, instead of clipping.
+ // The clip turned all under about 7% (the shade of a car on the asphalt, tyres, wheel wells) pure black,
+ // and after the filmic curve's own toe the sky's fill in a cast shadow (a fifth of the sun) sank to
+ // about 5%; a little over 1 gives that shade its skylight back, black stays black.
+ toe:1.4,
  shadowTint:[.975,.995,1.03],highlightTint:[1.025,1.0,.965],
- vignette:.18,grain:.007,aberration:.00035,
- bloom:.12,bloomThreshold:1.25,bloomKnee:.65,
+ vignette:.12,grain:.007,aberration:.00035,
+ // Bloom: hot highlights only (sun on chrome and clear coat), averaged so a single glinting pixel
+ // cannot flicker the glow on and off. The threshold is in exposed units (after eye adaptation):
+ // sunlit white paint and asphalt reach about 1.4, specular glints far more.
+ bloom:.12,bloomThreshold:1.8,bloomKnee:.65,
  // Ambient occlusion: radius in metres, strength and the distance it fades out. A surface
  // drawn with alpha -1 (the door mirrors' glass) shows light from elsewhere and takes no
  // occlusion; materials write 0..1 there (foliage and lake water their cut-out alpha).
  aoRadius:1.35,aoIntensity:2.4,aoBias:.18,aoFade:[85,180],
+ // The occlusion multiplies the whole picture (sun included): its floor keeps some sky in the deepest
+ // shade, under a car or a stand, so a cast shadow never goes to black.
+ aoFloor:.35,
  // Aerial perspective: metres of clear air, density of the haze and how fast it thins with height.
- hazeDensity:.00023,hazeFalloff:.012,hazeStart:70,hazeColor:[.59,.67,.77],hazeSun:[1.0,.83,.63],
+ hazeDensity:.00014,hazeFalloff:.012,hazeStart:140,hazeColor:[.59,.67,.77],hazeSun:[1.0,.83,.63],
  // Sun through the lens: players lost the road to it, so the glow and streak stay modest.
- flare:.34,streak:.14,
+ // ghosts: the lens's reflections of the sun, mirrored through the centre (half the old .05×flare).
+ flare:.34,streak:.14,ghosts:.0085,
  // 0 picture, 1 occlusion only (for tuning).
  debug:0
 };
 
+// Speed smear (Desfoque de velocidade), driven by the camera's own motion and not the car's speed, so a paused
+// frame, a cut, the photo and the podium are sharp: shutter (s) of the streak; it builds from 'from' to 'full'
+// of the followed car's top speed (the Fusca feels it as the Opala does), eased over 'ease' s; it starts 'near'
+// metres from the lens (the asphalt under the bottom of the frame) and is capped at 'cap' of the picture's size
+// close by and 'farCap' past about 20 m, so the crowd stays legible. SMEAR_CARS: the cars kept sharp (cinematic
+// render context smearCars, main.js).
+export const SPEED_SMEAR=Object.freeze({shutter:1/360,from:.3,full:.88,ease:.15,near:1.5,cap:.032,farCap:.008,cut:150});
+// The phones' road smear (render context roadSmear: Médio's film look with the full smear off): only the near road,
+// three taps of colour with no depth per tap (the riding cars' boxes alone keep them out), nothing past about 20 m.
+export const ROAD_SMEAR=Object.freeze({taps:3,cap:.022,farCap:0});
+export const SMEAR_CARS=4;
+// The smear's strength for a camera moving at speed (m/s) behind a car with this top speed.
+export function smearStrength(speed,top=60){const t=THREE.MathUtils.clamp((speed/Math.max(top,1)-SPEED_SMEAR.from)/(SPEED_SMEAR.full-SPEED_SMEAR.from),0,1);return t*t*(3-2*t);}
 const vertexShader=`varying vec2 vUv;void main(){vUv=position.xy*.5+.5;gl_Position=vec4(position.xy,0.0,1.0);}`;
 const depthCommon=`
 uniform sampler2D tDepth;uniform float cameraNear,cameraFar;uniform vec2 projScale,depthSize;
@@ -92,12 +119,19 @@ void main(){
  gl_FragColor=vec4(sum/weight,z,0.0,1.0);
 }`;
 // Bloom: soft-threshold prefilter and a dual-filter pyramid.
-const prefilterShader=`uniform sampler2D tInput;uniform vec2 texel;uniform float threshold,knee;varying vec2 vUv;
+// Each tap is weighted by 1/(1+luma) (Karis): a sub-pixel glint on chrome or clear coat, there one
+// frame and gone the next, adds a small steady glow instead of a flashing blob. The threshold is
+// on the picture as exposed (the last frame's eye adaptation): white paint and lines in full sun
+// stay under it on every circuit and in the dark cockpit alike, only specular glints cross it.
+// Each tap is thresholded before the average: a brake lamp a few pixels wide (brake-lights.js, its
+// lens brighter than white on purpose) keeps its glow instead of being averaged under the threshold.
+const prefilterShader=`uniform sampler2D tInput,tExposure;uniform vec2 texel,adaptRange;uniform float threshold,knee,adaptKey,exposure,adapted;varying vec2 vUv;
+vec3 bright(vec3 c,float scale){c=min(c,vec3(60.0));float br=max(c.r,max(c.g,c.b))*scale,soft=clamp(br-threshold+knee,0.0,2.0*knee);soft=soft*soft/(4.0*knee+1e-4);return c*max(soft,br-threshold)/max(br,1e-4);}
+vec4 karis(vec3 c){return vec4(c,1.0)/(1.0+dot(c,vec3(.2126,.7152,.0722)));}
 void main(){
- vec3 c=(texture2D(tInput,vUv+texel*vec2(-.5,-.5)).rgb+texture2D(tInput,vUv+texel*vec2(.5,-.5)).rgb+texture2D(tInput,vUv+texel*vec2(-.5,.5)).rgb+texture2D(tInput,vUv+texel*vec2(.5,.5)).rgb)*.25;
- c=min(c,vec3(60.0));
- float br=max(c.r,max(c.g,c.b)),soft=clamp(br-threshold+knee,0.0,2.0*knee);soft=soft*soft/(4.0*knee+1e-4);
- gl_FragColor=vec4(c*max(soft,br-threshold)/max(br,1e-4),1.0);
+ float scale=exposure*mix(1.0,clamp(adaptKey/exp(texture2D(tExposure,vec2(.5)).r),adaptRange.x,adaptRange.y),adapted);
+ vec4 s=karis(bright(texture2D(tInput,vUv+texel*vec2(-.5,-.5)).rgb,scale))+karis(bright(texture2D(tInput,vUv+texel*vec2(.5,-.5)).rgb,scale))+karis(bright(texture2D(tInput,vUv+texel*vec2(-.5,.5)).rgb,scale))+karis(bright(texture2D(tInput,vUv+texel*vec2(.5,.5)).rgb,scale));
+ gl_FragColor=vec4(s.rgb/s.a,1.0);
 }`;
 const downShader=`uniform sampler2D tInput;uniform vec2 texel;varying vec2 vUv;
 void main(){vec3 c=texture2D(tInput,vUv).rgb*4.0;
@@ -139,9 +173,20 @@ void main(){float sum=0.0,wsum=0.0;
 const compositeShader=`${depthCommon}
 uniform sampler2D tColor,tAO,tBloom,tSun,tExposure,tDof;uniform float dofFocus,dofAmount;uniform float adaptKey;uniform vec2 adaptRange;
 uniform vec2 resolution,aoSize;uniform mat4 cameraWorld;uniform vec3 camPos,sunDir;uniform vec2 sunUV;uniform float sunFront;
-uniform float debugView,exposure,time,speedBlur,aoStrength,bloomStrength,vignette,grain,aberration,saturation,greenSaturation,contrast,flare,streak,clarity;
+uniform float debugView,exposure,time,speedBlur,aoStrength,bloomStrength,vignette,grain,aberration,saturation,greenSaturation,contrast,toe,aoFloor,flare,streak,ghosts,clarity;
 uniform vec3 whiteBalance,shadowTint,highlightTint,hazeColor,hazeSun;uniform float hazeDensity,hazeFalloff,hazeStart,hazeBase;
+uniform vec3 smearShift;uniform vec4 smearBoxes[4],smearPlanes[4],smearFar;uniform vec4 smearReach;
 varying vec2 vUv;
+// The cars riding with the camera (speed smear): inside one's screen box, standing above the road under it and
+// nearer than its far end; the road inside the box is still the road and smears like the rest.
+float riding(vec2 p,vec3 v){float on=0.0;
+ for(int i=0;i<4;i++){vec4 b=smearBoxes[i];
+  if(b.z>b.x&&p.x>b.x&&p.x<b.z&&p.y>b.y&&p.y<b.w&&-v.z<smearFar[i]&&dot(smearPlanes[i].xyz,v)-smearPlanes[i].w>.12)on=1.0;}
+ return on;}
+// The road smear's cheaper test (no depth): inside any riding car's box.
+float boxed(vec2 p){float on=0.0;
+ for(int i=0;i<4;i++){vec4 b=smearBoxes[i];if(b.z>b.x&&p.x>b.x&&p.x<b.z&&p.y>b.y&&p.y<b.w)on=1.0;}
+ return on;}
 vec3 RRTAndODTFit(vec3 v){vec3 a=v*(v+.0245786)-.000090537,b=v*(.983729*v+.432951)+.238081;return a/b;}
 vec3 aces(vec3 c){
  const mat3 i=mat3(vec3(.59719,.076,.0284),vec3(.35458,.90834,.13383),vec3(.04823,.01566,.83777));
@@ -170,16 +215,26 @@ void main(){
   color=clamp(color+detail*clarity,low,high);
  }
  #endif
- // Peripheral speed cues preserve the bonnet, cockpit and the distant racing line.
- if(speedBlur>.001&&dist>3.5&&dist<240.0&&edge>.06&&center.a>=0.0){
-  vec3 acc=color;float w=1.0;
-  float smear=speedBlur*.024*smoothstep(.06,.28,edge)*smoothstep(3.5,9.0,dist)*(1.0-smoothstep(100.0,240.0,dist));
-  for(int i=1;i<=4;i++){
-   float k=float(i)/4.0;vec2 tap=clamp(uv-fromCenter*k*smear,vec2(.001),vec2(.999));
-   float depthWeight=exp(-abs(viewZAt(tap)-viewPos.z)/max(1.0,-viewPos.z*.08));
-   float weight=(1.0-k*.5)*depthWeight;acc+=texture2D(tColor,tap).rgb*weight;w+=weight;
+ // Speed smear (SPEED_SMEAR): the still world as it streams past the moving camera during a short shutter
+ // (smearShift: the camera's own travel in view space), so the near asphalt and the road's edges smear most and
+ // the far crowd hardly at all (a mid-distance cap keeps it legible); the cars riding with the camera stay sharp.
+ if(speedBlur>.001&&d<1.0&&center.a>=0.0&&dist>smearReach.x&&riding(uv,viewPos)<.5){
+  float z=-viewPos.z;vec3 q=viewPos-smearShift;
+  vec2 flow=(projScale*q.xy/max(-q.z,.05)-projScale*viewPos.xy/z)*.5;
+  float len=length(flow),cap=mix(smearReach.y,smearReach.z,smoothstep(8.0,22.0,z))*smoothstep(smearReach.x,smearReach.x+.6,dist);
+  if(len>cap)flow*=cap/len;
+  if(min(len,cap)*resolution.y>1.5){
+   // Six taps across the shutter (smearReach.w; the phones' road smear three, colour only), centred on now,
+   // jittered per pixel so they never band.
+   vec3 acc=color;float w=1.0,jitter=ign(gl_FragCoord.xy)-.5,taps=smearReach.w;bool full=taps>4.5;
+   for(int i=0;i<6;i++){
+    if(float(i)>=taps)break;
+    vec2 tap=clamp(uv+flow*((float(i)+.5+jitter*.9)/taps-.5),vec2(.001),vec2(.999));float weight;
+    if(full){vec3 tv=viewPosAt(tap);weight=exp(-abs(tv.z-viewPos.z)/max(1.0,z*.12))*(1.0-riding(tap,tv));}else weight=1.0-boxed(tap);
+    acc+=texture2D(tColor,tap).rgb*weight;w+=weight;
+   }
+   color=acc/w;
   }
-  color=acc/w;
  }
  #ifdef BLOOM
  // Long-lens depth of field (broadcast camera and opening shots only).
@@ -192,7 +247,7 @@ void main(){
   for(int j=0;j<2;j++)for(int i=0;i<2;i++){
    vec2 c=(base+vec2(float(i),float(j))+.5)/aoSize;vec2 s=texture2D(tAO,c).rg;
    float w=(i==0?1.0-f.x:f.x)*(j==0?1.0-f.y:f.y)*exp(-abs(s.g-z)/(.03*z+.05))+1e-4;ao+=s.r*w;wsum+=w;}
-  ao=mix(1.0,ao/wsum,clamp(1.0+texture2D(tColor,uv).a,0.0,1.0));color*=mix(1.0,ao,aoStrength);
+  ao=mix(1.0,max(ao/wsum,aoFloor),clamp(1.0+texture2D(tColor,uv).a,0.0,1.0));color*=mix(1.0,ao,aoStrength);
   if(debugView>.5){gl_FragColor=vec4(vec3(ao),1.0);return;}
  }
  #endif
@@ -213,12 +268,15 @@ void main(){
   vec3 sunLight=vec3(1.0,.86,.66)*sunSeen;
   color+=sunLight*(exp(-r*9.0)*.35+exp(-r*38.0)*.9)*flare;
   color+=vec3(1.0,.8,.62)*sunSeen*exp(-abs(toSun.y)*170.0)*exp(-abs(toSun.x)*2.4)*streak;
-  vec2 axis=vec2(.5)-sunUV;
+  // Ghosts: soft discs with no rim (a hard-edged dot read as a speck on the car), fading out as the sun
+  // nears the frame's edge instead of popping when it leaves.
+  vec2 axis=vec2(.5)-sunUV;float ghostFade=ghosts*smoothstep(0.0,.15,min(min(sunUV.x,1.0-sunUV.x),min(sunUV.y,1.0-sunUV.y)));
   for(int i=0;i<4;i++){
    float t=float(i)==0.0?.55:float(i)==1.0?1.1:float(i)==2.0?1.45:1.85;
    vec2 g=((sunUV+axis*t)-uv)*aspect;float size=float(i)==0.0?.035:float(i)==1.0?.07:float(i)==2.0?.022:.11;
    vec3 tint=float(i)==0.0?vec3(.55,.8,1.0):float(i)==1.0?vec3(1.0,.7,.45):float(i)==2.0?vec3(.6,1.0,.7):vec3(.8,.6,1.0);
-   color+=tint*sunSeen*flare*.05*(1.0-smoothstep(size*.55,size,length(g)));
+   float ghost=1.0-smoothstep(0.0,size,length(g));
+   color+=tint*sunSeen*ghostFade*ghost*ghost;
   }
  }
  #endif
@@ -229,7 +287,10 @@ void main(){
  color=toSRGB(color);
  float l=luma(color);
  color*=mix(shadowTint,highlightTint,smoothstep(.15,.75,l));
- color=clamp((color-.5)*contrast+.5,0.0,1.0);
+ // Contrast round the middle; under it a toe with the same slope there that eases into black at the
+ // slope LOOK.toe, rather than clipping at about 7% (a cubic through black and mid grey).
+ vec3 steep=(color-.5)*contrast+.5,t=2.0*max(color,0.0);
+ color=clamp(mix(.5*t*(toe+t*(3.0-2.0*toe-contrast+t*(toe+contrast-2.0))),steep,step(.5,color)),0.0,1.0);
  color=mix(color,color*color*(3.0-2.0*color),.22);
  l=luma(color);
  float green=clamp((color.g-max(color.r,color.b))*4.0,0.0,1.0);
@@ -241,6 +302,47 @@ void main(){
  color+=n*grain*(1.0-l*.6);
  gl_FragColor=vec4(clamp(color,0.0,1.0),1.0);
 }`;
+
+// Shader programs built a few at a time while the page keeps answering. One compileAsync of the whole
+// circuit (a level switch, the Simples look) built about a hundred programs of some 100 KB of source
+// each in a single task: seconds of frozen page on a busy machine. The scene goes in subtrees of at
+// most SLICE_MATERIALS materials (one new program took 0.1 to 0.7 s on a loaded PC), as many per task
+// as fit in SLICE_MS. Once the GPU has linked them (KHR_parallel_shader_compile), each program's first
+// use (uniform lookup, the driver's log) and the textures waiting for an upload (a new anisotropy
+// re-uploads the asphalt's 2048 px maps) go the same way, so the first frame after it does not pay for
+// them all at once. target(): the render target the programs are for, asked again at every slice (null:
+// the screen).
+const SLICE_MATERIALS=3,SLICE_MS=24;
+export async function compileInSlices(renderer,scene,camera,target=()=>null){
+ const drawn=o=>o.isMesh||o.isPoints||o.isLine||o.isSprite,units=[],wait=ms=>new Promise(done=>setTimeout(done,ms));
+ // compile() counts the lights below the subtree it is given on top of the scene's: a slice holds none
+ // (a drawn object with a light under it is left to a last whole-scene pass).
+ const fits=root=>{const seen=new Set(),stack=[root];while(stack.length){const o=stack.pop();if(o.isLight)return false;
+  if(drawn(o))for(const m of [].concat(o.material??[])){seen.add(m);if(seen.size>SLICE_MATERIALS)return false;}for(const c of o.children)stack.push(c);}return true;};
+ const lit=new Map(),holdsLight=o=>{let light=lit.get(o);if(light===undefined){light=false;o.traverse(c=>{light||=!!c.isLight;});lit.set(o,light);}return light;};
+ let whole=false;
+ const split=o=>{if(fits(o))units.push(o);else if(!drawn(o))for(const c of o.children)split(c);else if(holdsLight(o))whole=true;else units.push(o);};
+ split(scene);
+ // compile() also walks the whole scene for its lights at every call: some 6000 objects, a millisecond,
+ // times the two or three thousand subtrees of a circuit. The top-level children with no light are hidden
+ // from that walk for the task and shown again before it ends (compile() takes every material, shown or not).
+ let t=performance.now();const pace=async()=>{if(performance.now()-t>SLICE_MS){await wait(0);t=performance.now();}};
+ for(let i=0;i<units.length;){
+  const previous=renderer.getRenderTarget(),hidden=scene.children.filter(c=>c.visible&&!holdsLight(c));renderer.setRenderTarget(target());for(const c of hidden)c.visible=false;
+  try{do renderer.compile(units[i++],camera,scene);while(i<units.length&&performance.now()-t<SLICE_MS);}finally{for(const c of hidden)c.visible=true;renderer.setRenderTarget(previous);}
+  await pace();
+ }
+ if(whole){const previous=renderer.getRenderTarget();renderer.setRenderTarget(target());try{renderer.compile(scene,camera);}finally{renderer.setRenderTarget(previous);}}
+ // Linked by the GPU in parallel meanwhile; a lost context never answers, so not waited for forever.
+ const programs=renderer.info.programs;for(const until=performance.now()+20000;programs.some(p=>!p.isReady())&&performance.now()<until;)await wait(10);
+ t=performance.now();
+ for(const p of [...programs]){if(p.program&&p.isReady())p.getUniforms();await pace();}
+ // The maps of what is shown (a hidden object's wait until it shows, as before); a cheap bind when uploaded already.
+ const textures=new Set(),materials=new Set(),add=v=>{if(v?.isTexture&&!v.isRenderTargetTexture&&!v.isVideoTexture&&v.version>0&&v.image&&v.image.complete!==false)textures.add(v);};
+ scene.traverseVisible(o=>{if(drawn(o))for(const m of [].concat(o.material??[]))materials.add(m);});
+ for(const m of materials){for(const key in m)add(m[key]);if(m.uniforms)for(const u of Object.values(m.uniforms)){const v=u?.value;if(Array.isArray(v))v.forEach(add);else add(v);}}
+ for(const texture of textures){renderer.initTexture(texture);await pace();}
+}
 
 export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full',quality=mobile?'medio':'alto',features:wanted={}}={}){
  if(!Object.hasOwn(CINEMATIC_QUALITY,quality))quality=mobile?'medio':'alto';
@@ -256,14 +358,16 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
  const depthUniforms=()=>({tDepth:{value:null},cameraNear:{value:.1},cameraFar:{value:1000},projScale:{value:new THREE.Vector2(1,1)},depthSize:{value:new THREE.Vector2(1,1)}});
  const aoMaterial=pass(aoShader,{...depthUniforms(),fullTexel:{value:new THREE.Vector2()},radius:{value:look.aoRadius},intensity:{value:look.aoIntensity},bias:{value:look.aoBias},frame:{value:0},fade:{value:new THREE.Vector2(...look.aoFade)}},{SAMPLES:profile().aoSamples});
  const blurMaterial=pass(blurShader,{tInput:{value:null},direction:{value:new THREE.Vector2()}});
- const prefilter=pass(prefilterShader,{tInput:{value:null},texel:{value:new THREE.Vector2()},threshold:{value:look.bloomThreshold},knee:{value:look.bloomKnee}});
+ const prefilter=pass(prefilterShader,{tInput:{value:null},texel:{value:new THREE.Vector2()},threshold:{value:look.bloomThreshold},knee:{value:look.bloomKnee},tExposure:{value:null},adaptKey:{value:.2},adaptRange:{value:new THREE.Vector2(1,1)},exposure:{value:1},adapted:{value:0}});
  const down=pass(downShader,{tInput:{value:null},texel:{value:new THREE.Vector2()}});
  const up=pass(upShader,{tInput:{value:null},tBase:{value:null},texel:{value:new THREE.Vector2()}});
  const sunMaterial=pass(sunShader,{tDepth:{value:null},tColor:{value:null},sunUV:{value:new THREE.Vector2()},aspect:{value:new THREE.Vector2(1,1)}});
  const compositeUniforms={...depthUniforms(),tColor:{value:null},tAO:{value:null},tBloom:{value:null},tSun:{value:null},
   resolution:{value:new THREE.Vector2()},aoSize:{value:new THREE.Vector2()},cameraWorld:{value:new THREE.Matrix4()},camPos:{value:new THREE.Vector3()},
   sunDir:{value:new THREE.Vector3(0,1,0)},sunUV:{value:new THREE.Vector2()},sunFront:{value:0},time:{value:0},speedBlur:{value:0},
-  tDof:{value:null},dofFocus:{value:10},dofAmount:{value:0},tExposure:{value:null},adaptKey:{value:.2},adaptRange:{value:new THREE.Vector2(1,1)},debugView:{value:0},exposure:{value:0},aoStrength:{value:0},bloomStrength:{value:0},vignette:{value:0},grain:{value:0},aberration:{value:0},saturation:{value:1},greenSaturation:{value:1},contrast:{value:1},flare:{value:0},streak:{value:0},clarity:{value:0},
+  smearShift:{value:new THREE.Vector3()},smearBoxes:{value:Array.from({length:SMEAR_CARS},()=>new THREE.Vector4())},smearPlanes:{value:Array.from({length:SMEAR_CARS},()=>new THREE.Vector4())},smearFar:{value:new THREE.Vector4()},
+  smearReach:{value:new THREE.Vector4(SPEED_SMEAR.near,SPEED_SMEAR.cap,SPEED_SMEAR.farCap,6)},
+  tDof:{value:null},dofFocus:{value:10},dofAmount:{value:0},tExposure:{value:null},adaptKey:{value:.2},adaptRange:{value:new THREE.Vector2(1,1)},debugView:{value:0},exposure:{value:0},aoStrength:{value:0},bloomStrength:{value:0},vignette:{value:0},grain:{value:0},aberration:{value:0},saturation:{value:1},greenSaturation:{value:1},contrast:{value:1},toe:{value:1},aoFloor:{value:0},flare:{value:0},streak:{value:0},ghosts:{value:0},clarity:{value:0},
   whiteBalance:{value:new THREE.Vector3()},shadowTint:{value:new THREE.Vector3()},highlightTint:{value:new THREE.Vector3()},hazeColor:{value:new THREE.Vector3()},hazeSun:{value:new THREE.Vector3()},
   hazeDensity:{value:0},hazeFalloff:{value:0},hazeStart:{value:0},hazeBase:{value:0}};
  const tent=pass(tentShader,{tInput:{value:null},texel:{value:new THREE.Vector2()}});
@@ -272,14 +376,17 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
  const composites=new Map();
  const composite=()=>{const ao=stats.ao,lens=stats.lens,detail=level==='full',key=(ao?'ao':'')+(lens?'lens':'')+(detail?'detail':'');let m=composites.get(key);if(!m){m=pass(compositeShader,compositeUniforms,{...(ao?{AO:''}:{}),...(lens?{BLOOM:''}:{}),...(detail?{DETAIL:''}:{})});composites.set(key,m);}return m;};
  const size=new THREE.Vector2(),sunProjected=new THREE.Vector3(),cameraDirection=new THREE.Vector3();
+ // The camera's own velocity for the smear (world m/s, eased), where it was last frame and the view it rode.
+ const smear={velocity:new THREE.Vector3(),last:new THREE.Vector3(),step:new THREE.Vector3(),view:new THREE.Matrix3(),ready:false,mode:'',strength:0,road:false};
  let width=0,height=0,frame=0,time=0,previousToneMapping=renderer.toneMapping,previousColorSpace=renderer.outputColorSpace;
  const stats={level,quality,passes:0,width:0,height:0,samples:0,sunVisible:0,ao:false,lens:false,aoSamples:0,bloomScale:0};
+ // Multisampling of the HDR frame as asked (features.samples): 4x up to about 1080p, fewer on very
+ // large drawing buffers (a 4x half-float frame at 4K would take hundreds of MB of video memory).
+ const samplesFor=(w,h)=>Math.min(features.samples,w*h<2.3e6?4:w*h<5.2e6?2:0,renderer.capabilities.maxSamples??4),planned=new THREE.Vector2();
 
  function allocate(){
   dispose();
-  // Multisampling of the HDR frame as asked (features.samples): 4x up to about 1080p, fewer on very
-  // large drawing buffers (a 4x half-float frame at 4K would take hundreds of MB of video memory).
-  const pixels=width*height,samples=Math.min(features.samples,pixels<2.3e6?4:pixels<5.2e6?2:0,renderer.capabilities.maxSamples??4);
+  const samples=samplesFor(width,height);
   hdr=new THREE.WebGLRenderTarget(width,height,{type:THREE.HalfFloatType,samples,depthTexture:new THREE.DepthTexture(width,height,THREE.FloatType)});
   hdr.texture.minFilter=hdr.texture.magFilter=THREE.LinearFilter;hdr.texture.generateMipmaps=false;
   // Passes that only draw for the player's own view (lake reflections) treat this target as the screen.
@@ -301,6 +408,21 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
   Object.assign(stats,{passes:0,width:0,height:0,samples:0,sunVisible:0,ao:false,lens:false,aoSamples:0,bloomScale:0});
  }
  function draw(material,output){quad.material=material;renderer.setRenderTarget(output);renderer.render(quadScene,quadCamera);stats.passes++;}
+ // Speed smear (SPEED_SMEAR) for the views that ride with the car: the camera's travel this frame, eased; a
+ // paused frame (dt 0), a cut (another view, or a jump faster than SPEED_SMEAR.cut) start it from nothing.
+ // road: the phones' lighter road smear (ROAD_SMEAR) where the full one is off.
+ function updateSmear(camera,dt,mode,top,cars,road){
+  const u=compositeUniforms,riding=mode==='chase'||mode==='close'||mode==='far'||mode==='hood'||mode==='cockpit',full=features.motionBlur;
+  smear.step.subVectors(camera.position,smear.last);
+  if(dt>0&&riding&&smear.ready&&mode===smear.mode&&smear.step.length()<SPEED_SMEAR.cut*dt)smear.velocity.lerp(smear.step.divideScalar(dt),1-Math.exp(-dt/SPEED_SMEAR.ease));
+  else smear.velocity.set(0,0,0);
+  smear.last.copy(camera.position);smear.ready=true;smear.mode=mode;smear.road=!full&&!!road;
+  smear.strength=(full||road)&&riding?smearStrength(smear.velocity.length(),top||60):0;u.speedBlur.value=smear.strength;
+  if(!smear.strength)return;
+  if(full)u.smearReach.value.set(SPEED_SMEAR.near,SPEED_SMEAR.cap,SPEED_SMEAR.farCap,6);else u.smearReach.value.set(SPEED_SMEAR.near,ROAD_SMEAR.cap,ROAD_SMEAR.farCap,ROAD_SMEAR.taps);
+  u.smearShift.value.copy(smear.velocity).applyMatrix3(smear.view.setFromMatrix4(camera.matrixWorldInverse)).multiplyScalar(SPEED_SMEAR.shutter*smear.strength);
+  for(let i=0;i<SMEAR_CARS;i++){const c=cars?.[i];if(c){u.smearBoxes.value[i].fromArray(c.box);u.smearPlanes.value[i].fromArray(c.plane);}else u.smearBoxes.value[i].set(0,0,0,0);u.smearFar.value.setComponent(i,c?c.far:0);}
+ }
  // Materials compile for the render target they draw into: with the look on, the scene is
  // linear and un-tone-mapped both on screen and off it, so load-time compiles stay valid.
  function applyRendererState(){
@@ -318,8 +440,15 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
   // {ao, lens, motionBlur, samples}: the targets are rebuilt at the next frame when one of them changes.
   get features(){return {...features};},
   setFeatures(patch){const before=JSON.stringify(features);for(const key of Object.keys(CINEMATIC_FEATURES))if(patch&&typeof patch[key]===typeof CINEMATIC_FEATURES[key])features[key]=patch[key];if(JSON.stringify(features)!==before)width=height=0;return {...features};},
-  // context: {dt, speed (m/s), mode (camera), hazeBase (m)}
-  render(scene,camera,{dt=0,speed=0,mode='chase',hazeBase=0,dof=null}={}){
+  // The multisampling the HDR frame draws with from now on: a level, feature or size change only marks
+  // the target stale (stats.samples keeps the old one until the next frame rebuilds it), and the cars'
+  // clear coat must follow at once (car-reflections.js).
+  samples(){if(level==='off')return 0;renderer.getDrawingBufferSize(planned);return samplesFor(planned.x,planned.y);},
+  // context: {dt (0 paused), mode (camera; anything but a riding view, e.g. 'still', has no smear), hazeBase (m),
+  // topSpeed (m/s, the followed car's), smearCars: up to SMEAR_CARS {box:[x0,y0,x1,y1] (uv, from the bottom left),
+  // plane:[x,y,z,w] (the road under it in view space: up . p - w is the height), far (m)} kept sharp, roadSmear:
+  // the phones' light road smear (ROAD_SMEAR) while the full one (features.motionBlur) is off}
+  render(scene,camera,{dt=0,mode='chase',hazeBase=0,dof=null,topSpeed=60,smearCars=null,roadSmear=false}={}){
    if(level==='off'){
     renderer.getDrawingBufferSize(size);
     Object.assign(stats,{passes:1,width:size.x,height:size.y,samples:0,sunVisible:0,ao:false,lens:false,aoSamples:0,bloomScale:0});
@@ -346,6 +475,7 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
    }
    if(stats.lens){
     prefilter.uniforms.tInput.value=hdr.texture;prefilter.uniforms.texel.value.set(profile().bloomScale*.5/width,profile().bloomScale*.5/height);prefilter.uniforms.threshold.value=look.bloomThreshold;prefilter.uniforms.knee.value=look.bloomKnee;
+    const pu=prefilter.uniforms;pu.tExposure.value=adapt[0].texture;pu.adapted.value=adaptReset?0:1;pu.adaptKey.value=look.adaptKey;pu.adaptRange.value.set(...look.adaptRange);pu.exposure.value=look.exposure;
     draw(prefilter,bloom[0].down);
     for(let i=1;i<bloom.length;i++){down.uniforms.tInput.value=bloom[i-1].down.texture;down.uniforms.texel.value.set(1/bloom[i-1].w,1/bloom[i-1].h);draw(down,bloom[i].down);}
     let source=bloom[bloom.length-1].down;
@@ -375,24 +505,26 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
    adaptMaterial.uniforms.rate.value=adaptReset?1:1-Math.exp(-Math.min(dt,.1)*look.adaptSpeed);draw(adaptMaterial,adapt[1]);
    adapt.reverse();adaptReset=false;u.tExposure.value=adapt[0].texture;u.adaptKey.value=look.adaptKey;u.adaptRange.value.set(...look.adaptRange);
    u.tColor.value=hdr.texture;u.resolution.value.set(width,height);u.cameraWorld.value.copy(camera.matrixWorld);u.camPos.value.copy(camera.position);u.time.value=time;
-   u.debugView.value=look.debug;u.exposure.value=look.exposure;u.aoStrength.value=1;u.bloomStrength.value=look.bloom;u.vignette.value=look.vignette;u.grain.value=look.grain;u.aberration.value=look.aberration;
-   u.saturation.value=look.saturation;u.greenSaturation.value=look.greenSaturation;u.contrast.value=look.contrast;u.flare.value=look.flare;u.streak.value=look.streak;u.clarity.value=profile().clarity;
+   u.debugView.value=look.debug;u.exposure.value=look.exposure;u.aoStrength.value=1;u.aoFloor.value=look.aoFloor;u.toe.value=look.toe;u.bloomStrength.value=look.bloom;u.vignette.value=look.vignette;u.grain.value=look.grain;u.aberration.value=look.aberration;
+   u.saturation.value=look.saturation;u.greenSaturation.value=look.greenSaturation;u.contrast.value=look.contrast;u.flare.value=look.flare;u.streak.value=look.streak;u.ghosts.value=look.ghosts;u.clarity.value=profile().clarity;
    u.whiteBalance.value.set(...look.whiteBalance);u.shadowTint.value.set(...look.shadowTint);u.highlightTint.value.set(...look.highlightTint);
    u.hazeColor.value.set(...look.hazeColor);u.hazeSun.value.set(...look.hazeSun);u.hazeDensity.value=look.hazeDensity;u.hazeFalloff.value=look.hazeFalloff;u.hazeStart.value=look.hazeStart;u.hazeBase.value=hazeBase;
-   // A little smear at speed, only for the cameras that ride with the car.
-   const riding=mode==='chase'||mode==='close'||mode==='hood'||mode==='cockpit';
-   u.speedBlur.value=features.motionBlur&&riding?THREE.MathUtils.clamp((speed-34)/45,0,1):0;
+   updateSmear(camera,dt,mode,topSpeed,smearCars,roadSmear);
    draw(composite(),null);
    info.render.calls=calls;info.render.triangles=triangles;info.autoReset=autoReset;
    stats.sunVisible=stats.lens?u.sunFront.value:0;
   },
-  // Compile the scene's programs for the off-screen target during loading.
+  // Compile the scene's programs for the off-screen target (loading, a level switch) a slice at a time
+  // (compileInSlices), and the screen passes the next frame draws with (another set of parts, Ultra's
+  // occlusion samples), which otherwise compiled inside that frame.
   async compile(scene,camera){
-   if(level==='off')return renderer.compileAsync(scene,camera);
-   renderer.getDrawingBufferSize(size);if(!hdr||size.x!==width||size.y!==height){width=size.x;height=size.y;allocate();}
-   const previous=renderer.getRenderTarget();renderer.setRenderTarget(hdr);
-   let pending;try{pending=renderer.compileAsync(scene,camera);}finally{renderer.setRenderTarget(previous);}
-   await pending;
+   if(level!=='off'){
+    renderer.getDrawingBufferSize(size);if(!hdr||size.x!==width||size.y!==height){width=size.x;height=size.y;allocate();}
+    const previous=renderer.getRenderTarget(),drawn=quad.material;renderer.setRenderTarget(null);
+    try{for(const m of [composite(),lumMaterial,adaptMaterial,...(stats.ao?[aoMaterial,blurMaterial]:[]),...(stats.lens?[prefilter,down,up,sunMaterial]:[])]){quad.material=m;renderer.compile(quadScene,quadCamera);}}
+    finally{quad.material=drawn;renderer.setRenderTarget(previous);}
+   }
+   await compileInSlices(renderer,scene,camera,()=>level==='off'?null:hdr);
   },
   setSun(direction){compositeUniforms.sunDir.value.copy(direction).normalize();},
   dispose(){dispose();for(const m of [aoMaterial,blurMaterial,prefilter,down,up,tent,sunMaterial,lumMaterial,adaptMaterial,...composites.values()])m.dispose();triangle.dispose();},
@@ -400,6 +532,6 @@ export function createCinematic(renderer,{mobile=false,level=mobile?'lite':'full
   adaptation(){if(!adapt[0])return null;const out=new Uint16Array(4);renderer.readRenderTargetPixels(adapt[0],0,0,1,1,out);const mean=Math.exp(THREE.DataUtils.fromHalfFloat(out[0]));
    return {mean,scale:THREE.MathUtils.clamp(look.adaptKey/mean,...look.adaptRange)};},
   resetAdaptation(){adaptReset=true;},
-  info:()=>({...stats,features:{...features},look:{...look}})
+  info:()=>({...stats,features:{...features},look:{...look},smear:{strength:+smear.strength.toFixed(3),road:!!(smear.strength&&smear.road),speed:+smear.velocity.length().toFixed(2),shift:+(smear.strength?compositeUniforms.smearShift.value.length():0).toFixed(4)}})
  };
 }

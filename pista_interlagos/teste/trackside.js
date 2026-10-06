@@ -4,38 +4,48 @@ import {TestCar,wrap,guardrailSections,guardrailClearance} from './physics.js';
 import {sceneryBands,bandClearance} from './track-clearance.js';
 import {canvasTexture} from './pit-textures.js';
 import {createPeople} from './pit-crew.js';
+import {circuitSponsors,circuitSeed,seeded,paintBanner,paintBannerAlt} from './sponsors.js';
+import {billboardSpots} from './track-surface.js';
 
 // What makes a circuit look run by people on race day: sponsor banners tied to the
 // guardrails, marshal posts with their flags, and TV camera towers on the outside of
 // the corners (which the TV camera also films from). Sponsors are fictional, taken
 // from the game's own world. Game art, not a survey of the real circuit.
 
-// One banner design per row of the atlas: [background, text, accent, words].
-const SPONSORS=[
- ['#b3161d','#f6f1e4','#f0c419','AUTO-POBRE RACING'],
- ['#12351f','#f0c419','#f6f1e4','OLD STOCK · INTERLAGOS'],
- ['#f0c419','#1a1a1a','#b3161d','PNEUS PAULISTA · RECAPAGEM'],
- ['#1b2a4a','#f6f1e4','#e8702a','POSTO 99 · ADITIVADA'],
- ['#f6f1e4','#b3161d','#1b2a4a','LANCHONETE DA TIA'],
- ['#1a1a1a','#e8702a','#f6f1e4','RETÍFICA DO ZÉ'],
- ['#0f5f58','#f6f1e4','#f0c419','SEIVA · DANILO VEÍCULOS'],
- ['#e8702a','#1a1a1a','#f6f1e4','OFICINA DA BLAZER']
-];
-const ROWS=SPONSORS.length,BANNER_TILE=7.5,BANNER_LOW=.37,BANNER_HIGH=.87,BANNER_FRONT=.118;
-// The Old Stock banner names the circuit it hangs at (meta.name, set by main.js).
-function bannerAtlas(circuit='INTERLAGOS'){
- return canvasTexture((ctx,w,h)=>{
-  const rowH=h/ROWS;
-  SPONSORS.forEach(([bg,fg,accent,words],i)=>{if(words==='OLD STOCK · INTERLAGOS')words=`OLD STOCK · ${circuit}`;
-   const y=i*rowH;ctx.fillStyle=bg;ctx.fillRect(0,y,w,rowH);
-   ctx.fillStyle=accent;ctx.fillRect(0,y+rowH*.08,w,rowH*.06);ctx.fillRect(0,y+rowH*.86,w,rowH*.06);
-   ctx.font=`900 ${Math.round(rowH*.5)}px "Arial Black","Arial Bold",Arial,sans-serif`;ctx.textAlign='center';ctx.textBaseline='middle';
-   ctx.fillStyle=fg;ctx.fillText(words,w/2,y+rowH*.52,w*.9);
-   // Grommets and a little road dirt on the lower edge.
-   ctx.fillStyle='rgba(0,0,0,.35)';for(let x=w*.03;x<w;x+=w*.12){ctx.beginPath();ctx.arc(x,y+rowH*.2,rowH*.035,0,7);ctx.fill();}
-   const dirt=ctx.createLinearGradient(0,y+rowH,0,y+rowH*.55);dirt.addColorStop(0,'rgba(60,50,38,.45)');dirt.addColorStop(1,'rgba(60,50,38,0)');ctx.fillStyle=dirt;ctx.fillRect(0,y+rowH*.55,w,rowH*.45);
-  });
- },1024,ROWS*96);
+// The trackside people's skin and hair tones.
+const SKINS=[0xc68e6a,0x8d5a3b,0xe0b08f,0x6b4128,0xd9a37f,0xb77a55,0xf0c8a8,0x4a2c1d],HAIR=[0x2b1f17,0x1b1410,0x5a3a22,0x8a6a4a,0xbab4ab,0x111111];
+// Banners: lengths (m) of the tiles a run is made of, their height on the rail and how far in front of it.
+const BANNER_TILE=[5.6,9.4],BANNER_LOW=.37,BANNER_HIGH=.87,BANNER_FRONT=.118;
+// Two rows of the atlas per sponsor of the circuit (sponsors.js), its main banner and its reversed
+// one: the Old Stock one names the circuit it hangs at (meta.name, set by main.js), the local
+// businesses are the city's own. 64 px rows: about as sharp across a 0.5 m banner as along it.
+const bannerRow=(row,alt)=>row*2+(alt?1:0);
+function bannerAtlas(sponsors){
+ return canvasTexture((ctx,w,h)=>{const rowH=h/(sponsors.length*2);sponsors.forEach((s,i)=>{paintBanner(ctx,0,bannerRow(i,0)*rowH,w,rowH,s);paintBannerAlt(ctx,0,bannerRow(i,1)*rowH,w,rowH,s);});},1024,sponsors.length*2*64);
+}
+// Each banner weathered its own way (per-tile attributes): road dirt up from the bottom edge to its
+// own height, with splashes; the sun's bleaching; a torn-off top corner on a few.
+function bannerMaterial(map){
+ const material=new THREE.MeshStandardMaterial({name:'Faixas_patrocinio',map,roughness:.62,side:THREE.DoubleSide,vertexColors:true,polygonOffset:true,polygonOffsetFactor:-1});
+ material.onBeforeCompile=shader=>{
+  shader.vertexShader=shader.vertexShader.replace('#include <common>','#include <common>\nattribute vec3 aTile;\nattribute vec4 aWear;\nvarying vec3 vTile;\nvarying vec4 vWear;').replace('#include <begin_vertex>','#include <begin_vertex>\nvTile=aTile;vWear=aWear;');
+  shader.fragmentShader=shader.fragmentShader.replace('#include <common>',`#include <common>
+varying vec3 vTile;
+varying vec4 vWear;
+float tileHash(vec2 p){return fract(sin(dot(p,vec2(127.1,311.7)))*43758.5453);}
+float tileNoise(vec2 p){vec2 i=floor(p),f=fract(p);f=f*f*(3.0-2.0*f);return mix(mix(tileHash(i),tileHash(i+vec2(1,0)),f.x),mix(tileHash(i+vec2(0,1)),tileHash(i+1.0),f.x),f.y);}`)
+   .replace('#include <map_fragment>',`#include <map_fragment>
+ {
+  // vTile: metres along the banner, height on it (0 bottom, 1 top), sun fade. vWear: dirt, its reach, tear, seed.
+  float x=vTile.x,v=vTile.y,seed=vWear.w;
+  if(vWear.z>0.0){float e=fract(seed*7.1)<.5?x:vWear.z-x,jag=tileNoise(vec2(x*9.0,seed*31.0));if(e<1.4&&v>.25+e*.55+jag*.18)discard;}
+  float grey=dot(diffuseColor.rgb,vec3(.3,.59,.11));diffuseColor.rgb=mix(diffuseColor.rgb,vec3(grey)*1.06+.07,vTile.z*.55);
+  float dirt=(1.0-smoothstep(0.0,vWear.y,v+.12*(tileNoise(vec2(x*1.3,seed*17.0))-.5)))*vWear.x*(.55+.45*tileNoise(vec2(x*2.7,v*3.0+seed*9.0)));
+  dirt+=smoothstep(.72,.95,tileNoise(vec2(x*11.0,v*7.0+seed*41.0)))*(1.0-v)*vWear.x*.8;
+  diffuseColor.rgb=mix(diffuseColor.rgb,vec3(.23,.19,.14),clamp(dirt,0.0,.85));
+ }`);
+ };
+ material.customProgramCacheKey=()=>'faixas-patrocinio-v2';return material;
 }
 
 // Vertex-coloured parts merged into one mesh.
@@ -47,13 +57,13 @@ function tinted(geometry,color,matrix){
 const M=new THREE.Matrix4(),Q=new THREE.Quaternion(),S=new THREE.Vector3(1,1,1),P=new THREE.Vector3(),Y=new THREE.Vector3(0,1,0);
 const place=(x,y,z,yaw=0,scale=[1,1,1])=>M.clone().compose(P.set(x,y,z),Q.clone().setFromAxisAngle(Y,yaw),S.clone().set(...scale));
 
-function trackPoint(data,s){
+export function trackPoint(data,s){
  const a=data.samples,L=data.meta.reconstructed_xy_m;s=((s%L)+L)%L;let lo=0,hi=a.length-1;
  while(lo<hi){const mid=Math.ceil((lo+hi)/2);if(a[mid][0]<=s)lo=mid;else hi=mid-1;}return {p:a[lo],i:lo};
 }
 function heading(p){return Math.atan2(p[8],p[7]);}
-// Signed bend (rad per metre) around s: positive turns left.
-function bend(data,s,span=22){return wrap(heading(trackPoint(data,s+span).p)-heading(trackPoint(data,s-span).p))/(2*span);}
+// Signed bend (rad per metre) around s: positive turns left. Also places the flags, rods and brake boards (trackside-flags.js).
+export function bend(data,s,span=22){return wrap(heading(trackPoint(data,s+span).p)-heading(trackPoint(data,s-span).p))/(2*span);}
 
 // Outside of the sharper corners, clear of roads, pits and stands.
 export function towerSpots(data,count=9){
@@ -82,14 +92,56 @@ export function marshalSpots(data){
 }
 function findMarshalSpots(data){
  const L=data.meta.reconstructed_xy_m,bands=sceneryBands(data),spots=[];
+ // A post every 360 m or so (each one up to 30 m off the beat, per circuit), on alternate sides, and
+ // never under a billboard: a post that cannot keep 25 m from one stands where the old rule put it.
+ const boards=billboardSpots(data),rand=seeded(circuitSeed(data.meta?.id)+360);
  for(let s=140,k=0;s<L-60;s+=360,k++){
-  const side=k%2?1:-1;
+  const side=k%2?1:-1,jitter=(rand()-.5)*60;let fallback=null;
   for(const shift of [0,20,-20,40,-40]){
-   const {p}=trackPoint(data,s+shift),off=side*(p[4]/2+guardrailClearance(data,p[0],side)+2.6),x=p[1]-p[8]*off,y=p[2]+p[7]*off;
-   if(bandClearance(bands,x,y).distance>2.5){spots.push({s:s+shift,side,x,y,p});break;}
+   const at=((s+jitter+shift)%L+L)%L,{p}=trackPoint(data,at),off=side*(p[4]/2+guardrailClearance(data,p[0],side)+2.6),x=p[1]-p[8]*off,y=p[2]+p[7]*off;
+   if(bandClearance(bands,x,y).distance<=2.5)continue;
+   const spot={s:at,side,x,y,p};fallback??=spot;
+   if(boards.every(b=>Math.hypot(b.x-x,b.y-y)>25)){fallback=null;spots.push(spot);break;}
   }
+  if(fallback)spots.push(fallback);
  }
  return spots;
+}
+
+// Where the rail banners hang, found once per track data (pure: the Node check testar_beira.mjs reads
+// it): runs of banners tied side by side. A run keeps one length of banner and mostly one sponsor
+// (half of them alternate two, and an odd one slips in); every banner sits a little higher or lower,
+// has its own dirt, fading and gap to the next, and now and then one is missing, hangs loose by a
+// corner or has its top corner torn off. Local businesses hang more of them than the national names.
+// alt: the sponsor's reversed banner (paintBannerAlt): some runs all one or the other, most mixed.
+const bannerPlans=new WeakMap();
+export function bannerPlan(data){
+ if(bannerPlans.has(data))return bannerPlans.get(data);
+ const L=data.meta.reconstructed_xy_m,sponsors=circuitSponsors(data.meta.id,data.meta.name??'Interlagos'),ROWS=sponsors.length,rand=seeded(circuitSeed(data.meta.id)+91),banners=[];
+ const weights=sponsors.map(s=>s.region==='br'?.55:1),total=weights.reduce((u,v)=>u+v,0);
+ const pickRow=(not=-1)=>{for(;;){let r=rand()*total,k=0;while(r>weights[k]&&k<ROWS-1)r-=weights[k++];if(k!==not)return k;}};
+ // Its own stream, so the variants leave the rest of the plan as it was.
+ const flip=seeded(circuitSeed(data.meta.id)+313);let mix=.5;
+ let runs=0,metres=0;
+ const hang=(side,s0,s1,row)=>{const rip=rand()<.035;banners.push({side,s0,s1,row,alt:flip()<mix?1:0,lift:(rand()-.5)*.05,drop:(rand()-.5)*.04,fade:rand()**1.6,bright:.82+.22*rand(),dirt:.15+.75*rand()**1.4,reach:.22+.4*rand(),seed:rand(),rip,hangs:!rip&&rand()<.045?(rand()<.5?-1:1):0});};
+ for(const side of [-1,1])for(const [from,end] of guardrailSections(data,side)){
+  const to=Math.min(end,L);
+  for(let s=from+8+rand()*6;s<to-8;){
+   const tile=BANNER_TILE[0]+(BANNER_TILE[1]-BANNER_TILE[0])*rand(),len=tile*(2+Math.floor(rand()*4)),stop=Math.min(to-8,s+len);
+   if(rand()<.72&&stop-s>tile){
+    const a0=pickRow(),b0=rand()<.45?pickRow(a0):-1,m=flip();let k=0;mix=m<.3?0:m<.45?1:.5;
+    for(let t=s;t<stop-1;k++){
+     const end=Math.min(stop,t+tile),odd=rand()<.1;
+     // One banner in sixteen is missing: bare rail where it hung.
+     if(rand()>.06)hang(side,t,end,odd?pickRow(a0):b0>=0&&k%2?b0:a0);
+     t=end+(rand()<.6?.04+.2*rand():0);
+    }
+    metres+=stop-s;runs++;
+   }
+   s=stop+(rand()<.5?.5+1.5*rand():tile);
+  }
+ }
+ const plan={sponsors,banners,runs,metres};bannerPlans.set(data,plan);return plan;
 }
 
 export function createTrackside(data){
@@ -98,66 +150,90 @@ export function createTrackside(data){
  const probe=new TestCar(data),ground=(x,y,i=probe.index)=>{probe.index=i;const q=probe.sample(x,y);probe.index=q.i;return q.z;};
  const parts=[],people=[];
 
- // Sponsor banners on the track face of the guardrails, in runs of a few tiles.
- const L=data.meta.reconstructed_xy_m,a=data.samples,positions=[],uvs=[],indices=[];let bannerMetres=0,runs=0;
- const rand=(()=>{let x=91;return()=>(x=x*16807%2147483647)/2147483647;})();
+ // Sponsor banners on the track face of the guardrails (bannerPlan): each banner its own strip.
+ const L=data.meta.reconstructed_xy_m,a=data.samples,positions=[],uvs=[],colors=[],tiles=[],wears=[],indices=[];
+ const plan=bannerPlan(data),sponsors=plan.sponsors,ROWS=sponsors.length*2,tint=new THREE.Color();
  const point=s=>{if(s>=L)return a[0];const {i}=trackPoint(data,s),p=a[i],q=a[(i+1)%a.length],u=(s-p[0])/((i===a.length-1?L:q[0])-p[0]);return p.map((v,k)=>k===0?s:v+(q[k]-v)*u);};
- for(const side of [-1,1])for(const [from,end] of guardrailSections(data,side)){
-  const to=Math.min(end,L);
-  for(let s=from+8;s<to-8;){
-   const len=BANNER_TILE*(2+Math.floor(rand()*4)),stop=Math.min(to-8,s+len);
-   if(rand()<.72&&stop-s>BANNER_TILE){
-    const row=Math.floor(rand()*ROWS),v0=1-(row+1)/ROWS+.002,v1=1-row/ROWS-.002,base=positions.length/3;let count=0;
-    for(let t=s;t<=stop+.01;t+=2){
-     const p=point(Math.min(t,stop)),off=side*(p[4]/2+guardrailClearance(data,p[0],side)),x=p[1]-p[8]*off+p[8]*side*BANNER_FRONT,y=p[2]+p[7]*off-p[7]*side*BANNER_FRONT;
-     probe.index=Math.min(a.length-1,Math.floor(p[0]/L*a.length));const z=ground(x,y),u=(Math.min(t,stop)-s)/BANNER_TILE*(side>0?1:-1);
-     positions.push(x,z+BANNER_LOW,-y,x,z+BANNER_HIGH,-y);uvs.push(u,v0,u,v1);
-     if(count>0){const k=base+(count-1)*2;indices.push(k,k+2,k+1,k+1,k+2,k+3);}count++;
-    }
-    bannerMetres+=stop-s;runs++;
-   }
-   s=stop+BANNER_TILE*(rand()<.5?0:1);
-  }
+ for(const b of plan.banners){
+  const {side,s0,s1,fade,bright,dirt,reach,seed,rip,hangs,lift,drop}=b,row=bannerRow(b.row,b.alt),v0=1-(row+.96)/ROWS,v1=1-(row+.04)/ROWS,len=s1-s0,base=positions.length/3;
+  // Sun fade and a warm cast with it; a loose one sags and billows out from the rail at its free corner.
+  tint.setRGB(bright,bright*(1-.03*fade),bright*(1-.09*fade));
+  const stations=[];for(let t=s0;t<s1-.01;t+=hangs?.5:2)stations.push(t);stations.push(s1);
+  stations.forEach((t,count)=>{
+   const p=point(t),off=side*(p[4]/2+guardrailClearance(data,p[0],side)),e=hangs<0?t-s0:s1-t,sag=hangs&&e<1.6?(1-e/1.6)**2:0,out=BANNER_FRONT+sag*.09;
+   const x=p[1]-p[8]*off+p[8]*side*out,y=p[2]+p[7]*off-p[7]*side*out;
+   probe.index=Math.min(a.length-1,Math.floor(p[0]/L*a.length));const z=ground(x,y),f=(t-s0)/len,u=side>0?f:1-f;
+   positions.push(x,z+BANNER_LOW+drop+sag*.12,-y,x,z+BANNER_HIGH+lift-sag*.3,-y);uvs.push(u,v0,u,v1);
+   for(const h of [0,1]){colors.push(tint.r,tint.g,tint.b);tiles.push(side>0?t-s0:s1-t,h,fade);wears.push(dirt,reach,rip?len:0,seed);}
+   if(count>0){const k=base+(count-1)*2;indices.push(k,k+2,k+1,k+1,k+2,k+3);}
+  });
  }
- const bannerGeometry=new THREE.BufferGeometry();bannerGeometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));bannerGeometry.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));bannerGeometry.setIndex(indices);bannerGeometry.computeVertexNormals();
- const atlas=bannerAtlas((data.meta.name??'Interlagos').toLocaleUpperCase('pt-BR'));atlas.wrapS=THREE.RepeatWrapping;
- const banners=new THREE.Mesh(bannerGeometry,new THREE.MeshStandardMaterial({name:'Faixas_patrocinio',map:atlas,roughness:.62,side:THREE.DoubleSide,polygonOffset:true,polygonOffsetFactor:-1}));
+ const bannerGeometry=new THREE.BufferGeometry();bannerGeometry.setAttribute('position',new THREE.Float32BufferAttribute(positions,3));bannerGeometry.setAttribute('uv',new THREE.Float32BufferAttribute(uvs,2));
+ bannerGeometry.setAttribute('color',new THREE.Float32BufferAttribute(colors,3));bannerGeometry.setAttribute('aTile',new THREE.Float32BufferAttribute(tiles,3));bannerGeometry.setAttribute('aWear',new THREE.Float32BufferAttribute(wears,4));
+ bannerGeometry.setIndex(indices);bannerGeometry.computeVertexNormals();
+ const banners=new THREE.Mesh(bannerGeometry,bannerMaterial(bannerAtlas(sponsors)));
  banners.name='Faixas_nos_guardrails';banners.receiveShadow=true;root.add(banners);
 
- // Marshal posts: a small white-and-orange shelter, a flag stand and the marshal.
- const marshals=marshalSpots(data);
+ // Marshal posts, no two alike: a roofed cabin, an open deck under a beach umbrella or a little
+ // concrete hut, roofs in the post's own colour, an extinguisher, a stool or a radio mast, and one or
+ // two marshals in the uniform, skin, hair and stance of their own.
+ const marshals=marshalSpots(data),pick=seeded(circuitSeed(data.meta.id)+7),one=list=>list[Math.floor(pick()*list.length)];
+ const person=(top,bottom,extra={})=>({top,bottom,skin:one(SKINS),hair:one(HAIR),hairStyle:one(['short','short','curly','bald','bun']),belly:pick()<.35?.3+.5*pick():0,mustache:pick()<.2,glasses:pick()<.15,...extra});
+ const uniform=()=>{const r=pick();return r<.4?person(0xe8702a,0xe8702a,{trim:0xf4f1ea,hat:'cap',hatColor:0xf4f1ea,hands:0x2b2b2b})
+  :r<.65?person(0xf26b1d,one([0x2d3a4a,0x3a3f45,0x1b2a4a]),{hat:pick()<.5?'cap':null,hatColor:0xf26b1d,sleeves:pick()<.5?'short':'long'})
+  :r<.85?person(0xeeeeea,0xeeeeea,{trim:0xe8702a,hat:pick()<.6?'cap':null,hatColor:0xe8702a})
+  :person(0xc8e830,0x2d3a4a,{trim:0xb9bdb6,hat:'cap',hatColor:0x2d3a4a});};
  for(const m of marshals){
   // Local +x looks at the track (data x/y plane); three.js turns by the same angle about y.
   const z=ground(m.x,m.y,trackPoint(data,m.s).i),yaw=Math.atan2(-m.side*m.p[7],m.side*m.p[8]);
   const at=(dx,dz,dy=0)=>{const c=Math.cos(yaw),s=Math.sin(yaw);return [m.x+dx*c-dz*s,z+dy,-(m.y+dx*s+dz*c)];};
-  const [bx,by,bz]=at(-1.3,0);
-  parts.push(tinted(new THREE.BoxGeometry(1.5,.12,2.2),0x6d6f6c,place(bx,by+.06,bz,yaw)));
-  for(const [dx,dz] of [[-.7,-1],[-.7,1],[.7,-1],[.7,1]]){const [x,y,zz]=at(-1.3+dx,dz);parts.push(tinted(new THREE.CylinderGeometry(.035,.035,2.2,6),0xd9dcd8,place(x,y+1.16,zz)));}
-  parts.push(tinted(new THREE.BoxGeometry(1.7,.08,2.4),0xe8702a,place(bx,by+2.3,bz,yaw)));
-  const [wx,wy,wz]=at(-2.02,0);parts.push(tinted(new THREE.BoxGeometry(.05,1.1,2.2),0xe9ebe7,place(wx,wy+.7,wz,yaw)));
-  // Yellow flag held out toward the track.
+  const box=(w,h,d,dx,dz,dy,color)=>{const [x,y,zz]=at(dx,dz);parts.push(tinted(new THREE.BoxGeometry(w,h,d),color,place(x,y+dy,zz,yaw)));};
+  const pole=(r0,r1,h,dx,dz,dy,color)=>{const [x,y,zz]=at(dx,dz);parts.push(tinted(new THREE.CylinderGeometry(r0,r1,h,6),color,place(x,y+dy,zz)));};
+  const kind=pick(),roof=one([0xe8702a,0xe8702a,0xe9ebe7,0xc0392b,0xe8b42a]),side=pick()<.5?-1:1;
+  if(kind<.45){
+   box(1.5,.12,2.2,-1.3,0,.06,0x6d6f6c);for(const [dx,dz] of [[-.7,-1],[-.7,1],[.7,-1],[.7,1]])pole(.035,.035,2.2,-1.3+dx,dz,1.16,0xd9dcd8);
+   box(1.7,.08,2.4,-1.3,0,2.3,roof);box(.05,1.1,2.2,-2.02,0,.7,0xe9ebe7);
+  }else if(kind<.75){
+   box(1.6,.1,1.8,-1.2,0,.05,0x8a6a4a);pole(.025,.025,2.4,-1.4,side*.4,1.2,0xcfcfcf);
+   const [ux,uy,uz]=at(-1.4,side*.4);parts.push(tinted(new THREE.ConeGeometry(1.25,.42,10,1,true),roof,place(ux,uy+2.45,uz)));
+  }else{
+   box(1.4,2.15,1.9,-2.1,0,1.075,0xb8b5ad);box(1.7,.1,2.2,-2.0,0,2.2,roof);box(.03,.7,1.2,-1.39,0,1.35,0x30373b);
+  }
+  if(pick()<.7){pole(.08,.08,.5,-.9,-side*1.1,.25,0xc0221a);pole(.03,.03,.08,-.9,-side*1.1,.54,0x1b1d20);}
+  const stool=pick()<.4;if(stool){pole(.17,.17,.05,-.7,side*.95,.62,0x2a2d30);pole(.025,.025,.6,-.7,side*.95,.3,0x9ea4a6);}
+  if(kind<.45&&pick()<.35)pole(.015,.015,3.2,-2,-1.05,2.6,0x9ea4a6);
+  // Yellow flag held out toward the track: its cloth flies with the wind of the cars (trackside-flags.js).
   const [fx,fy,fz]=at(.28,.28);parts.push(tinted(new THREE.CylinderGeometry(.012,.012,1.2,5),0x2b2b2b,place(fx,fy+1.35,fz)));
-  const [gx,gy,gz]=at(.28,.52);parts.push(tinted(new THREE.PlaneGeometry(.46,.32),0xf2c318,place(gx,gy+1.78,gz,yaw+Math.PI/2)));
-  // He follows the cars with his eyes, calls on the radio, shifts his weight (pit-crew.js).
-  people.push({outfit:{top:0xe8702a,bottom:0xe8702a,trim:0xf4f1ea,hat:'cap',hatColor:0xf4f1ea,hands:0x2b2b2b},pose:'rest',idle:'marshal',x:m.x,y:z,z:-m.y,yaw});
+  // He follows the cars with his eyes, calls on the radio, shifts his weight (pit-crew.js); a second
+  // one keeps him company, on the stool or standing back by the shelter.
+  people.push({outfit:uniform(),pose:one(['rest','rest','folded','stand']),idle:'marshal',x:m.x,y:z,z:-m.y,yaw:yaw+(pick()-.5)*.4});
+  if(pick()<.45){const [x,y,zz]=at(stool?-.7:-.95,side*(stool?.95:1.05));people.push({outfit:uniform(),pose:stool?'stool':one(['folded','stand','rest']),idle:stool?'seated':'marshal',x,y:y+(stool?.02:0),z:zz,yaw:yaw+(pick()-.5)*.8});}
  }
 
- // TV towers: scaffold, deck with rails, a cameraman under an umbrella.
+ // TV towers: a scaffold of its own height and paint, a deck with rails, a cameraman under a coloured
+ // umbrella (and now and then a second crewman), a sponsor's tarp round the base, a generator or a
+ // cable reel on the ground.
  const towers=towerSpots(data).map(t=>{
-  const {p,i}=trackPoint(data,t.s),z=ground(t.x,t.y,i),deck=4.6,look=Math.atan2(p[2]-t.y,p[1]-t.x);
-  for(const [dx,dz] of [[-.9,-.9],[-.9,.9],[.9,-.9],[.9,.9]])parts.push(tinted(new THREE.CylinderGeometry(.045,.045,deck+1.1,6),0xb9bec0,place(t.x+dx,z+(deck+1.1)/2,-t.y+dz)));
+  const {p,i}=trackPoint(data,t.s),z=ground(t.x,t.y,i),deck=3.6+2.8*pick(),look=Math.atan2(p[2]-t.y,p[1]-t.x);
+  const steel=one([0xb9bec0,0xb9bec0,0xd8a425,0x2f5d8a,0x9b3b2f]),brace=new THREE.Color(steel).multiplyScalar(.92).getHex(),shade=one([0xf2efe7,0xc0392b,0x2b5fa8,0xf0c419,0x2e7d4f]);
+  for(const [dx,dz] of [[-.9,-.9],[-.9,.9],[.9,-.9],[.9,.9]])parts.push(tinted(new THREE.CylinderGeometry(.045,.045,deck+1.1,6),steel,place(t.x+dx,z+(deck+1.1)/2,-t.y+dz)));
   for(let h=1.2;h<deck;h+=1.15)for(const [dx,dz,r] of [[0,-.9,0],[0,.9,0],[-.9,0,Math.PI/2],[.9,0,Math.PI/2]]){
-   const brace=new THREE.CylinderGeometry(.025,.025,2.55,5).rotateZ(Math.PI/4);parts.push(tinted(brace,0xa9aeb0,place(t.x+dx,z+h+.55,-t.y+dz,r)));
+   const bar=new THREE.CylinderGeometry(.025,.025,2.55,5).rotateZ(Math.PI/4);parts.push(tinted(bar,brace,place(t.x+dx,z+h+.55,-t.y+dz,r)));
   }
   parts.push(tinted(new THREE.BoxGeometry(2.2,.1,2.2),0x7b7f7c,place(t.x,z+deck,-t.y)));
   for(const [dx,dz,r] of [[0,-1.08,0],[0,1.08,0],[-1.08,0,Math.PI/2],[1.08,0,Math.PI/2]])parts.push(tinted(new THREE.BoxGeometry(2.2,.05,.05),0xd6d8d4,place(t.x+dx,z+deck+1,-t.y+dz,r)));
-  // Tripod aimed at the track and a big white-and-red umbrella behind it. The camera head
-  // pans on the tripod with its cameraman, who films the nearest car (pit-crew.js).
+  // The tarp on the two sides that face the track, in a sponsor's colour.
+  const tarp=new THREE.Color(one(sponsors).bg).getHex();for(const [dx,dz,r] of [[Math.cos(look)*.93,-Math.sin(look)*.93,look],[-Math.sin(look)*.93,-Math.cos(look)*.93,look+Math.PI/2]])parts.push(tinted(new THREE.BoxGeometry(.03,.95,1.86),tarp,place(t.x+dx,z+.75,-t.y+dz,r)));
+  if(pick()<.6)parts.push(tinted(new THREE.BoxGeometry(.9,.6,.6),one([0xe8702a,0x2a2d30,0xd8a425]),place(t.x-Math.cos(look)*1.9,z+.3,-t.y+Math.sin(look)*1.9+.6,look)));
+  if(pick()<.5)parts.push(tinted(new THREE.CylinderGeometry(.36,.36,.26,12).rotateX(Math.PI/2),0x2b2b2b,place(t.x-Math.sin(look)*1.7,z+.36,-t.y-Math.cos(look)*1.7,look)));
+  // Tripod aimed at the track and a big umbrella behind it. The camera head pans on the tripod
+  // with its cameraman, who films the nearest car (pit-crew.js).
   const cx=t.x+Math.cos(look)*.5,cz=-t.y-Math.sin(look)*.5,ux=t.x-Math.cos(look)*.75,uz=-t.y+Math.sin(look)*.75;
   parts.push(tinted(new THREE.CylinderGeometry(.03,.09,1.25,5),0x222222,place(cx,z+deck+.66,cz)));
   parts.push(tinted(new THREE.CylinderGeometry(.02,.02,2.3,5),0xcfcfcf,place(ux,z+deck+1.15,uz)));
-  parts.push(tinted(new THREE.ConeGeometry(1.35,.5,10,1,true),0xf2efe7,place(ux,z+deck+2.35,uz)));
-  people.push({outfit:{top:0x24292e,bottom:0x3a3f45,hat:'headset'},pose:'stand',idle:'camera',x:cx,y:z+deck+1.3,z:cz,yaw:look,camera:{x:cx,y:z+deck+1.3,z:cz,back:.62,drop:1.25}});
+  parts.push(tinted(new THREE.ConeGeometry(1.35,.5,10,1,true),shade,place(ux,z+deck+2.35,uz)));
+  people.push({outfit:person(one([0x24292e,0x1b2a4a,0x5a6a78,0x3d2b1f]),one([0x3a3f45,0x2d3a4a,0x1b1d20]),{hat:'headset'}),pose:'stand',idle:'camera',x:cx,y:z+deck+1.3,z:cz,yaw:look,camera:{x:cx,y:z+deck+1.3,z:cz,back:.62,drop:1.25}});
+  if(pick()<.4)people.push({outfit:person(one([0xf2f2ee,0x24292e,0xc81d25]),0x2d3a4a,{hat:pick()<.5?'cap':null,hatColor:0x1b1d20}),pose:'folded',idle:'stand',x:t.x-Math.cos(look)*.55+Math.sin(look)*.6,y:z+deck+.05,z:-t.y+Math.sin(look)*.55+Math.cos(look)*.6,yaw:look+(pick()-.5)});
   // The broadcast view sits just in front of the lens, not inside the camera body.
   return {s:t.s,side:t.side,x:t.x,y:t.y,z:z+deck+1.45,position:new THREE.Vector3(cx+Math.cos(look)*.95,z+deck+1.5,cz-Math.sin(look)*.95)};
  });
@@ -165,6 +241,6 @@ export function createTrackside(data){
  const structure=new THREE.Mesh(mergeGeometries(parts,false),new THREE.MeshStandardMaterial({name:'Postos_e_torres',vertexColors:true,roughness:.6,metalness:.25,side:THREE.DoubleSide}));
  parts.forEach(g=>g.dispose());structure.name='Postos_fiscais_e_torres_TV';structure.castShadow=structure.receiveShadow=true;root.add(structure);
  const crew=createPeople().crowd(people,{name:'Fiscais_e_cinegrafistas',cell:60,seed:3});if(crew)root.add(crew);
- return {root,towers,stats:{bannerRuns:runs,bannerMetres:Math.round(bannerMetres),marshals:marshals.length,towers:towers.length},
+ return {root,towers,stats:{bannerRuns:plan.runs,bannerMetres:Math.round(plan.metres),banners:plan.banners.length,bannerSponsors:new Set(plan.banners.map(b=>b.row)).size,looseBanners:plan.banners.filter(b=>b.hangs).length,tornBanners:plan.banners.filter(b=>b.rip).length,marshals:marshals.length,towers:towers.length},
   clearings:[...marshals.map(m=>({x:m.x,y:m.y,r:4})),...towers.map(t=>({x:t.x,y:t.y,r:6}))]};
 }

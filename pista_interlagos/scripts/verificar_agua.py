@@ -97,7 +97,7 @@ with sync_playwright() as p:
         enter_track(page)
         wait_race_start(page)
         page.evaluate("""async()=>{const THREE=await import('three');THREE.Scene.prototype.onBeforeRender=function(r,s,c,t){if((!t||t.isMainView)&&!c.isOrthographicCamera)window.waterScene=s;};}""")
-        wait_js(page, 'window.waterScene')
+        wait_js(page, '!!window.waterScene')   # a boolean: returning the scene itself hangs the page's serializer
         lake = max(page.evaluate('interlagos.waterInfo().lakes'), key=lambda l: l['area'])
         bed = page.evaluate("""level=>{let mesh=null;waterScene.traverse(o=>{if(o.isMesh&&o.material?.userData?.terrain)mesh=o;});
           const pos=mesh.geometry.attributes.position;let wet=0,visible=0,physics=0;

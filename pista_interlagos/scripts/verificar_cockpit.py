@@ -43,12 +43,12 @@ with sync_playwright() as p:
   page.screenshot(path=str(ROOT/'renders/cockpit_movimento.png'))
   race_options(page,livery='seiva_danilo');page.evaluate('interlagos.reposition(800)');enter_track(page);page.keyboard.down('KeyS');frame()
   info=page.evaluate('interlagos.cockpitInfo()');check('second_livery_cockpit',info['visible'] and info['externalVisible'] and not info['view']['classic']);page.screenshot(path=str(ROOT/'renders/cockpit_seiva.png'));page.keyboard.up('KeyS')
-  page.click('#cockpitButton');frame();info=page.evaluate('interlagos.cockpitInfo()');check('external_car_restored',info['visible'] and info['externalVisible'] and not info['view']['cabin'] and info['fov']==58)
+  page.click('#cockpitButton');frame();info=page.evaluate('interlagos.cockpitInfo()');check('external_car_restored',info['visible'] and info['externalVisible'] and not info['view']['cabin'] and abs(info['fov']-page.evaluate('interlagos.cameraSnapshot().baseFov'))<.05)
   page.keyboard.down('KeyB');page.wait_for_timeout(300);frame()
   check('b_only_inside_cockpit',page.evaluate('interlagos.viewControls().lookBack.amount')==0);page.keyboard.up('KeyB')
   modes=[]
-  for _ in range(7):page.keyboard.press('KeyC');modes.append(page.evaluate('interlagos.state.mode'))
-  check('seven_camera_cycle',modes==['close','hood','cockpit','tv','aerial','orbit','chase'])
+  for _ in range(8):page.keyboard.press('KeyC');modes.append(page.evaluate('interlagos.state.mode'))
+  check('eight_camera_cycle',modes==['close','far','hood','cockpit','tv','aerial','orbit','chase'])
   page.click('#cockpitButton');page.set_viewport_size({'width':1280,'height':720});frame();page.screenshot(path=str(ROOT/'renders/cockpit_16x9.png'))
   check('no_webgl_errors',not report['errors']);report['passed']=True
  finally:

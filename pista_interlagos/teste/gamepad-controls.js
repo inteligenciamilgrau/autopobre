@@ -101,5 +101,12 @@ export class GamepadControls {
   const actuator=this.pad?.vibrationActuator;if(!this.rumble||!actuator?.playEffect||impact<4)return;
   const strength=Math.min(1,(impact-3)/14);
   actuator.playEffect('dual-rumble',{duration:Math.round(120+260*strength),strongMagnitude:strength,weakMagnitude:Math.min(1,.3+strength)}).catch(()=>{});
+  this.kerbAt=performance.now()+120+260*strength;
+ }
+ // Riding a kerb (car.kerbRide 0..1, every frame): short buzzes of the light motor only, which
+ // never cut into an impact's shake.
+ kerb(ride){
+  const actuator=this.pad?.vibrationActuator,now=performance.now();if(!this.rumble||!actuator?.playEffect||!(ride>.08)||now<(this.kerbAt??0))return;
+  this.kerbAt=now+90;actuator.playEffect('dual-rumble',{duration:110,strongMagnitude:0,weakMagnitude:Math.min(.55,.18+.4*ride)}).catch(()=>{});
  }
 }

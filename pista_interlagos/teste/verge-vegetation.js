@@ -26,12 +26,16 @@ function tuftGeometry(){
  return geometry;
 }
 
+// Cars passing close (speed-particles.js wakeCars, 'Sensação de velocidade' Completa): world x, z
+// and velocity x, z of up to WAKE_CARS of them.
+export const WAKE_CARS=6;
 function grassMaterial(time,reach){
  const material=new THREE.MeshStandardMaterial({name:'Capim_margens',roughness:.94,metalness:0,vertexColors:true,side:THREE.DoubleSide});
+ const wake={vergeCars:{value:Array.from({length:WAKE_CARS},()=>new THREE.Vector4())},vergeCarCount:{value:0}};material.userData.wake=wake;
  material.onBeforeCompile=shader=>{
-  Object.assign(shader.uniforms,{vergeTime:time,vergeReach:{value:reach}});
+  Object.assign(shader.uniforms,{vergeTime:time,vergeReach:{value:reach}},wake);
   shader.vertexShader=shader.vertexShader.replace('#include <common>',`#include <common>
-uniform float vergeTime,vergeReach;`).replace('#include <begin_vertex>',`#include <begin_vertex>
+uniform float vergeTime,vergeReach;uniform vec4 vergeCars[${WAKE_CARS}];uniform int vergeCarCount;`).replace('#include <begin_vertex>',`#include <begin_vertex>
 #ifdef USE_INSTANCING
  vec3 root=(modelMatrix*instanceMatrix*vec4(0.0,0.0,0.0,1.0)).xyz;
  float distanceFade=1.0-smoothstep(vergeReach*.6,vergeReach,length(root-cameraPosition));
@@ -39,6 +43,26 @@ uniform float vergeTime,vergeReach;`).replace('#include <begin_vertex>',`#includ
  float gust=sin(root.x*.13+root.z*.17-vergeTime*1.7)*.045+sin(root.x*.7-root.z*.3+vergeTime*3.1)*.016;
  transformed.x+=gust*position.y*position.y;
  transformed.z+=gust*.6*position.y*position.y;
+ // A passing car's air: blades lean away from it and along its way, strongest beside it and
+ // trailing behind for about half a second, and shiver while they are pushed.
+ vec2 wake=vec2(0.0);float shiver=0.0;
+ for(int i=0;i<${WAKE_CARS};i++){
+  if(i>=vergeCarCount)break;
+  vec4 car=vergeCars[i];float speed=length(car.zw);vec2 dir=car.zw/max(speed,.001),rel=root.xz-car.xy;
+  float trail=speed*.55+.001,behind=clamp(-dot(rel,dir)/trail,0.0,1.0);vec2 off=rel+dir*behind*trail;float gap=length(off);
+  float push=smoothstep(3.0,32.0,speed)*exp(-gap*gap/48.0)*(1.0-behind*.7);
+  wake+=(off/max(gap,.3)*.75+dir*.55)*push;shiver+=push;
+ }
+ float pushed=min(length(wake),1.1);
+ if(pushed>.001){
+  // World lean of the tip, up to about 40 degrees, taken into the tuft's turned and scaled frame.
+  float tall=length(instanceMatrix[1].xyz),wide=length(instanceMatrix[0].xyz);
+  vec3 lean=vec3(normalize(wake)*pushed*(.85+.15*sin(vergeTime*23.0+root.x*1.7+root.z*2.3+position.x*9.0)),0.0).xzy*tall;
+  lean+=vec3(-lean.z,0.0,lean.x)*sin(vergeTime*31.0+root.x*3.1+position.z*7.0)*min(shiver,1.0)*.5;
+  vec3 local=transpose(mat3(instanceMatrix))*lean/(wide*wide);
+  transformed.xz+=local.xz*position.y*position.y;
+  transformed.y-=pushed*.3*position.y*position.y;
+ }
  transformed.y*=distanceFade;
 #endif`);
   // Three expands shader chunks after onBeforeCompile. Undo the back-face flip
@@ -53,7 +77,7 @@ uniform float vergeTime,vergeReach;`).replace('#include <begin_vertex>',`#includ
  reflectedLight.directDiffuse+=diffuseColor.rgb*directionalLights[0].color*grassBack*.12;
 #endif`);
  };
- material.customProgramCacheKey=()=>'verge-blades-v2';return material;
+ material.customProgramCacheKey=()=>'verge-blades-v3';return material;
 }
 
 // coverClass follows the circuit's WorldCover mapping: 4 built, 5 bare, 6 water.
@@ -92,7 +116,14 @@ export function createVergeVegetation({data,field,ground,vegetated=()=>true,dry=
  }
  return {root,count:items.length,reach,update(camera){
   for(const block of blocks)block.mesh.visible=camera.position.distanceToSquared(block.center)<(reach+block.radius)**2;
- },clearAround(points){
+ },
+ // The cars that push the grass this frame (TestCars, nearest first; [] lets it be).
+ setCars(cars){
+  const {vergeCars,vergeCarCount}=material.userData.wake,n=Math.min(WAKE_CARS,cars.length);
+  for(let i=0;i<n;i++){const c=cars[i];vergeCars.value[i].set(c.x,-c.y,c.vx,-c.vy);}
+  vergeCarCount.value=n;
+ },
+ wakeInfo:()=>({cars:material.userData.wake.vergeCarCount.value}),clearAround(points){
   const changed=new Set(),zero=new THREE.Matrix4().makeScale(0,0,0);
   for(const item of items){if(item.removed||!points.some(p=>Math.hypot(item.x-p.x,item.y-p.y)<p.r+.65))continue;item.removed=true;item.mesh.setMatrixAt(item.index,zero);changed.add(item.mesh);}
   for(const mesh of changed)mesh.instanceMatrix.needsUpdate=true;

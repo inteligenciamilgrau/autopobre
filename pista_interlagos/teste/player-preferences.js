@@ -6,7 +6,8 @@ export const PREFERENCES_KEY='opala99-preferences-v1';
 // 'tv' films from the trackside towers and verge cameras (tv-camera.js).
 // Race length in laps, for the free race and the story alike, on every circuit.
 export const LAPS=Object.freeze({min:1,max:20,standard:3});
-export const CAMERA_MODES=Object.freeze(['chase','close','hood','cockpit','tv','aerial','orbit']);
+// 'far' is the old high Perseguição; chase and close ride low behind the car (camera-rig.js).
+export const CAMERA_MODES=Object.freeze(['chase','close','far','hood','cockpit','tv','aerial','orbit']);
 const liveries=['assinaturas_omp','seiva_danilo'];
 export function normalizePreferences(value){
  const source=value&&typeof value==='object'?value:{};

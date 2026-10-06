@@ -3,11 +3,14 @@
 The scanned asphalt (asfalto_*_v3, 2 m per tile) holds its detail at the millimetre scale, so its
 mipmaps fade to a flat grey a few metres ahead of the car and the road reads as smooth paint at
 speed. This map adds what the scan lacks: coarse stones (12-33 mm) polished by the tyres, voids,
-and patches where the stones are more or less exposed, with energy at every scale from 1 cm to
-about 1.5 m, so each mip level keeps part of the grain. Game art, not survey data.
+and patches where the stones are more or less exposed, from 1 cm up to about 0.5 m only. v1 put
+energy up to 3 m inside its 6 m tile: those blotches were landmarks, and the road showed the tile
+as a 6 m lattice. The game adds the broad patchiness in track coordinates and draws this map with
+random offsets per cell (track-surface.js), so nothing here may be recognisable. Game art, not
+survey data.
 
 Uso: python scripts/gerar_asfalto_grao.py [saida.jpg]   (numpy + Pillow; e.g. the geo-venv)
-Grava teste/assets/texturas/asfalto_grao_v1.jpg: 2048 x 2048, 6 m por repeticao, cinza com media 0.5.
+Grava teste/assets/texturas/asfalto_grao_v2.jpg: 2048 x 2048, 6 m por repeticao, cinza com media 0.5.
 O jogo (track-surface.js) desenha o mapa nesse tamanho.
 """
 import sys
@@ -18,7 +21,8 @@ from PIL import Image
 N = 2048          # pixels per tile
 TILE_M = 6.0      # metres per tile
 MM = TILE_M * 1000 / N
-OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / 'teste/assets/texturas/asfalto_grao_v1.jpg'
+OUT = Path(sys.argv[1]) if len(sys.argv) > 1 else Path(__file__).resolve().parents[1] / 'teste/assets/texturas/asfalto_grao_v2.jpg'
+LONGEST_M = .5    # longest wavelength in the map: nothing a driver can recognise one tile later
 rng = np.random.default_rng(20261003)
 
 
@@ -54,10 +58,10 @@ def stamp(canvas, weight, cx, cy, radius, value, aspect, angle, rough):
 
 def main():
     # Patches where the binder wore off (stones exposed, lighter and busier) or stayed rich.
-    exposure = field(1.0, 1.8, .045)
+    exposure = field(1.0, LONGEST_M, .045)
     exposure = 1 / (1 + np.exp(-1.6 * exposure))
-    # Binder tone: broad, low mottling from 4.5 cm to 3 m.
-    binder = .44 + .035 * field(1.1, 3.0, .045) + .018 * field(.6, .09, .012)
+    # Binder tone: low mottling from 4.5 cm to half a metre.
+    binder = .44 + .03 * field(1.1, LONGEST_M, .045) + .018 * field(.6, .09, .012)
     canvas = binder.copy()
     weight = np.zeros((N, N))
     # Coarse aggregate, 12-33 mm, denser where it is exposed.

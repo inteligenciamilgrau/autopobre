@@ -156,13 +156,28 @@ export function garageDoors(teams){
 
 // Glass of the upper floor (one bay, ~11.7 x 2.5 m): sky reflection, mullions,
 // lit ceiling and a few people inside.
-export const facadeGlass=()=>canvasTexture((ctx,w,h)=>{
- const g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,'#a9bfcb');g.addColorStop(.45,'#4b6674');g.addColorStop(1,'#1d2c34');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
- ctx.fillStyle='rgba(255,236,196,.28)';for(let x=40;x<w;x+=130)ctx.fillRect(x,h*.2,70,6);
- const r=random(8);for(let i=0;i<9;i++){const x=r()*w,s=.8+r()*.3;ctx.fillStyle=`rgba(18,24,28,${.35+r()*.25})`;ctx.beginPath();ctx.arc(x,h*.5,11*s,0,7);ctx.fill();round(ctx,x-15*s,h*.5+10*s,30*s,h*.5,8);ctx.fill();}
- ctx.fillStyle='rgba(255,255,255,.07)';for(let x=-200;x<w;x+=260){ctx.beginPath();ctx.moveTo(x,h);ctx.lineTo(x+120,0);ctx.lineTo(x+170,0);ctx.lineTo(x+50,h);ctx.closePath();ctx.fill();}
- ctx.fillStyle='#262c30';for(let k=0;k<=8;k++)ctx.fillRect(k*w/8-4,0,8,h);ctx.fillRect(0,h*.3,w,6);ctx.fillRect(0,0,w,8);ctx.fillRect(0,h-10,w,10);
-},1024,256);
+// Upper glass of the garages: FACADE_GLASS_ROWS variants stacked (256 px each), every one with its
+// own people behind the glass (alone or in twos, at different heights), ceiling lights and blinds.
+// Mullions every 1/8 of the width, so a bay may shift its glass by whole panes and mirror it.
+export const FACADE_GLASS_ROWS=3;
+export const facadeGlass=()=>{const map=canvasTexture((ctx,w,H)=>{
+ const h=H/FACADE_GLASS_ROWS;
+ for(let row=0;row<FACADE_GLASS_ROWS;row++){
+  const r=random(8+row*977);ctx.save();ctx.translate(0,row*h);
+  const g=ctx.createLinearGradient(0,0,0,h);g.addColorStop(0,'#a9bfcb');g.addColorStop(.45,'#4b6674');g.addColorStop(1,'#1d2c34');ctx.fillStyle=g;ctx.fillRect(0,0,w,h);
+  for(let x=20+r()*60;x<w;x+=90+r()*120){ctx.fillStyle=`rgba(255,236,196,${(.1+r()*.26).toFixed(2)})`;ctx.fillRect(x,h*(.17+r()*.06),40+r()*60,5+r()*3);}
+  for(let k=0;k<8;k++)if(r()<.22){const x=k*w/8,d=h*(.25+r()*.45);ctx.fillStyle=`rgba(${190+r()*40|0},${185+r()*35|0},${170+r()*30|0},.55)`;ctx.fillRect(x,0,w/8,d);ctx.fillStyle='rgba(0,0,0,.08)';for(let y=6;y<d;y+=7)ctx.fillRect(x,y,w/8,1.5);}
+  const n=3+Math.floor(r()*9);
+  for(let i=0;i<n;i++){
+   const x=r()*w,s=.75+r()*.45,dy=(r()-.5)*.12*h;ctx.fillStyle=`rgba(18,24,28,${(.3+r()*.3).toFixed(2)})`;
+   ctx.beginPath();ctx.arc(x,h*.5+dy,11*s,0,7);ctx.fill();round(ctx,x-15*s,h*.5+dy+10*s,30*s,h*.5,8);ctx.fill();
+   if(r()<.3){const x2=x+28*s;ctx.beginPath();ctx.arc(x2,h*.52+dy,10*s,0,7);ctx.fill();round(ctx,x2-14*s,h*.52+dy+10*s,28*s,h*.5,8);ctx.fill();}
+  }
+  ctx.fillStyle='rgba(255,255,255,.07)';for(let x=-200-r()*260;x<w;x+=200+r()*120){const sl=100+r()*60;ctx.beginPath();ctx.moveTo(x,h);ctx.lineTo(x+sl,0);ctx.lineTo(x+sl+40+r()*30,0);ctx.lineTo(x+50,h);ctx.closePath();ctx.fill();}
+  ctx.fillStyle='#262c30';for(let k=0;k<=8;k++)ctx.fillRect(k*w/8-4,0,8,h);ctx.fillRect(0,h*.3,w,6);ctx.fillRect(0,0,w,8);ctx.fillRect(0,h-10,w,10);
+  ctx.restore();
+ }
+},1024,256*FACADE_GLASS_ROWS);map.wrapS=THREE.RepeatWrapping;return map;};
 
 // Painted service box on the working lane, 7.2 m along the lane x 3.8 m across:
 // team red, yellow outline, hatched ends and white wheel marks (right = forward).

@@ -196,7 +196,8 @@ def comfortable_camera(page, straight, case):
     place(page, straight['index'], 43)
     frames(page, 12)
     reduced = shot(page, case + '_reduced_motion')
-    check(case + '_os_reduced_motion', abs(reduced['camera']['fov'] - 58) < .05 and
+    # With the motion off the lens stays at the view's own (camera-rig.js baseFov: 58 for the hood at 16:10).
+    check(case + '_os_reduced_motion', abs(reduced['camera']['fov'] - reduced['camera']['baseFov']) < .05 and
           not reduced['graphics']['cinematic']['features']['motionBlur'], reduced['camera'])
     page.emulate_media(reduced_motion='no-preference')
     open_graphics(page)
@@ -206,7 +207,7 @@ def comfortable_camera(page, straight, case):
     frames(page, 12)
     manual = shot(page, case + '_camera_motion_off')
     check(case + '_manual_camera_motion_off', manual['graphics']['values']['cameraMotion'] == 0 and
-          abs(manual['camera']['fov'] - 58) < .05, manual['camera'])
+          abs(manual['camera']['fov'] - manual['camera']['baseFov']) < .05, manual['camera'])
     # Restore a normal High driving camera before measuring the action response.
     open_graphics(page)
     page.select_option('#gfx-cameraMotion', '1')
@@ -272,7 +273,10 @@ def action_encounters(page, straight, case):
             if kind == 'impact':
                 check(case + '_impact_uses_collision_physics', event['collisions'] > started['beforeCollisions'], event)
             state = shot(page, case + '_action_' + kind)
-            check(case + '_action_camera_' + kind, state['camera']['fov'] > 58 and state['camera']['fov'] < 72, state['camera'])
+            # Speed and the action open the chase lens past its own (55 at 16:10), never wider than 95° side to side
+            # (camera-rig.js MAX_SPEED_HFOV, applied after the kick and the punches).
+            wide = math.degrees(2 * math.atan(math.tan(math.radians(state['camera']['fov']) / 2) * state['camera']['aspect']))
+            check(case + '_action_camera_' + kind, state['camera']['fov'] > state['camera']['baseFov'] + 1 and wide < 95.1, {**state['camera'], 'horizontalFov': round(wide, 1)})
             results['encounters'][kind] = {'event': event, 'camera': state['camera'], 'action': state['action']}
     finally:
         page.evaluate(RESTORE_FIXTURE)

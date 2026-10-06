@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {TestCar} from './physics.js';
-import {terrainMaterial} from './landscape.js';
+import {terrainMaterial,structureMaterial} from './landscape.js';
 import {RIVAL_ROSTER,GRID_ROW_SPACING,GRID_START_BACK} from './race-roster.js';
 import {canvasTexture} from './pit-textures.js';
 import {gantryPosts,groundHeight} from './track-clearance.js';
@@ -56,7 +56,8 @@ export async function createOpenCircuit(data,roadSurface,{heights,textures,field
   const mesh=new THREE.Mesh(material===roadSurface.material?roadSurface.geometry(g):g,material);mesh.name=name;mesh.receiveShadow=true;root.add(mesh);return mesh;
  }
  strip(p=>-p[4]/2,p=>p[4]/2,roadSurface.material,'Asfalto');
- const paint=new THREE.MeshStandardMaterial({name:'Pintura_borda',color:0xe8e4d6,roughness:.7,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2});
+ // Worn like the GLB's lines (landscape.js structureMaterial 'paint').
+ const paint=structureMaterial(new THREE.MeshStandardMaterial({name:'Pintura_borda',color:0xe8e4d6,roughness:.7,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}),textures);
  for(const side of [-1,1])strip(p=>side*(p[4]/2-.32),p=>side*(p[4]/2-.18),paint,side<0?'Linha_borda_direita':'Linha_borda_esquerda',.006);
  // Timing line: two rows of checks across the asphalt at s = 0.
  const check=canvasTexture((ctx,w,h)=>{const cells=16;for(let r=0;r<2;r++)for(let c=0;c<cells;c++){ctx.fillStyle=(r+c)%2?'#141414':'#f1eee4';ctx.fillRect(c*w/cells,r*h/2,w/cells,h/2);}},512,64);
@@ -88,7 +89,9 @@ export async function createOpenCircuit(data,roadSurface,{heights,textures,field
  }
  const beam=new THREE.Mesh(new THREE.BoxGeometry(.5,1.5,left.d+right.d+.4),steel);beam.position.set(0,7.2,(right.d-left.d)/2);beam.castShadow=true;beam.name='Portico_viga';gantry.add(beam);
  const sign=canvasTexture((ctx,w,h)=>{ctx.fillStyle='#172b27';ctx.fillRect(0,0,w,h);ctx.fillStyle='#ffdb32';ctx.font='bold 66px sans-serif';ctx.textAlign='center';ctx.textBaseline='middle';ctx.fillText(label,w/2,h/2,w*.94);},1024,128);
- for(const side of [-1,1]){const face=new THREE.Mesh(new THREE.PlaneGeometry(span*2,1.25),new THREE.MeshBasicMaterial({map:sign}));face.rotation.y=side*Math.PI/2;face.position.set(side*.26,7.2,0);gantry.add(face);}
+ // Lit like the billboards (track-surface.js): it takes the sun and the shade of the beam, never glows.
+ const signMaterial=new THREE.MeshStandardMaterial({name:'Portico_placa',map:sign,color:0xdadada,roughness:.6});
+ for(const side of [-1,1]){const face=new THREE.Mesh(new THREE.PlaneGeometry(span*2,1.25),signMaterial);face.rotation.y=side*Math.PI/2;face.position.set(side*.26,7.2,0);gantry.add(face);}
  // Camera proxies in world space (the root stays at the origin).
  root.updateMatrixWorld(true);const obstacles=[];gantry.traverse(o=>{if(o.isMesh&&o.name.startsWith('Portico_')){const proxy=new THREE.Mesh(o.geometry.clone().applyMatrix4(o.matrixWorld));proxy.name=o.name;obstacles.push(proxy);}});
  return {root,ground,cover,obstacles,stats:{gridSlots:slots.length,terrainVertices:data.terrain.nx*data.terrain.ny}};

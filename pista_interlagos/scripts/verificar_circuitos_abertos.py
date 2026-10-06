@@ -45,6 +45,12 @@ with sync_playwright() as p:
         sc = info['scenery']
         assert sc['trees'] > 500 and sc['houses'] > 50, sc
         assert sc['stands']['blocks'] >= 3 and sc['fans'] > 100, sc
+        # The #19's garage door always has its crewman: Leonardo takes his place in the story paddock (Brasilia once drew nobody).
+        door = page.evaluate("""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js'),{garageBays}=await import('./pit-lane.js'),{RIVAL_ROSTER}=await import('./race-roster.js');
+          const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixtureMode=this;return old.call(this)};interlagos.immersiveInfo();ImmersiveMode.prototype.info=old;
+          const scene=fixtureMode.visual.root.parent,pit=fixtureMode.data.pit,k=RIVAL_ROSTER.findIndex(r=>r.number==='19');
+          return {bay19:!!(pit?.garages&&scene.getObjectByName('Box_garagens')&&[...garageBays(pit,RIVAL_ROSTER.length).team.values()].includes(k)),door19:!!scene.getObjectByName('Porta_equipe_19')};}""")
+        assert door['door19'] or not door['bay19'], (circuito, door)
         page.screenshot(path=str(RENDERS / f'circuitos_{circuito}_largada.png'))
         # Volta de reconhecimento: o piloto automatico percorre o circuito.
         page.evaluate('interlagos.setTour(true)')

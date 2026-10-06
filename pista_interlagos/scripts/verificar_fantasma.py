@@ -79,7 +79,7 @@ with sync_playwright() as p:
  # Put back 14 m before the line: the ghost waits on it; frozen with P, every camera sees it.
  page.evaluate(BEFORE_LINE,14);page.wait_for_timeout(80);page.keyboard.press('KeyP');page.wait_for_timeout(300)
  views={}
- for view in ['chase','close','hood','cockpit','tv','aerial']:
+ for view in ['chase','close','far','hood','cockpit','tv','aerial']:
   camera(page,view);page.wait_for_timeout(400);g=info(page);views[view]={'visible':g['visible'],'opacity':round(g['opacity'],2)};shot(page,view)
  print(json.dumps({'cameras':views}),flush=True)
  assert all(v['visible'] and v['opacity']>.3 for v in views.values()),views

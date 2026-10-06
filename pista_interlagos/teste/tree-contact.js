@@ -9,7 +9,7 @@ const CELL=8,FRONT=2.42,REAR=2.35,HALF=.93,BUMPER=-.1,RESTITUTION=.15,FRICTION=.
 const LEAF=new THREE.Color();
 
 export class TreeField {
- // trees: [{x, y, z, height, width, kind, color, instance:{mesh, index}}] from the landscape.
+ // trees: [{x, y, z, height, width, kind, color, instance:{mesh, index}, nearInstance?}] from the landscape.
  constructor(trees,{mobile=false}={}){
   this.cells=new Map();this.trees=[];this.shaking=[];this.mobile=mobile;
   for(const t of trees){
@@ -98,7 +98,8 @@ export class TreeField {
    const angle=s.amount*Math.exp(-s.t*2.2)*Math.sin(s.t*7.5+.3);
    axis.set(-s.dir[1],0,-s.dir[0]).normalize();tilt.setFromAxisAngle(axis,angle);turn.setFromAxisAngle(up,t.turn);
    m.compose(new THREE.Vector3(t.x,t.z,-t.y),tilt.multiply(turn),new THREE.Vector3(t.width,t.height,t.width));
-   const {mesh,index}=t.instance??{};if(mesh){mesh.setMatrixAt(index,m);mesh.instanceMatrix.needsUpdate=true;}
+   // The near crown (its own mesh on the full builds) and the distant one sway together.
+   for(const {mesh,index} of [t.instance,t.nearInstance].filter(Boolean)){mesh.setMatrixAt(index,m);mesh.instanceMatrix.needsUpdate=true;}
    if(s.t>3)post.shake=null;
   }
   this.shaking=this.shaking.filter(p=>p.shake);

@@ -1,11 +1,15 @@
 import * as THREE from 'three';
 
-// Late-afternoon sun from the north-north-west (southern hemisphere), about 27° high:
-// long shadows that model the terrain, still bright enough to read the track, and
-// behind the main grandstand so its roof keeps the crowd in the shade.
-export const SUN_DIRECTION=new THREE.Vector3(-.34,.454,-.824).normalize();
+// Early-afternoon sun from the north-west (southern hemisphere), 45° high: bright and clean,
+// shadows still long enough to model the terrain, behind the main grandstand so its roof keeps
+// the crowd in the shade, and off to the side of the main straight, so the chase cameras see the
+// cars lit from three quarters with their shadows beside them (not flat from behind).
+export const SUN_DIRECTION=new THREE.Vector3(-.521,.707,-.478).normalize();
+// The world's environment strength (scene.environmentIntensity); the cars' trim, which carries the cars' own map
+// (three.js then ignores the scene's strength), keeps it too (car-finish.js TRIM_ENV).
+export const WORLD_ENV=1;
 // Linear-space colours shared by the sky dome, the fog and the environment map.
-const ZENITH=new THREE.Color(.085,.235,.52),HORIZON=new THREE.Color(.57,.67,.79),GROUND=new THREE.Color(.19,.205,.155);
+const ZENITH=new THREE.Color(.07,.22,.54),HORIZON=new THREE.Color(.53,.645,.8),GROUND=new THREE.Color(.19,.205,.155);
 const SKY_DETAIL=Object.freeze({basico:{octaves:3,layers:1},leve:{octaves:4,layers:1},completo:{octaves:6,layers:2},denso:{octaves:7,layers:2}});
 const detailFor=value=>SKY_DETAIL[typeof value==='boolean'?(value?'leve':'completo'):value]??SKY_DETAIL.completo;
 
@@ -34,7 +38,9 @@ void main(){
  color+=vec3(1.0,.82,.62)*(pow(towardSun,6.0)*.14+aureole*.45);
  vec3 horizonLight=horizon+vec3(.11,.065,.02)*pow(towardSun,4.0);
  color=mix(color,horizonLight,exp(-max(h,0.0)*12.0)*.5);
- if(h<0.0)color=mix(horizon,ground,smoothstep(0.0,.18,-h)*environment+smoothstep(0.0,.5,-h)*(1.0-environment)*.35);
+ // environment: 0 the dome, 1 the world's lighting map, 2 the cars' own (the horizon band below).
+ float world=min(environment,1.0);
+ if(h<0.0)color=mix(horizon,ground,smoothstep(0.0,.18,-h)*world+smoothstep(0.0,.5,-h)*(1.0-world)*.35);
  if(h>0.0){
   #if CLOUD_LAYERS > 1
   // Thin high-altitude cirrus: stretched, separate drift and very low opacity.
@@ -58,8 +64,26 @@ void main(){
   color=mix(color,cloud,cover*.97);
   transmission=exp(-cover*7.0);
  }
- // A cloud also occludes the solar disc; otherwise it glowed on top of dark clouds.
- color+=vec3(22.0,19.0,15.0)*smoothstep(.99965,.99986,mu)*(1.0-environment*.9)*transmission;
+ if(environment>1.5){
+  // The cars' map only (carEnvironment): what glossy paint and chrome reflect round the horizon on any
+  // circuit (the circuit's own picture, car-reflections.js, replaces it where the Gráficos tab asks); the
+  // world's lighting map (stands, walls, water, glass) keeps the plain sky and ground. A dark tree line
+  // with grandstand blocks over it, a pale wall at eye level, grey asphalt under it fading into the
+  // verge: the horizon line that shapes a body, where a flat ground showed none. Noise read round a
+  // circle so the band joins up behind the car; drawn over the low clouds, as trees and stands are.
+  vec2 ring=normalize(direction.xz+vec2(1e-5,0.0));
+  float trees=.03+.045*skyNoise(ring*7.0+3.1)+.015*skyNoise(ring*29.0+7.7),stands=step(.62,skyNoise(ring*3.0+11.0))*(.11+.04*skyNoise(ring*17.0));
+  float top=max(trees,stands),wall=smoothstep(-.036,-.028,h)*(1.0-smoothstep(-.008,-.003,h));
+  vec3 band=stands>trees?mix(vec3(.07,.072,.08),vec3(.22,.22,.23),step(top-.012,h)):vec3(.03,.04,.028);
+  // Asphalt a little brighter than the shade's (the circuits' own captures read about .36 sunlit on the grid; a
+  // uniform ground that bright greys a whole black body); a soft fill over the band, the bright low sky a flank's
+  // shoulder catches.
+  if(h<0.0)color=mix(mix(vec3(.18,.185,.19),ground,smoothstep(.05,.45,-h)),vec3(.42,.42,.41),wall);
+  else color=mix(band,color*(1.0+.22*(1.0-smoothstep(.1,.35,h))),smoothstep(top-.003,top+.002,h));
+ }
+ // A cloud also occludes the solar disc; otherwise it glowed on top of dark clouds. The world's lighting
+ // map keeps 10% of it; the cars' 30%: a glint in the paint beside the sun's own highlight, not a second sun.
+ color+=vec3(22.0,19.0,15.0)*smoothstep(.99965,.99986,mu)*(environment>1.5?.3:1.0-environment*.9)*transmission;
  gl_FragColor=vec4(color,1.0);
  #include <tonemapping_fragment>
  #include <colorspace_fragment>
@@ -68,7 +92,7 @@ void main(){
 export function createSky(renderer,scene,{mobile=false,detail=mobile?'leve':'completo'}={}){
  const uniforms={
   sunDirection:{value:SUN_DIRECTION.clone()},zenith:{value:ZENITH.clone()},horizon:{value:HORIZON.clone()},ground:{value:GROUND.clone()},
-  time:{value:0},cloudCover:{value:.53},environment:{value:0}
+  time:{value:0},cloudCover:{value:.47},environment:{value:0}
  };
  const quality=detailFor(detail);
  const material=new THREE.ShaderMaterial({name:'Ceu_dinamico',uniforms,vertexShader,fragmentShader,side:THREE.BackSide,depthWrite:false,fog:false,defines:{CLOUD_OCTAVES:quality.octaves,CLOUD_LAYERS:quality.layers}});
@@ -81,14 +105,18 @@ export function createSky(renderer,scene,{mobile=false,detail=mobile?'leve':'com
  const envScene=new THREE.Scene(),envMaterial=material.clone();envMaterial.uniforms.environment.value=1;envMaterial.defines={CLOUD_OCTAVES:4,CLOUD_LAYERS:2};
  envScene.add(new THREE.Mesh(dome.geometry,envMaterial));
  const pmrem=new THREE.PMREMGenerator(renderer),environmentTarget=pmrem.fromScene(envScene,.025),environment=environmentTarget.texture;
+ // The cars' own map (car-reflections.js 'ceu' and its fallback): the same sky with the horizon band.
+ envMaterial.uniforms.environment.value=2;const carTarget=pmrem.fromScene(envScene,.025),carEnvironment=carTarget.texture;
  pmrem.dispose();envMaterial.dispose();
- scene.environment=environment;scene.environmentIntensity=.82;
+ // The world's sky light (the cars carry their own map and strength, car-finish.js): with the hemisphere
+ // (main.js skyFill), about a fifth of the sun on open ground, so shade keeps its skylight.
+ scene.environment=environment;scene.environmentIntensity=WORLD_ENV;
  return {
-  dome,environment,sunDirection:SUN_DIRECTION,horizon:HORIZON,
+  dome,environment,carEnvironment,sunDirection:SUN_DIRECTION,horizon:HORIZON,
   update(dt){uniforms.time.value+=dt;},
   // The boolean API remains valid; scenery names also distinguish Básico and Ultra.
   setDetail(value){const next=detailFor(value);if(material.defines.CLOUD_OCTAVES!==next.octaves||material.defines.CLOUD_LAYERS!==next.layers){material.defines.CLOUD_OCTAVES=next.octaves;material.defines.CLOUD_LAYERS=next.layers;material.needsUpdate=true;}},
-  dispose(){scene.remove(dome);dome.geometry.dispose();material.dispose();if(scene.environment===environment)scene.environment=null;environmentTarget.dispose();},
+  dispose(){scene.remove(dome);dome.geometry.dispose();material.dispose();if(scene.environment===environment)scene.environment=null;environmentTarget.dispose();carTarget.dispose();},
   info:()=>({clouds:uniforms.cloudCover.value,cloudOctaves:material.defines.CLOUD_OCTAVES,cloudLayers:material.defines.CLOUD_LAYERS,environment:!!scene.environment,fog:[scene.fog.near,scene.fog.far]})
  };
 }
