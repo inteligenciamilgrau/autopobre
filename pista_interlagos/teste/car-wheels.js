@@ -1,6 +1,6 @@
 import * as THREE from 'three';
 import {finishMaterial} from './car-finish.js';
-// Racing slicks and spinning wheels, shared by every car built from a model (the player's, the rivals' clones,
+// Tyres and spinning wheels, shared by every car built from a model (the player's, the rivals' clones,
 // the car screen's): the tyres' sidewall lettering and worn tread, and the blur that hides the rims' spokes at
 // speed (its disc is drawn by contact-shadows.js, one instanced draw for every car).
 // The GLB tyres have no usable UVs (one ring has; the rest sit on 0,1): prepareWheels writes radial ones on the
@@ -54,11 +54,14 @@ function tyreGeometry(geometry,matrix,profile,outer){
  geometry.setAttribute('uv',new THREE.BufferAttribute(uv,2));geometry.setIndex(index);geometry.userData.tyreUV=true;
 }
 // Rubber is a dark grey, not paint black (about .03 linear: the sidewall's #313234); the tread a shade darker.
-// Sidewall: the moulded lettering (a made-up make, no real brand) twice round the tyre, a rim line, a darker
-// bead; the tread a little greyer, scrubbed. Drawn upside down: the outer face's letters stand toward the tread.
+// Sidewall: the moulded lettering (the game's own AUTO POBRE, with the tyre the model races on under it) twice
+// round the tyre, a rim line, a darker bead; the tread a little greyer, scrubbed. Drawn upside down: the outer
+// face's letters stand toward the tread.
 // The letters are a worn light grey, not paint white: brake dust and rubber pick-up dull them unevenly.
 export const TYRE_LETTERS=Object.freeze({v:.81,color:'#7d7a73',brand:36,small:17});
-function tyreTexture(){
+// The real cars' tyres: the Opala on Dunlop Direzza, the Fusca on Goodyear 185/70 R14.
+export const TYRE_MARKINGS=Object.freeze({opala:'DUNLOP DIREZZA',fusca:'GOODYEAR 185/70 R14'});
+function tyreTexture(tyre){
  const W=1024,H=256,c=document.createElement('canvas');c.width=W;c.height=H;const ctx=c.getContext('2d'),y=v=>(1-v)*H;
  ctx.fillStyle='#313234';ctx.fillRect(0,0,W,H);
  ctx.fillStyle='#2c2d2f';ctx.fillRect(0,y(TYRE_BANDS.tread[1]+.02),W,y(TYRE_BANDS.tread[0]-.02)-y(TYRE_BANDS.tread[1]+.02));
@@ -75,7 +78,7 @@ function tyreTexture(){
  for(let k=0;k<2;k++){
   const x0=k*W/2/.8;
   lx.font=`italic 900 ${L.brand}px Arial,sans-serif`;lx.fillText('AUTO POBRE',x0+24,0,250);
-  lx.font=`bold ${L.small}px Arial,sans-serif`;lx.fillText('SLICK DE CORRIDA',x0+300,-10,180);lx.fillText('MOLE · 99',x0+300,10,180);
+  lx.font=`bold ${L.small}px Arial,sans-serif`;lx.fillText(tyre,x0+300,-10,210);lx.fillText('MOLE · 99',x0+300,10,180);
   lx.font=`bold ${L.small-2}px Arial,sans-serif`;lx.fillText('▲',x0+520,0);
  }
  lx.restore();lx.globalCompositeOperation='source-atop';
@@ -98,10 +101,10 @@ function roughnessTexture(){
 // One lettered material per model, shared by all its cars; detail off (Baixo) puts a plain one back, the same
 // rubber grey (the GLB's own was near black).
 export const PLAIN_TYRE=Object.freeze({color:[.03,.031,.033],roughness:.88});
-const tyres={};let detailed=true,maps=null;
-function dressTyre(m){
- maps??={map:tyreTexture(),roughnessMap:roughnessTexture()};
- if(detailed){m.map=maps.map;m.roughnessMap=maps.roughnessMap;m.color.setRGB(1,1,1);m.roughness=1;}
+const tyres={},maps={};let detailed=true,roughnessMap=null;
+function dressTyre(m,model){
+ maps[model]??=tyreTexture(TYRE_MARKINGS[model]);roughnessMap??=roughnessTexture();
+ if(detailed){m.map=maps[model];m.roughnessMap=roughnessMap;m.color.setRGB(1,1,1);m.roughness=1;}
  else{m.map=null;m.roughnessMap=null;m.color.setRGB(...PLAIN_TYRE.color);m.roughness=PLAIN_TYRE.roughness;}
  m.needsUpdate=true;
 }
@@ -116,7 +119,7 @@ export function prepareWheels(root,model='opala'){
    tyreGeometry(o.geometry,toPivot.clone().multiply(o.matrixWorld),profile,outer);
    // The shared clone goes through the cars' finish (car-finish.js) so the reflection levels re-point its map
    // and set its strength, whichever of setLivery's passes ran first.
-   if(!tyres[model]){const m=o.material.clone();tyres[model]=m;dressTyre(m);finishMaterial(m);}
+   if(!tyres[model]){const m=o.material.clone();tyres[model]=m;dressTyre(m,model);finishMaterial(m);}
    o.material=tyres[model];
   }
  });
@@ -124,7 +127,7 @@ export function prepareWheels(root,model='opala'){
 // Gráficos: lettered tyres from Médio up. A change recompiles the tyres' program (main.js applyGraphics calls
 // it with the track detail, whose change already precompiles). Returns whether anything changed.
 export function setTyreDetail(on){
- if(on===detailed)return false;detailed=on;for(const m of Object.values(tyres))dressTyre(m);return true;
+ if(on===detailed)return false;detailed=on;for(const [model,m] of Object.entries(tyres))dressTyre(m,model);return true;
 }
 export const tyreInfo=()=>({detailed,models:Object.keys(tyres),lettered:Object.values(tyres).map(m=>!!m.map)});
 

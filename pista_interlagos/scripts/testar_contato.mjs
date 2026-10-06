@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import * as THREE from '../teste/node_modules/three/build/three.module.js';
 import {CONTACT_SHAPES,CONTACT_MARGIN,CONTACT_TEXTURE,contactQuad,contactShade,contactPixels,contactFade,contactStrength,BLUR_LEVELS,wheelSpeeds,carContact,contactPullAt} from '../teste/contact-shadows.js';
-import {TYRE_PROFILES,TYRE_BANDS,TYRE_LETTERS,tyreUV,splitSeam,tyreRoughness,BLUR_PROFILES,BLUR_TURN,blurTexel,blurLipSlope,blurArc,spokeCover,faceGLSL,spinBlur} from '../teste/car-wheels.js';
+import {TYRE_PROFILES,TYRE_BANDS,TYRE_LETTERS,TYRE_MARKINGS,tyreUV,splitSeam,tyreRoughness,BLUR_PROFILES,BLUR_TURN,blurTexel,blurLipSlope,blurArc,spokeCover,faceGLSL,spinBlur} from '../teste/car-wheels.js';
 import {GRAPHICS_LEVELS,GRAPHICS_OPTIONS,GRAPHICS_PRESETS} from '../teste/graphics-settings.js';
 
 // Contact shadows (contact-shadows.js): each footprint covers its car's body with a margin, in its own half
@@ -71,6 +71,9 @@ for(const [name,P] of Object.entries(TYRE_PROFILES)){
  // A quarter turn moves u by a quarter.
  const u0=tyreUV(P.radius,0,0,P,1)[0],u1=tyreUV(0,P.radius,0,P,1)[0];assert.ok(Math.abs(u1-u0-.25)<1e-9);
 }
+// Each model's sidewall reads the tyre its real car races on.
+assert.deepEqual(Object.keys(TYRE_MARKINGS).sort(),Object.keys(TYRE_PROFILES).sort());
+assert.equal(TYRE_MARKINGS.opala,'DUNLOP DIREZZA');assert.equal(TYRE_MARKINGS.fusca,'GOODYEAR 185/70 R14');
 // A triangle across u's seam gets copies of its low corners at u+1; the others keep their vertices.
 const seam=splitSeam([0,1,2,2,3,4],[.98,.02,.97,.5,.55]);
 assert.deepEqual(seam.index,[0,5,2,2,3,4]);assert.deepEqual(seam.copies,[1]);
