@@ -24,6 +24,12 @@ OFFSET_X=.2165 # exportar_fusca_jogo.py: game x = OFFSET_X - y
 # the ground, the arches just over the tyres): the exporter brings everything but the wheels down by it, so a point of
 # the game's frame is that much higher in this one.
 LOWER=.19
+# The race wheels (fusca_acabamento.race_wheels): the tyre's radius and its half width either side of V2.BITOLA. The
+# exporter leaves them where they are while the rest comes down by LOWER, so in this frame they sit LOWER higher. The
+# cabin keeps out of the space they turn in (in_wheels): the rear seat's back wall stands 3 cm ahead of the rear tyres
+# and the parcel shelf's underside 4 cm over them.
+WHEEL_R,TYRE_HALF=.27,.09
+REAR_WALL,SHELF=V2.EIXO_T-WHEEL_R-.03,LOWER+2*WHEEL_R+.04
 def game(x,y,z):
  """A point of the game's car frame (+X forward, +Y up, -Z the driver's side) in this frame."""
  return Vector((-z,OFFSET_X-x,y+LOWER))
@@ -198,7 +204,27 @@ def build(sup,body,m):
  for o in classic_wheel(M):add(o)
  leaks=poking_out(cab,made)
  assert not leaks,'peças da cabine atravessando a lataria: '+', '.join(f'{n} {d*1000:.0f} mm' for n,d in leaks)
+ clash=in_wheels(made)
+ assert not clash,'peças da cabine dentro das rodas: '+', '.join(f'{n} ({k} pontos)' for n,k in clash)
  return made
+
+def in_wheels(objects,margin=.015):
+ """The objects reaching into the space a tyre turns in (its radius and half width round each wheel's centre, plus
+ margin), with how many points do: points spread over the triangles the GLB gets near a wheel, as a large end cap
+ can cross a tyre between its corners (the rear seat's base once showed through the rear wheels' faces)."""
+ bpy.context.view_layer.update();out=[];reach=Vector((TYRE_HALF+margin,WHEEL_R+margin,WHEEL_R+margin))
+ wheels=[Vector((s*V2.BITOLA,ya,WHEEL_R+LOWER)) for ya in (V2.EIXO_F,V2.EIXO_T) for s in (1,-1)]
+ inside=lambda p:any(abs(p.x-w.x)<reach.x and math.hypot(p.y-w.y,p.z-w.z)<reach.y for w in wheels)
+ for o in objects:
+  if o.type!='MESH':continue
+  me=o.data;me.calc_loop_triangles();W=o.matrix_world;co=[W@v.co for v in me.vertices];hits=0
+  for t in me.loop_triangles:
+   a,b,c=(co[i] for i in t.vertices)
+   lo=Vector([min(a[k],b[k],c[k]) for k in range(3)]);hi=Vector([max(a[k],b[k],c[k]) for k in range(3)])
+   if not any(all(lo[k]<w[k]+reach[k] and hi[k]>w[k]-reach[k] for k in range(3)) for w in wheels):continue
+   hits+=sum(inside(a+(b-a)*(u/6)+(c-a)*(v/6)) for u in range(7) for v in range(7-u))
+  if hits:out.append((o.name,hits))
+ return out
 
 def poking_out(cab,objects,tolerance=.003):
  """The objects with vertices, faces' middles or (larger faces, a dash's end caps) their fan triangles' middles
@@ -259,7 +285,7 @@ def recolor_shell(body,M):
    # Its edge hides under the header bar and the A-pillar bars, under the main hoop, behind the side panels' tops
    # and under the parcel shelf at the back (the lining covers the wall under the rear window): the faces' steps
    # along it never show.
-   lined=c.z>.97 if c.y<.98 else c.z>.81
+   lined=c.z>.97 if c.y<REAR_WALL-.015 else c.z>.81
    bare=c.y<HEADER_Y or (c.y<MAIN_Y and under_bars(c))
    p.material_index=liner if lined and -.62<c.y<1.32 and not bare else paint
 
@@ -426,7 +452,7 @@ def doors(cab,M):
   out.append(box('Macaneta_interna_base_'+side,h,(.05,.004,.03),M['chrome'],.002,z_axis=n,up=Vector((0,0,1)),interno=True))
   k,_=w(.28,1.0,.03)
   out.append(cylinder('Pino_trava_'+side,k-Vector((0,0,.01)),Vector((0,0,1)),.0045,.004,.03,M['chrome'],8,interno=True))
-  out.append(card(cab,'Forro_lateral_'+side,s,BACK+.03,.98,.37,.98,M))
+  out.append(card(cab,'Forro_lateral_'+side,s,BACK+.03,REAR_WALL-.015,.37,.98,M))
  return out
 
 def floor(cab,M):
@@ -464,8 +490,11 @@ def floor(cab,M):
  out.append(cylinder('Freio_mao_pegador',pivot+Vector((0,.12,.035)),(grip-pivot).normalized(),.016,.015,.13,M['wheel'],12,interno=True))
  out.append(cylinder('Freio_mao_botao',grip,(grip-pivot).normalized(),.007,.006,.012,M['chrome'],10,interno=True))
  # The rear seat's base and back wall (the seat is out) and the parcel shelf behind, carpeted black as a Fusca's;
- # the battery in a box on the base.
- out.append(loft('Base_banco_tras',[(.60,FLOOR),(.60,.47),(.98,.47),(.98,.80),(1.30,.80),(1.30,FLOOR)],[M['vinyl']],cab,lambda k:0,inset=.006,stations=13))
+ # the battery in a box on the base. The back wall stands just ahead of the rear wheels (REAR_WALL) and the shelf
+ # over them, wall to wall: under it the wheels turn in their housings (from the arches the tyres show against the
+ # housings' dark liners, criar_fusca_v2.caixa_de_roda).
+ out.append(loft('Base_banco_tras',[(.60,FLOOR),(.60,.47),(REAR_WALL-.015,.47),(REAR_WALL-.015,.80),(1.30,.80),(1.30,SHELF),(REAR_WALL,SHELF),(REAR_WALL,FLOOR)],
+  [M['vinyl']],cab,lambda k:0,inset=.006,stations=13))
  out.append(box('Bateria_caixa',(-.25,.80,.47+.09),(.26,.17,.18),M['shell'],.008,interno=True))
  out.append(box('Bateria_tampa',(-.25,.80,.47+.183),(.27,.18,.012),M['vinyl'],.004,interno=True))
  for k,c in enumerate((M['red'],M['wheel'])):out.append(cylinder(f'Bateria_polo_{k}',Vector((-.33+k*.16,.80,.47+.19)),Vector((0,0,1)),.012,.01,.02,c,12,interno=True))

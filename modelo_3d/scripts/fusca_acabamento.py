@@ -236,7 +236,7 @@ def race_prep(car,body,cut,m,sup,lid):
 # --- Race wheels: black steel wheels with six holes and low tyres, 0.54 m across (the Copa Fusca photo the user
 # sent: about 13 inches), in place of criar_fusca_v2's 5.60-15 with chrome hubcaps. The same five parts per wheel
 # (exportar_fusca_jogo.py WHEEL), centred WHEEL_R over the ground.
-WHEEL_R=.27
+WHEEL_R=C.WHEEL_R # the cabin keeps clear of them (fusca_cabine.in_wheels)
 WHEEL_PARTS=re.compile(r'^(Pneu|Roda|Tambor|Calota|Aro_roda)_[ED]_[+-]1\.2$')
 def race_wheels(m):
  for o in [o for o in bpy.data.objects if WHEEL_PARTS.match(o.name)]:bpy.data.objects.remove(o)

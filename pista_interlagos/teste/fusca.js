@@ -12,7 +12,7 @@ import {prepareWheels} from './car-wheels.js';
 // the street car's (the sills 7 cm off the ground, the arches just over the tyres), the engine lid propped open. Each wears a team's colours as the Opalas do (race-roster.js), as the
 // Copa Fusca's liveries do: the body paint and the dash in the first, the four fenders in the second (the Opala's
 // stripe), the number on both doors and on the roof.
-export const FUSCA_URL='./assets/fusca_v2.glb?v=fusca-v2-corrida-4';
+export const FUSCA_URL='./assets/fusca_v2.glb?v=fusca-v2-corrida-5';
 // The driver (driver.js and rival-driver.js, with the race wheel he turns) moves this much from the Opala's
 // seat: onto the Fusca's steering wheel, 26 cm further forward, 8 cm lower and 6 cm inboard (the Fusca is
 // narrower: from the Opala's seat his left elbow came out through the door). The exporter builds the cabin round

@@ -91,9 +91,11 @@ blender --background --factory-startup --python-exit-code 2 --python modelo_3d/s
   manivela, maçaneta e pino), laterais traseiras; forro do teto claro com as costuras, quebra-sóis
   e luz de teto; gaiola (arco atrás dos bancos, colunas A até o assoalho, travessa do para-brisa, barras baixas nas portas,
   diagonal, escoras e barra do cinto); banco concha com cinto vermelho; túnel, tapetes de borracha, torre do câmbio, freio
-  de mão, extintor no lugar do banco do carona, base do banco traseiro e bagageiro em preto com a bateria. A cabine é
-  montada em volta do lugar do piloto do jogo (`SEAT` = `fusca.js` `FUSCA_SEAT`, 6 cm para dentro do banco do Opala: o
-  cotovelo esquerdo saía pela porta) e confere que nenhuma peça atravessa a lataria (`poking_out`).
+  de mão, extintor no lugar do banco do carona, base do banco traseiro e bagageiro em preto com a bateria (o encosto fica
+  3 cm à frente das rodas traseiras e o bagageiro 4 cm acima delas: antes a base ia de lado a lado e aparecia pelos arcos,
+  atravessando a face das rodas). A cabine é montada em volta do lugar do piloto do jogo (`SEAT` = `fusca.js`
+  `FUSCA_SEAT`, 6 cm para dentro do banco do Opala: o cotovelo esquerdo saía pela porta) e confere que nenhuma peça
+  atravessa a lataria (`poking_out`) nem entra no espaço onde as rodas giram (`in_wheels`).
 - **Bico arredondado** (`fusca_acabamento.py` `RoundNose`, a carroceria do exportador): o V2 fecha a frente com uma tampa
   plana (só 3 cm de filete), que aparecia como uma face lisa entre os faróis sobre o para-choque. No jogo o capô vai 2 cm
   mais à frente e desce arredondado (raio de 9 cm) até o avental, a frente é curva em planta e os para-lamas viram bojos
