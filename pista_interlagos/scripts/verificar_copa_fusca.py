@@ -25,7 +25,7 @@ SEED="""if(!sessionStorage.getItem('seeded')){sessionStorage.setItem('seeded','1
  for(const k of Object.keys(localStorage))if(k.startsWith('opala99-championship'))localStorage.removeItem(k);
  localStorage.setItem('opala99-preferences-v1',JSON.stringify({circuit:'interlagos',immersive:false,car:'73',carModel:'opala'}));}"""
 HOOK="""async()=>{const {ImmersiveMode}=await import('./immersive-mode.js');const old=ImmersiveMode.prototype.info;ImmersiveMode.prototype.info=function(){window.fixture=this;return old.call(this)};interlagos.immersiveInfo();return true;}"""
-FIELD="""()=>{interlagos.immersiveInfo();const v=fixture.visual;return {models:v.rivals.map(o=>o.userData.fusca?'fusca':'opala'),bodies:fixture.rivals.map(r=>r.car.body.name),playerBody:interlagos.car.body.name}}"""
+FIELD="""()=>{interlagos.immersiveInfo();const v=fixture.visual;return {models:v.rivals.map(o=>o.userData.fusca?'fusca':'opala'),bodies:fixture.rivals.map(r=>r.car.body.name),playerBody:interlagos.car.body.name,rivals:fixture.rivals.map(r=>r.entry.number)}}"""
 # The car screen's way on: first in the side panel, above the cards and as wide as them, inside the window.
 NEXT="""()=>{const r=s=>document.querySelector(s).getBoundingClientRect(),c=document.querySelector('#cars');return {first:document.querySelector('.cars-side').firstElementChild?.id==='carsNext',cardsWidth:r('#carCards').width,detail:document.querySelector('#carsNextDetail')?.textContent??null,
  next:r('#carsNext').toJSON(),stage:r('#carStage').top,cards:r('#carCards').top,height:innerHeight,width:document.documentElement.scrollWidth<=innerWidth,scroll:c.scrollHeight-c.clientHeight}}"""
@@ -104,7 +104,9 @@ with sync_playwright() as p:
  session=page.inner_text('header .session');assert 'COPA FUSCA 2026 · ETAPA 1/11' in session,session
  page.evaluate(HOOK);page.wait_for_timeout(400)
  cars=page.evaluate("()=>interlagosCarros.info()");field=page.evaluate(FIELD)
- assert cars['raceModel']=='fusca' and cars['raceCar']=='73' and not cars['opalaShown'] and cars['fusca']['number']=='73',cars
+ # The car is the Fusca tab's (the 99 unless picked: the Opala's 73 is no Copa Fusca car), the field the Copa Fusca's.
+ assert cars['raceModel']=='fusca' and cars['raceCar']=='99' and not cars['opalaShown'] and cars['fusca']['number']=='99',cars
+ assert field['rivals']==['20','86','77','29','18','3','33','5','39','11','4','9','79','49'],field['rivals']
  assert field['models']==['fusca']*14 and field['bodies']==['fusca']*14 and field['playerBody']=='fusca',field
  assert page.evaluate("JSON.parse(localStorage.getItem('opala99-preferences-v1')).carModel")=='opala','the car screen keeps its tab'
  shot(page,'copa_fusca_grid.png')

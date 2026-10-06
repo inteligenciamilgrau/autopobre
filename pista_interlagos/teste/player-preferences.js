@@ -1,5 +1,5 @@
 import {circuitId} from './circuits.js';
-import {DUEL_DEFAULT,carEntry,AI_LEVELS,PLAYER_CAR_DEFAULT,CAR_MODELS,CAR_MODEL_DEFAULT} from './race-roster.js';
+import {DUEL_DEFAULT,carEntry,duelDefault,AI_LEVELS,PLAYER_CAR_DEFAULT,CAR_MODELS,CAR_MODEL_DEFAULT} from './race-roster.js';
 import {normalizeGraphics,DEBUG_OVERLAY_MODES,DEBUG_OVERLAY_CORNERS} from './graphics-settings.js';
 import {WHEEL_LOCKS,WHEEL_LOCK_DEFAULT} from './wheel-controls.js';
 export const PREFERENCES_KEY='opala99-preferences-v1';
@@ -32,10 +32,14 @@ export function normalizePreferences(value){
   // Performance overlay (debug-overlay.js, F3): off unless asked for, and its corner.
   debugOverlay:DEBUG_OVERLAY_MODES.some(([v])=>v===source.debugOverlay)?source.debugOverlay:'off',
   debugCorner:DEBUG_OVERLAY_CORNERS.some(([v])=>v===source.debugCorner)?source.debugCorner:'auto',
-  // The rival of the 1x1 (Modo Corrida's track screen), by car number (the 99 when the player races another car).
+  // The rival of the 1x1 (Modo Corrida's track screen), by car number (the 99 when the player races another car);
+  // fuscaDuelRival: the one of the Copa Fusca's field (race-roster.js), when the race is in Fuscas.
   duelRival:typeof source.duelRival==='string'&&carEntry(source.duelRival)?source.duelRival:DUEL_DEFAULT,
+  fuscaDuelRival:typeof source.fuscaDuelRival==='string'&&carEntry(source.fuscaDuelRival,'fusca')?source.fuscaDuelRival:duelDefault('fusca'),
   // The car the player races in Modo Corrida (the car screen, car-select.js), by number; the story is the 99's.
+  // fuscaCar: the one picked on the Fusca tab, among the Copa Fusca's cars.
   car:typeof source.car==='string'&&carEntry(source.car)?source.car:PLAYER_CAR_DEFAULT,
+  fuscaCar:typeof source.fuscaCar==='string'&&carEntry(source.fuscaCar,'fusca')?source.fuscaCar:PLAYER_CAR_DEFAULT,
   // Its model (the car screen's tabs): the Opala unless the player picks the Fusca.
   carModel:CAR_MODELS.includes(source.carModel)?source.carModel:CAR_MODEL_DEFAULT,
   // Laps of every race (Modo Corrida and Modo História): 3 unless the player picks more or fewer.

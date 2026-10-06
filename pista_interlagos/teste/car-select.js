@@ -1,11 +1,11 @@
 import * as THREE from 'three';
-import {CAR_CHOICES,carEntry,MODEL_NAMES,CAR_MODELS,CAR_MODEL_DEFAULT,luminance,cssColor as css} from './race-roster.js';
+import {rosterOf,carEntry,MODEL_NAMES,CAR_MODELS,CAR_MODEL_DEFAULT,PLAYER_CAR_DEFAULT,luminance,cssColor as css} from './race-roster.js';
 import {carWorkshop,FAR_PROFILE} from './immersive-visuals.js';
-import {fuscaCar,fuscaDispose,FUSCA_PROFILE} from './fusca.js';
+import {fuscaCar,fuscaDispose,FUSCA_PROFILE,BOLT,BOLT_SHAPE} from './fusca.js';
 import {setCarEnvironment} from './car-finish.js';
 // Modo Corrida's car screen (#cars, between the opening and the track screen): two tabs, the Opala and the
-// Fusca (fusca.js), each with the grid's 15 cars (the Fusca in their colours) as cards and the chosen one
-// turning in a small studio. The studio is drawn by the game's own renderer on the page's canvas, which
+// Fusca (fusca.js), each with its grid's 15 cars as cards (the Opala's Old Stock field, the Fusca's Copa Fusca one,
+// race-roster.js) and the chosen one turning in a small studio. The studio is drawn by the game's own renderer on the page's canvas, which
 // shows through the screen's open middle (carros.css); the car is the race model, painted as the rivals
 // are (ImmersiveVisuals.rivalCar, fuscaCar), so it is what races.
 // Card icon: the car's side view (the distant rivals' model, immersive-visuals.js FAR_PROFILE, or the
@@ -25,6 +25,9 @@ function carIcon(entry,model){
  const svg=svgNode('svg',{viewBox:'0 0 100 34','aria-hidden':'true'});
  svg.append(svgNode('polygon',{points:icon.body,fill:css(entry.color)}),...icon.trim.map(points=>svgNode('polygon',{points,fill:css(entry.stripe)})),svgNode('polygon',{points:icon.glass,fill:'#17232a'}));
  for(const [x,y,r] of icon.wheels)svg.append(svgNode('circle',{cx:f(x),cy:f(y),r:f(r),fill:'#0d0f0f'}),svgNode('circle',{cx:f(x),cy:f(y),r:f(r*.42),fill:'#8d9396'}));
+ // A livery's drawing (fusca.js BOLT, BOLT_SHAPE): the lightning bolt along the side, under the number.
+ if(entry.graphic==='raio'&&model==='fusca'){const left=(BOLT.x-BOLT.w/2+2.5)*20,top=(1.55-BOLT.y-BOLT.h/2)*20;
+  svg.append(svgNode('polygon',{points:BOLT_SHAPE.map(([u,v])=>`${f(left+u*BOLT.w*20)},${f(top+v*BOLT.h*20)}`).join(' '),fill:'#ffb21a',stroke:'#121314','stroke-width':'.5'}));}
  const number=svgNode('text',{x:f(icon.number[0]),y:f(icon.number[1]),'text-anchor':'middle','font-family':'Arial,sans-serif','font-size':'10.5','font-weight':'900','font-style':'italic',fill:dark?'#141716':'#f4f3ee',stroke:dark?'#f4f3ee':'#141716','stroke-width':'.7','paint-order':'stroke'});
  number.textContent=entry.number;svg.append(number);return svg;
 }
@@ -60,7 +63,7 @@ class Studio {
  drop(){if(!this.car)return;this.car.removeFromParent();if(this.car.userData.own)fuscaDispose(this.car);else this.workshop.disposeCar(this.car,this.template);this.car=null;this.shown=null;}
  ready(model){return !!(model==='fusca'?this.fusca:this.template);}
  build(){
-  const [model,number]=this.wanted.split(':'),entry=carEntry(number);if(!this.ready(model)||!entry||this.wanted===this.shown)return;
+  const [model,number]=this.wanted.split(':'),entry=carEntry(number,model);if(!this.ready(model)||!entry||this.wanted===this.shown)return;
   this.drop();
   this.car=model==='fusca'?fuscaCar(this.fusca,entry):this.workshop.rivalCar(this.template,entry.color,entry.number,'',{stripe:entry.stripe,finish:entry.finish,livery99:entry.number==='99'});
   this.turntable.add(this.car);this.shown=this.wanted;
@@ -83,13 +86,15 @@ class Studio {
  }
  turn(dx){this.yaw+=dx*.009;this.handUntil=this.time+2.5;}
 }
-// root: the #cars screen. value: the chosen car's number; model: its model ('opala' or 'fusca', the
-// tabs). onPick(number), onModel(model) (main.js then loads the Fusca's model: setFusca), onNext(), onBack().
+// root: the #cars screen. values: the chosen car's number in each model's field ({opala, fusca}); model: the tab
+// shown ('opala' or 'fusca'). onPick(number, model), onModel(model) (main.js then loads the Fusca's model:
+// setFusca), onNext(), onBack().
 // In a multiplayer room (setRoom) the cars other pilots have show their names and cannot be taken, and
 // everyone races the Opala (the tabs hide).
 export class CarSelect {
- constructor({root,value,model=CAR_MODEL_DEFAULT,carRoot,onPick,onModel,onNext,onBack}){
-  this.root=root;this.model=CAR_MODELS.includes(model)?model:CAR_MODEL_DEFAULT;this.value=carEntry(value)?value:CAR_CHOICES[0].number;this.onPick=onPick;this.onModel=onModel;this.studio=new Studio(carRoot);this.live=false;
+ constructor({root,values={},model=CAR_MODEL_DEFAULT,carRoot,onPick,onModel,onNext,onBack}){
+  this.root=root;this.model=CAR_MODELS.includes(model)?model:CAR_MODEL_DEFAULT;
+  this.values=Object.fromEntries(CAR_MODELS.map(m=>[m,carEntry(values[m],m)?values[m]:PLAYER_CAR_DEFAULT]));this.onPick=onPick;this.onModel=onModel;this.studio=new Studio(carRoot);this.live=false;
   this.room=null;this.taken=new Map();this.asked=null;this.guest=null;this.failure=null;this.tell('');
   const $=id=>root.querySelector('#'+id);this.stage=$('carStage');this.status=$('carStageStatus');this.tabs=$('carModels');this.note=root.querySelector('.car-note');
   for(const tab of this.tabs.querySelectorAll('[data-model]'))tab.onclick=()=>this.setModel(tab.dataset.model);
@@ -101,7 +106,7 @@ export class CarSelect {
    if(e.key==='Enter'){e.preventDefault();onNext();return;}
    const keys={ArrowLeft:-1,ArrowRight:1,ArrowUp:-this.columns(),ArrowDown:this.columns()},step=keys[e.key];if(!step)return;e.preventDefault();
    // Past the cars other pilots have in a room; a step past the ends stops at the first or last free card.
-   const choices=CAR_CHOICES,cur=choices.findIndex(c=>c.number===this.value),last=choices.length-1,free=i=>!this.taken.has(choices[i].number);
+   const choices=rosterOf(this.model).choices,cur=choices.findIndex(c=>c.number===this.value),last=choices.length-1,free=i=>!this.taken.has(choices[i].number);
    let i=cur+step;while(i>=0&&i<=last&&!free(i))i+=step;
    if(i<0||i>last){i=Math.max(0,Math.min(last,i));while(i!==cur&&!free(i))i-=Math.sign(step);}
    if(i===cur)return;const next=choices[i];
@@ -116,21 +121,24 @@ export class CarSelect {
   this.show();
  }
  columns(){return getComputedStyle(this.cards).gridTemplateColumns.split(' ').length||1;}
+ // The car chosen in the tab shown.
+ get value(){return this.values[this.model];}
+ set value(number){this.values[this.model]=number;}
  // The cards in the tab's model.
  fillCards(){
-  this.cards.replaceChildren(...CAR_CHOICES.map(entry=>{
+  this.cards.replaceChildren(...rosterOf(this.model).choices.map(entry=>{
    const b=document.createElement('button');b.type='button';b.dataset.car=entry.number;b.setAttribute('role','radio');
    const label=document.createElement('span');label.textContent=entry.shortName;b.append(carIcon(entry,this.model),label);
    b.title=`#${entry.number} · ${entry.name}`;b.onclick=()=>this.pick(entry.number);return b;
   }));
-  this.cards.setAttribute('aria-label',this.model==='fusca'?'Fuscas nas cores das equipes':'Carros do grid');
+  this.cards.setAttribute('aria-label',this.model==='fusca'?'Fuscas da Copa Fusca':'Carros do grid');
  }
  pick(number){
-  if(!carEntry(number))return;
+  if(!carEntry(number,this.model))return;
   if(this.taken.has(number)){this.tell(`O #${number} está com ${this.taken.get(number)}. Escolha outro carro.`,number);this.show();return;}
-  this.tell('');this.value=number;this.show();this.onPick?.(number);
+  this.tell('');this.value=number;this.show();this.onPick?.(number,this.model);
  }
- // The tabs: the Opala or the Fusca, the same car chosen in either.
+ // The tabs: the Opala or the Fusca, each with its own field and its own car chosen.
  setModel(model,{silent=false}={}){
   if(!CAR_MODELS.includes(model)||model===this.model)return;
   this.model=model;this.fillCards();this.show();if(!silent)this.onModel?.(model);
@@ -156,22 +164,22 @@ export class CarSelect {
  setTemplate(template){const s=this.studio;if(!s.car?.userData.own)s.drop();s.template=template;this.show();}
  failed(model='opala'){this.failure=model;if(model!==this.model)return;this.status.textContent=`Não foi possível carregar o ${MODEL_NAMES[model]}. A escolha vale mesmo assim.`;this.status.hidden=false;}
  show(){
-  const entry=carEntry(this.value),$=id=>this.root.querySelector('#'+id),own=entry.number==='99',fusca=this.model==='fusca',name=MODEL_NAMES[this.model];
+  // own: the Opala 99, the Auto-Pobre Racing's; the Fusca 99 is Cristiano Canto's.
+  const fusca=this.model==='fusca',entry=carEntry(this.value,this.model),$=id=>this.root.querySelector('#'+id),own=entry.number==='99'&&!fusca,name=MODEL_NAMES[this.model];
   this.studio.wanted=`${this.model}:${entry.number}`;
   for(const tab of this.tabs.querySelectorAll('[data-model]')){const on=tab.dataset.model===this.model;tab.setAttribute('aria-selected',String(on));tab.tabIndex=on?0:-1;}
-  $('carsTitle').textContent=`Com qual ${name} você vai correr?`;$('carsKicker').textContent=fusca?'O GRID · 15 FUSCAS':'O GRID · 15 OPALAS';
+  $('carsTitle').textContent=`Com qual ${name} você vai correr?`;$('carsMode').textContent=fusca?'MODO CORRIDA · COPA FUSCA':'MODO CORRIDA · OLD STOCK RACE';$('carsKicker').textContent=fusca?'O GRID · 15 FUSCAS':'O GRID · 15 OPALAS';
   for(const b of this.cards.children){
    const on=b.dataset.car===entry.number,holder=this.taken.get(b.dataset.car),label=b.querySelector('span');b.setAttribute('aria-checked',String(on));b.tabIndex=on?0:-1;
-   b.classList.toggle('taken',!!holder);b.setAttribute('aria-disabled',String(!!holder));label.textContent=holder??carEntry(b.dataset.car).shortName;
-   b.title=holder?`#${b.dataset.car} · com ${holder}`:`#${b.dataset.car} · ${carEntry(b.dataset.car).name}`;
+   b.classList.toggle('taken',!!holder);b.setAttribute('aria-disabled',String(!!holder));label.textContent=holder??carEntry(b.dataset.car,this.model).shortName;
+   b.title=holder?`#${b.dataset.car} · com ${holder}`:`#${b.dataset.car} · ${carEntry(b.dataset.car,this.model).name}`;
   }
   $('carNumber').textContent='#'+entry.number;$('carNumber').style.setProperty('--body',css(entry.color));$('carNumber').style.setProperty('--stripe',css(entry.stripe));
   $('carName').textContent=own?`${name} 99 · Auto-Pobre Racing`:`${name} ${entry.number} · ${entry.shortName}`;
-  $('carDetail').textContent=own&&fusca?`O Fusca do Stevan Gaipo: preto com os para-lamas amarelos (o amarelo da faixa do Opala 99), sem os patrocinadores. ${entry.rank}º no campeonato (${entry.points} pts).`
+  $('carDetail').textContent=fusca?`Fusca de ${entry.name} · ${entry.category}, ${entry.points} pts na classe em 2026 · ${entry.rank}º do top 15 da Copa Fusca. Você corre no lugar dele${entry.number==='99'?'':'; o Cristiano vai de Fusca 99'}.`
    :own?`O carro do Stevan Gaipo e do Edu Neves, da vaquinha ao grid. ${entry.rank}º no campeonato (${entry.points} pts).`
-   :fusca?`Nas cores do carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele; o Stevan Gaipo vai de Fusca 99.`
    :`Carro de ${entry.name}${entry.rank?` · ${entry.rank}º no campeonato (${entry.points} pts)`:''}. Você corre no lugar dele${this.room?'':'; o Stevan Gaipo vai de Opala 99'}.`;
-  if(!this.room)this.note.textContent=fusca?'De Fusca, o grid inteiro corre de Fusca de corrida, cada um com as cores do seu carro (a segunda nos para-lamas, como na Copa Fusca) e o número: menos motor que os Opalas (no máximo uns 170 km/h), melhor nas curvas e mais manso na saída delas. O piloto do carro escolhido fica de fora e o Stevan Gaipo corre com o Fusca 99.'
+  if(!this.room)this.note.textContent=fusca?'De Fusca, o grid é o da Copa Fusca 2026: os 15 melhores da temporada, cada um com o número e as cores do seu carro (a segunda nos para-lamas) e o ritmo que mostraram nas corridas. Menos motor que os Opalas (no máximo uns 170 km/h), melhor nas curvas e mais manso na saída delas. O piloto do carro escolhido fica de fora e o Cristiano corre com o Fusca 99.'
    :'Todos correm com o mesmo Opala: muda a pintura e o número. O piloto do carro escolhido fica de fora e o Stevan Gaipo corre com o 99.';
   // In a room the note says how the cars are shared, and what became of the last choice.
   if(this.room)this.room.textContent=this.notice||(this.asked?`Pedindo o #${this.asked} ao anfitrião… Vale a partir da próxima largada.`:

@@ -102,19 +102,24 @@ $('carDamage').onchange=()=>{preferences.update({damage:$('carDamage').checked})
 // standings pace, the harder levels the pilots' table.
 // The player's car is the 99 or, in Modo Corrida, the car screen's choice, whose driver then sits out
 // and the 99 races in its seat (race-roster.js fieldRoster).
+// The car each tab of the car screen keeps (the Opala's and the Fusca's fields have their own numbers,
+// race-roster.js), and the 1x1's rival picked in that field.
+const chosenCar=model=>model==='fusca'?preferences.values.fuscaCar:preferences.values.car;
+const chosenDuel=model=>model==='fusca'?preferences.values.fuscaDuelRival:preferences.values.duelRival;
 // The car of the next race: Modo Corrida's choice (in a multiplayer room, the car the room gave this
 // window, multiplayer.js car); the story races the 99, so it skips the car screen.
-const menuCar=()=>menuMode==='historia'?'99':multiplayer?.car()??preferences.values.car;
+const menuCar=()=>menuMode==='historia'?'99':multiplayer?.car()??chosenCar(menuModel());
 // Its model: Modo Corrida's Fusca tab (fusca.js) or the Opala; the story and a room's race are Opalas.
 const menuModel=()=>menuMode==='historia'||roomWanted?'opala':preferences.values.carModel;
 const carScreen=()=>menuMode==='corrida';
 // The settings' grid list: the field racing now or, between races, the next one. Rebuilt each time
 // the settings open (openSettings).
 function showRoster(){
- const roster=$('gridRoster'),mine=sessionStarted?raceCar:menuCar(),you=mine==='99'?PLAYER_ENTRY:carEntry(mine);roster.replaceChildren();
+ // own: the Opala 99, the player's team's car; in the Fusca's field the 99 is Cristiano Canto's.
+ const roster=$('gridRoster'),mine=sessionStarted?raceCar:menuCar(),field=sessionStarted?raceModel:menuModel(),own=mine==='99'&&field!=='fusca',you=own?PLAYER_ENTRY:carEntry(mine,field);roster.replaceChildren();
  // A multiplayer guest races in the host's field (raceGrid): in its own car's seat, the host's car at the back.
  const back=sessionStarted?raceGrid:mine,host=back===mine?null:back==='99'?PLAYER_ENTRY:carEntry(back);
- for(const entry of [...fieldRoster(back).map(e=>host&&e.number===mine?you:e),host??you]){const row=document.createElement('li');row.textContent=entry===host?`#${back} · ANFITRIÃO${back==='99'?'':`, no carro de ${host.name}`}`:entry===you&&mine!=='99'?`#${mine} · VOCÊ, no carro de ${you.name}`:`#${entry.number} · ${entry.name}${entry===you?' · VOCÊ':entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':preferences.values.aiLevel==='facil'?` · Ritmo ${entry.level}/100`:` · Nível ${entry.skill}/10`}`;roster.append(row);}
+ for(const entry of [...fieldRoster(back,field).map(e=>host&&e.number===mine?you:e),host??you]){const row=document.createElement('li');row.textContent=entry===host?`#${back} · ANFITRIÃO${back==='99'?'':`, no carro de ${host.name}`}`:entry===you&&!own?`#${mine} · VOCÊ, no carro de ${you.name}`:`#${entry.number} · ${entry.name}${entry===you?' · VOCÊ':entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':preferences.values.aiLevel==='facil'?` · Ritmo ${entry.level}/100`:` · Nível ${entry.skill}/10`}`;roster.append(row);}
 }
 // Koyzinho Indestrutível: taken at the next start (RaceField.reset), like the race length.
 $('aceKoyzinho').checked=preferences.values.aceKoyzinho;
@@ -132,7 +137,7 @@ for(const laps of [$('raceLaps'),$('tracksLaps')]){for(let n=LAPS.min;n<=LAPS.ma
 // The 1x1's rival, on the track screen: any driver of the field the chosen car races in (options and
 // labels in updateMenuLabels).
 {const pick=$('duelRival');
- pick.onchange=()=>{preferences.update({duelRival:pick.value});updateMenuLabels();};}
+ pick.onchange=()=>{preferences.update({[menuModel()==='fusca'?'fuscaDuelRival':'duelRival']:pick.value});updateMenuLabels();};}
 $('classicInterior').checked=preferences.values.classicInterior;
 $('classicInterior').onchange=()=>{preferences.update({classicInterior:$('classicInterior').checked});if(ready)cabinVisibility();};
 // Graphics (the Gráficos tab, graphics-settings.js): the values in force on this device, applied by
@@ -503,14 +508,15 @@ function ensureFusca(){
  if(fuscaTemplate)return Promise.resolve(fuscaTemplate);
  return fuscaLoading??=loader.loadAsync(FUSCA_URL).then(gltf=>fuscaTemplate=prepareFusca(gltf.scene)).catch(err=>{console.error(err);return null;}).finally(()=>{fuscaLoading=null;});
 }
-// The model a race asks for: its championship's (the Copa Fusca races Fuscas) or the car screen's tab.
-const wantedModel=()=>championshipRace?.championship.info.model??preferences.values.carModel;
+// The model a race asks for: its championship's (the Copa Fusca races Fuscas, another the model it started in) or
+// the car screen's tab.
+const wantedModel=()=>championshipRace?.championship.model??preferences.values.carModel;
 // A race in the Fusca loads it with the circuit, and the ghost of the best lap gets its shell (ghost-car.js).
 async function fuscaWanted(){
  if(wantedModel()!=='fusca'||roomWanted)return;
  if(await ensureFusca()&&!ghostCar.has('fusca'))ghostCar.build(fuscaTemplate,null,'fusca');
 }
-// The player's car as a Fusca in entry's colours (the 99's: black, the yellow stripe; null: back to the Opala). Meanwhile the Opala's body,
+// The player's car as a Fusca in entry's colours (a Copa Fusca car, race-roster.js; null: back to the Opala). Meanwhile the Opala's body,
 // cockpit and brake lamps hide, and the driver and the cockpit camera move to the Fusca's seat.
 function showFusca(entry){
  const on=!!entry&&fuscaBody.apply(fuscaTemplate,entry);if(!on)fuscaBody.clear();
@@ -1131,17 +1137,17 @@ function updateMenuLabels(){
  $('restartRace').hidden=!(resume||finished&&!scored&&!multiplayer?.guest());$('restartRace').textContent=finished?'Correr novamente →':immersive?.practice?'Recomeçar treino':'Recomeçar corrida';
  // The track screen races in the mode chosen at the opening.
  const story=menuMode==='historia',laps=preferences.values.laps;
- $('tracks').dataset.mode=menuMode;$('tracksMode').textContent=story?'MODO HISTÓRIA · AUTO-POBRE RACING':'MODO CORRIDA · OLD STOCK RACE';
+ $('tracks').dataset.mode=menuMode;$('tracksMode').textContent=story?'MODO HISTÓRIA · AUTO-POBRE RACING':menuModel()==='fusca'?'MODO CORRIDA · COPA FUSCA':'MODO CORRIDA · OLD STOCK RACE';
  $('singleRace').querySelector('.mode-label').textContent=loading&&pendingMode==='single'?'Carregando circuito…':'Corrida única →';
  $('singleRaceDetail').textContent=`Só esta pista · ${laps} volta${laps>1?'s':''}${story?' · vaquinha, boxes e o sonho da Blazer':' contra 14 adversários'}`;
  // Modo Corrida's solo practice and 1x1 (the story's track screen hides them: pistas.css).
- const myCar=menuCar(),rival=carEntry(duelRivalFor(myCar,preferences.values.duelRival));
+ const myModel=menuModel(),myCar=menuCar(),rival=carEntry(duelRivalFor(myCar,chosenDuel(myModel),myModel),myModel);
  $('soloRace').querySelector('.mode-label').textContent=loading&&pendingMode==='solo'?'Carregando circuito…':'Treino solo →';
  $('duelRace').querySelector('.mode-label').textContent=loading&&pendingMode==='duel'?'Carregando circuito…':'Corrida 1x1 →';
  $('duelRaceDetail').textContent=`Você contra #${rival.number} ${rival.shortName} · ${laps} volta${laps>1?'s':''}`;
  $('duelSwatch').style.setProperty('--body',cssColor(rival.color));$('duelSwatch').style.setProperty('--stripe',cssColor(rival.stripe));
- const pick=$('duelRival'),field=fieldRoster(myCar);if(pick.options.length!==field.length||field.some((e,i)=>pick.options[i].value!==e.number))pick.replaceChildren(...field.map(e=>new Option('',e.number)));
- for(const option of pick.options){const entry=carEntry(option.value);option.textContent=`#${entry.number} ${entry.shortName}${entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':''}`;}
+ const pick=$('duelRival'),field=fieldRoster(myCar,myModel);if(pick.options.length!==field.length||field.some((e,i)=>pick.options[i].value!==e.number))pick.replaceChildren(...field.map(e=>new Option('',e.number)));
+ for(const option of pick.options){const entry=carEntry(option.value,myModel);option.textContent=`#${entry.number} ${entry.shortName}${entry.number===ACE_NUMBER&&preferences.values.aceKoyzinho?' · Indestrutível':''}`;}
  $('duelRival').value=rival.number;$('tracksLaps').value=String(laps);$('tracksBack').textContent=carScreen()?'← Carro':'← Início';
  if(loading&&pendingMode==='championship')$('championshipStart').textContent=`Etapa ${championshipFor().round+1}: carregando ${circuit.name}…`;
  $('settingsResume').hidden=!sessionStarted||(!immersive?.active&&immersive?.freeResultReady);$('settingsRestart').hidden=$('settingsResume').hidden;
@@ -1155,7 +1161,7 @@ function freeRaceTitle(){
  const lineup=immersive?.active?null:immersive?.freeLineup;
  if(!lineup)return 'CORRIDA ÚNICA';
  if(!lineup.length)return `TREINO SOLO · ${car.laps} VOLTA${car.laps===1?'':'S'}${car.best?` · MELHOR ${fmt(car.best)}`:''}`;
- return `1x1 CONTRA #${lineup[0]} ${carEntry(lineup[0])?.shortName.toUpperCase()??''}`;
+ return `1x1 CONTRA #${lineup[0]} ${carEntry(lineup[0],raceModel)?.shortName.toUpperCase()??''}`;
 }
 function resumeRace(){if(!sessionStarted||(!immersive.active&&immersive.freeResultReady))return;$('settings').close();menu(false);}
 $('settingsResume').onclick=resumeRace;
@@ -1187,9 +1193,9 @@ function showScreen(name){screen=name;if(name==='opening')multiplayer?.wait(fals
 const pilotLine=()=>[pilotPicker.profiles.selected&&`Piloto: ${pilotPicker.profiles.selected}`,menuMode==='corrida'&&`${MODEL_NAMES[menuModel()]} #${menuCar()}`].filter(Boolean).join(' · ');
 // Modo Corrida's car screen (car-select.js): the studio needs the renderer and the car's model, both
 // kept for the race. A multiplayer guest does not pick the track: its button waits for the host's race.
-const carSelect=new CarSelect({root:$('cars'),value:preferences.values.car,model:preferences.values.carModel,carRoot,
+const carSelect=new CarSelect({root:$('cars'),values:{opala:preferences.values.car,fusca:preferences.values.fuscaCar},model:preferences.values.carModel,carRoot,
  onModel:model=>{preferences.update({carModel:model});updateMenuLabels();if(model==='fusca')fuscaInStudio();},
- onPick:number=>{preferences.update({car:number});multiplayer?.choose(number);updateMenuLabels();if(ready)showRoster();},onNext:()=>{if(multiplayer?.guest())multiplayer.wait();else showScreen('tracks');},onBack:()=>showScreen('opening')});
+ onPick:(number,model)=>{preferences.update({[model==='fusca'?'fuscaCar':'car']:number});multiplayer?.choose(number);updateMenuLabels();if(ready)showRoster();},onNext:()=>{if(multiplayer?.guest())multiplayer.wait();else showScreen('tracks');},onBack:()=>showScreen('opening')});
 // The Fusca tab's studio needs the Fusca's model.
 function fuscaInStudio(){ensureFusca().then(template=>{if(template)carSelect.setFusca(template);else carSelect.failed('fusca');});}
 function openCarScreen(){
@@ -1244,7 +1250,8 @@ const carPaintInfo=()=>carReflections.paintInfo({player:fuscaBody.car??model,riv
 const CHAMPIONSHIP_VIEW_KEY='opala99-championship-calendar-v1';
 let championshipView=(()=>{try{return championshipCalendar(pilotStorage()?.getItem(CHAMPIONSHIP_VIEW_KEY));}catch{return 'todas';}})();
 const championships=Object.fromEntries(['corrida','historia'].map(mode=>[mode,Object.fromEntries(calendarsFor(mode).map(id=>[id,new Championship(pilotStorage(),mode,id)]))])),championshipDialog=new ChampionshipDialog();
-const championshipFor=(mode=menuMode,calendar=championshipView)=>championships[mode][championshipCalendar(calendar,mode)];
+// One not started yet would race the car screen's model (Modo História: the Opala): its standings show that field.
+const championshipFor=(mode=menuMode,calendar=championshipView)=>Object.assign(championships[mode][championshipCalendar(calendar,mode)],{preferredModel:mode==='historia'?'opala':preferences.values.carModel});
 let championshipRace=null,storyRound=null,scoredChampionship=null,pendingMode=null;
 // Modo Corrida's single races: 'grid' (the whole field), 'solo' (practice alone) or 'duel' (the 1x1).
 let raceKind='grid';
@@ -1358,11 +1365,11 @@ async function beginRace(restart=false,tour=false,story=preferences.values.immer
  // A championship round races the championship's laps; everything else the chosen ones.
  if(tour)championshipRace=null;storyRound=null;raceResults.championship=null;
  immersive.laps=championshipRace?championshipRace.championship.laps:preferences.values.laps;
- // The car: Modo Corrida's choice, or the room's (multiplayer.js); the story and the recon lap race the 99.
- raceCar=preferences.values.immersive||tour?'99':multiplayer?.car()??preferences.values.car;reconLap=tour;
  // In a Fusca (the car screen's tab, or the Copa Fusca's rounds) when it loaded; the story and the recon lap race the Opala 99.
  raceModel=!preferences.values.immersive&&!tour&&!roomWanted&&wantedModel()==='fusca'&&fuscaTemplate?'fusca':'opala';ghostCar.use(raceModel);
- immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[duelRivalFor(raceCar,preferences.values.duelRival)];
+ // The car: Modo Corrida's choice for that model, or the room's (multiplayer.js); the story and the recon lap race the 99.
+ raceCar=preferences.values.immersive||tour?'99':multiplayer?.car()??chosenCar(raceModel);reconLap=tour;
+ immersive.lineup=preferences.values.immersive||raceKind==='grid'?null:raceKind==='solo'?[]:[duelRivalFor(raceCar,chosenDuel(raceModel),raceModel)];
  seatCar();
  document.querySelector('.session').childNodes[1].textContent=championshipRace?` ${championshipRace.championship.info.label} · ETAPA ${championshipRace.round+1}/${championshipRace.championship.total} `:immersive.lineup?.length===0?' TREINO SOLO ':immersive.lineup?` 1x1 · #${immersive.lineup[0]} `:' PISTA LIVRE ';
  pitstop?.reset();automatic=false;watched=0;
@@ -1406,7 +1413,7 @@ function startChampionshipRound(mode=menuMode){
  const pilot=pilotPicker.commit();if(!pilot)return;
  const championship=championshipFor(mode);if(!championship.available)return;menuMode=mode;
  if(championship.finished)championship.reset();
- if(!championship.started)championship.start(pilot,preferences.values.laps);
+ if(!championship.started)championship.start(pilot,preferences.values.laps,mode==='historia'?'opala':preferences.values.carModel);
  selectCircuit(championship.nextCircuit);championshipRace={championship,round:championship.round,circuit:championship.nextCircuit};
  pendingMode='championship';beginRace(true,false,mode==='historia');
 }
@@ -1421,19 +1428,20 @@ function chooseMode(mode){if(sessionStarted||loading||!pilotPicker.commit())retu
 // The chosen car on track: the field with the 99 in its seat (RaceField's roster, the rivals' models)
 // and the player's result rows under its number; set before the grid. The model goes back to the 99
 // first, since the 99 that Stevan Gaipo races is cloned from it. In a Fusca race the whole field races
-// Fuscas (raceModel), each meeting the others, the walls and the ground with the Fusca's body
+// Fuscas (raceModel), the Copa Fusca's field, each meeting the others, the walls and the ground with the Fusca's body
 // (physics.js FUSCA_BODY; the rivals take it at the grid's reset). A multiplayer guest's field is the
 // host's (gridCar: the host's car sits out of it); the guest's own car takes its seat (multiplayer.js).
+// The player's rows go under the car's entry, but the Opala 99's (Stevan Gaipo's team: PLAYER_ENTRY).
 function seatCar(){
- carLivery.clear();showFusca(null);const entry=raceCar==='99'?null:carEntry(raceCar),grid=raceGrid=multiplayer?.gridCar()??raceCar;
+ carLivery.clear();showFusca(null);const entry=raceCar==='99'&&raceModel!=='fusca'?null:carEntry(raceCar,raceModel),grid=raceGrid=multiplayer?.gridCar()??raceCar;
  const body=raceModel==='fusca'?FUSCA_BODY:OPALA_BODY;car.setBody(body);immersive.field.body=body;
- immersive.field.roster=fieldRoster(grid);immersive.visual.seatOpala99(model,grid,raceModel==='fusca'?fuscaTemplate:null);
+ immersive.field.roster=fieldRoster(grid,raceModel);immersive.visual.seatOpala99(model,grid,raceModel==='fusca'?fuscaTemplate:null);
  immersive.playerEntry=entry?{...entry,name:immersive.pilotName,shortName:immersive.pilotName}:undefined;
 }
 // Once the grid is set: the player's Opala in that car's colours (car-livery.js), the map's legend, and
 // the paint button only for the 99's two liveries.
 function paintCar(){
- if(!(raceModel==='fusca'&&showFusca(carEntry(raceCar))))carLivery.apply(model,raceCar==='99'?null:carEntry(raceCar),immersive.visual,{doorAds:oldStockMaterial});
+ if(!(raceModel==='fusca'&&showFusca(carEntry(raceCar,'fusca'))))carLivery.apply(model,raceCar==='99'?null:carEntry(raceCar),immersive.visual,{doorAds:oldStockMaterial});
  $('skinButton').hidden=$('touchSkin').hidden=raceCar!=='99'||raceModel==='fusca';document.querySelector('.map-legend').childNodes[1].textContent=` ${raceCar} · VOCÊ `;
 }
 $('start').onclick=()=>chooseMode('corrida');

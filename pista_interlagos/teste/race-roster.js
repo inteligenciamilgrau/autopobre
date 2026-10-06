@@ -63,20 +63,65 @@ export const gridSlot=slot=>({back:12+Math.floor(slot/2)*GRID_ROW_SPACING+(slot%
 export const playerGridSlot=(rivals=RIVAL_ROSTER.length)=>rivals<RIVAL_ROSTER.length?gridSlot(rivals):{back:GRID_START_BACK,lane:0};
 // Solo practice (no rivals, no flag) and the 1x1 against one chosen driver: Modo Corrida's single races.
 export const DUEL_DEFAULT='73';
-export const rivalEntry=number=>RIVAL_ROSTER.find(e=>e.number===number)??null;
-// The cars on the selection screen, the Opala 99 first; the player's car by number.
+// A rival of a model's field (rosterOf, below; the Opala's unless asked) by number.
+export const rivalEntry=(number,model='opala')=>rosterOf(model).rivals.find(e=>e.number===number)??null;
+// The Opalas on the selection screen, the 99 first; the player's car by number (a model's, the Opala's unless asked).
 export const PLAYER_CAR_DEFAULT='99';
 export const CAR_CHOICES=Object.freeze([OPALA_99_RIVAL,...RIVAL_ROSTER]);
-export const carEntry=number=>CAR_CHOICES.find(e=>e.number===number)??null;
-// The model the player races in Modo Corrida (the car screen's tabs): the Opala, or a Fusca (fusca.js) in
-// the colours of one of the same 15 cars. The Fusca 99 is Stevan Gaipo's black one with the yellow stripe,
-// without the Opala 99's sponsors.
+export const carEntry=(number,model='opala')=>rosterOf(model).choices.find(e=>e.number===number)??null;
+// The model the player races in Modo Corrida (the car screen's tabs): the Opala with the Old Stock field above,
+// or a Fusca (fusca.js) with the Copa Fusca's field below.
 export const CAR_MODELS=Object.freeze(['opala','fusca']);
 export const CAR_MODEL_DEFAULT='opala';
 export const MODEL_NAMES=Object.freeze({opala:'Opala',fusca:'Fusca'});
-// The rivals when the player races `car`: the roster, that car's seat taken by the Opala 99 (same
-// index, so the grid's cars and their models keep their places).
-export const fieldRoster=(car=PLAYER_CAR_DEFAULT)=>car===PLAYER_CAR_DEFAULT||!rivalEntry(car)?RIVAL_ROSTER:Object.freeze(RIVAL_ROSTER.map(e=>e.number===car?OPALA_99_RIVAL:e));
+// The Copa Fusca's field (the user's list, 2026-10-06): the fifteen best of the 2026 season, by a mark (0-10) from
+// the real races (score: Blog do Carelli's results and the FASP's standings up to the 7th round): where each finished
+// overall in the 14 championship and 2 extra races (60%), and how close to pole they qualified (40%); few races pull
+// the mark to the middle. Numbers and colours are the user's list: the body in the first colour, the fenders in the
+// second (a one-colour car has them in the same). points: the driver's class points at the FASP (Super, Light or
+// Sênior, until the 7th round); rank: the place in this top 15. The pace is a game adaptation, not an official
+// assessment: the Fácil rating from the mark, the harder levels' skill (5-10) spread over the same marks, errors
+// (1-10, as the pilots' table) from the retirements, penalties and crashes of the season, styleIndex a personality
+// (race-field.js DRIVER_STYLES) from how they raced. graphic: a livery's drawing (fusca.js: Benício's lightning bolt).
+// The 99 is Cristiano Canto's: he sits out when the player races it and races it in the seat of the car the player
+// takes, as Stevan Gaipo does with the Opala 99.
+const FUSCA_PILOTS=[
+ ['20','Arthur Fischer','Arthur Fischer','Super',179,8.2,1,0xeeeeea,0xc81d25,1],
+ ['86','Caio Gomes','Caio Gomes','Super',179,7.7,3,0x8a8f95,0x8a8f95,2],
+ ['77','Felipe Martins','Felipe Martins','Super',125,7.3,2,0x14306e,0x5fb0e8,1],
+ ['29','Stanley','Stanley Wessler','Super',66,6.7,3,0xf28c6e,0xf28c6e,2],
+ ['18','Thiagão','Thiago “Thiagão” Perez','Super',96,6.6,0,0x8ccf4d,0x1f4fb5,2],
+ ['3','Rogério Gaspar','Rogério Gaspar','Super',74,6.2,2,0x17191b,0xe8579b,2],
+ ['33','Fernando Moraes','Fernando Moraes','Light',215,6.1,1,0xf2c418,0x8ccf4d,2],
+ ['5','Eduardo Belisario','Eduardo Belisario','Super',23,5.9,4,0xb4b8bb,0xb4b8bb,2],
+ ['99','Cristiano','Cristiano Canto','Super',47,5.4,0,0x6f747a,0x141516,3],
+ ['39','Erli Camargo','Erli Camargo','Light',185,5.2,4,0xf2f1ec,0xd0262c,2],
+ ['11','Caio Mahana','Caio Mahana','Super',47,5.1,3,0xeeeeea,0xf08a6c,3],
+ ['4','Thiago Benício','Thiago Benício','Super',9,5,0,0xc41a22,0xc41a22,3,'raio'],
+ ['9','Marcos Fortuna','Marcos Fortuna','Light',148,4.9,2,0x161718,0x161718,2],
+ ['79','Zé Dias','José “Zé” Dias Filho','Sênior',190,4.8,2,0xe9e8e2,0xb81b22,1],
+ ['49','Robertão','Roberto “Robertão” Soares','Sênior',200,4.2,4,0x9a9fa5,0x17191b,3],
+];
+const MARK_TOP=8.2,MARK_LOW=4.2;
+const fuscaEntry=([number,shortName,name,category,points,score,styleIndex,color,stripe,errors,graphic=null],i)=>{
+ const q=(score-MARK_LOW)/(MARK_TOP-MARK_LOW),rating=.3+.65*q,dark=v=>luminance(v)<.15;
+ return Object.freeze({number,shortName,name,category,points,rank:i+1,score,styleIndex,color,stripe,finish:null,graphic,
+  mark:dark(color)?dark(stripe)?0xb5bbc4:stripe:color,rating,level:Math.round(70+rating*28),skill:Math.round(5+5*q),errors});
+};
+// FUSCA_CHOICES: the car screen's Fusca cards, in the top 15's order; FUSCA_ROSTER: the rivals (all but the 99).
+export const FUSCA_CHOICES=Object.freeze(FUSCA_PILOTS.map(fuscaEntry));
+export const FUSCA_99_RIVAL=FUSCA_CHOICES.find(e=>e.number==='99');
+export const FUSCA_ROSTER=Object.freeze(FUSCA_CHOICES.filter(e=>e!==FUSCA_99_RIVAL));
+// Each model's field: the rivals, the 99 that races in the seat of the car the player takes, the car screen's
+// cards and the 1x1's rival unless one is picked. A model it does not know is the Opala's.
+const ROSTERS=Object.freeze({
+ opala:Object.freeze({rivals:RIVAL_ROSTER,car99:OPALA_99_RIVAL,choices:CAR_CHOICES,duel:DUEL_DEFAULT}),
+ fusca:Object.freeze({rivals:FUSCA_ROSTER,car99:FUSCA_99_RIVAL,choices:FUSCA_CHOICES,duel:'20'})});
+export const rosterOf=model=>ROSTERS[model]??ROSTERS.opala;
+export const duelDefault=model=>rosterOf(model).duel;
+// The rivals when the player races `car`: the roster, that car's seat taken by the 99 (same index, so the
+// grid's cars and their models keep their places).
+export const fieldRoster=(car=PLAYER_CAR_DEFAULT,model='opala')=>{const r=rosterOf(model);return car===PLAYER_CAR_DEFAULT||!rivalEntry(car,model)?r.rivals:Object.freeze(r.rivals.map(e=>e.number===car?r.car99:e));};
 // The 1x1's rival when the player races `car`: the one asked for; asking for that car's own driver
 // gives the 99, now in its seat.
-export function duelRivalFor(car,wanted){const number=wanted===car?OPALA_99_RIVAL.number:wanted;return fieldRoster(car).some(e=>e.number===number)?number:DUEL_DEFAULT;}
+export function duelRivalFor(car,wanted,model='opala'){const number=wanted===car?PLAYER_CAR_DEFAULT:wanted;return fieldRoster(car,model).some(e=>e.number===number)?number:duelDefault(model);}

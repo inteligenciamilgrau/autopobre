@@ -1,5 +1,5 @@
 import {CIRCUITS} from './circuits.js';
-import {RIVAL_ROSTER,PLAYER_ENTRY,carEntry} from './race-roster.js';
+import {rosterOf,PLAYER_ENTRY,carEntry,CAR_MODELS} from './race-roster.js';
 
 // Campeonato Old Stock do jogo: todas as pistas, uma corrida em cada, pontos pela posição de
 // chegada e uma classificação geral com os 15 carros do grid. Each game mode (Modo Corrida,
@@ -47,24 +47,31 @@ function validRounds(rounds,calendar){
  if(calendar!=='todas'){const own=CHAMPIONSHIP_CALENDARS[calendar].rounds;return rounds.length===own.length&&own.every((r,i)=>r.circuit===rounds[i]);}
  return rounds.every(id=>typeof id==='string'&&Object.hasOwn(CIRCUITS,id))&&new Set(rounds).size===rounds.length&&FIRST_CALENDAR.every(id=>rounds.includes(id));
 }
+// The model it races (the calendar's, or the one it started in; saves from before the Fusca's own field are
+// the Opala's): every rival's number must be one of that field's (race-roster.js), so a Copa Fusca begun with the
+// Old Stock's drivers in Fuscas starts again.
+const stateModel=(s,calendar)=>CHAMPIONSHIP_CALENDARS[calendar].model??s.model??'opala';
 function validState(s,mode,calendar){
  return !!s&&s.version===1&&(s.mode??'corrida')===mode&&(s.calendar??'todas')===calendar&&validRounds(s.rounds,calendar)
-  &&Array.isArray(s.results)&&s.results.length<=s.rounds.length&&s.results.every((r,i)=>r&&r.circuit===s.rounds[i]&&Array.isArray(r.rows)&&r.rows.every(validRow))
+  &&(s.model===undefined||CAR_MODELS.includes(s.model))
+  &&Array.isArray(s.results)&&s.results.length<=s.rounds.length&&s.results.every((r,i)=>r&&r.circuit===s.rounds[i]&&Array.isArray(r.rows)&&r.rows.every(validRow)
+   &&r.rows.every(row=>row.player||carEntry(row.number,stateModel(s,calendar))))
   &&Number.isInteger(s.laps)&&s.laps>0;
 }
 
-// Overall standings: points, then wins, podiums, best finish and the last round's order.
+// Overall standings: points, then wins, podiums, best finish and the last round's order. model: the field it races
+// (race-roster.js: the Opala's Old Stock drivers or the Fusca's Copa Fusca ones).
 const PLAYER_KEY=Symbol('player');
-export function championshipStandings(state){
+export function championshipStandings(state,model='opala'){
  const drivers=new Map(),add=(number,name,shortName)=>{if(!drivers.has(number))drivers.set(number,{number,name,shortName:shortName??name,points:0,wins:0,podiums:0,best:Infinity,rounds:[],player:false});return drivers.get(number);};
- for(const entry of RIVAL_ROSTER)add(entry.number,entry.name,entry.shortName);
+ for(const entry of rosterOf(model).rivals)add(entry.number,entry.name,entry.shortName);
  // The player's rows are the player's whatever the car (Modo Corrida's car screen: another team's
  // number), shown with the car of the latest round. The Opala 99 that Stevan Gaipo then races, and the
  // driver whose car the player took, keep rows of their own.
  const player={number:PLAYER_ENTRY.number,name:state?.pilot||PLAYER_ENTRY.name,shortName:state?.pilot||PLAYER_ENTRY.shortName,points:0,wins:0,podiums:0,best:Infinity,rounds:[],player:true};drivers.set(PLAYER_KEY,player);
  for(const [k,round] of (state?.results??[]).entries())for(const r of round.rows){
   // A retirement (dnf) or disqualification (dsq) scores nothing and counts as no finish.
-  const d=r.player?Object.assign(player,{number:r.number}):add(r.number,r.name,carEntry(r.number)?.shortName),out=r.dnf||r.dsq;d.points+=r.points;if(!out&&r.position===1)d.wins++;if(!out&&r.position<=3)d.podiums++;if(!out)d.best=Math.min(d.best,r.position);d.rounds[k]={position:r.position,points:r.points,dnf:!!r.dnf,dsq:!!r.dsq};
+  const d=r.player?Object.assign(player,{number:r.number}):add(r.number,r.name,carEntry(r.number,model)?.shortName),out=r.dnf||r.dsq;d.points+=r.points;if(!out&&r.position===1)d.wins++;if(!out&&r.position<=3)d.podiums++;if(!out)d.best=Math.min(d.best,r.position);d.rounds[k]={position:r.position,points:r.points,dnf:!!r.dnf,dsq:!!r.dsq};
  }
  // The last round raced in the championship; a driver who sat it out (the one whose car the player
  // took, or Stevan's 99 when the player raced it) comes after those who raced it.
@@ -74,7 +81,8 @@ export function championshipStandings(state){
 }
 
 export class Championship {
- constructor(storage=null,mode='corrida',calendar='todas'){this.storage=storage;this.mode=CHAMPIONSHIP_MODES.includes(mode)?mode:'corrida';this.calendar=championshipCalendar(calendar,this.mode);this.key=championshipKey(this.mode,this.calendar);this.state=this.load();}
+ // preferredModel (main.js): the model a championship not started yet would race, its standings' field until then.
+ constructor(storage=null,mode='corrida',calendar='todas'){this.storage=storage;this.mode=CHAMPIONSHIP_MODES.includes(mode)?mode:'corrida';this.calendar=championshipCalendar(calendar,this.mode);this.key=championshipKey(this.mode,this.calendar);this.preferredModel=null;this.state=this.load();}
  load(){
   let s;try{s=JSON.parse(this.storage?.getItem(this.key)||'null');}catch{return null;}
   if(!validState(s,this.mode,this.calendar))return null;
@@ -92,13 +100,16 @@ export class Championship {
  get rounds(){return this.state?.rounds??CHAMPIONSHIP_CALENDARS[this.calendar].rounds.map(r=>r.circuit);}
  get total(){return this.rounds.length;}
  get info(){return CHAMPIONSHIP_CALENDARS[this.calendar];}
+ // The model its rounds race: the calendar's (the Copa Fusca's Fuscas), else the one it started in.
+ get model(){return this.info.model??this.state?.model??this.preferredModel??'opala';}
  // The calendar on screen: each round's circuit with, in a real season, its place and dates.
  get schedule(){const own=this.info.rounds;return this.rounds.map((circuit,k)=>own[k]?.circuit===circuit?own[k]:{circuit});}
  // Every round on a circuit the game has (a season's circuit not built yet holds the start).
  get available(){return this.rounds.every(id=>Object.hasOwn(CIRCUITS,id));}
  get nextCircuit(){return this.active?this.state.rounds[this.round]:null;}
  get laps(){return this.state?.laps??null;}
- start(pilot,laps){if(!this.available)return null;this.state={version:1,mode:this.mode,calendar:this.calendar,pilot,laps,rounds:[...this.rounds],results:[],started:new Date().toISOString()};this.save();return this.state;}
+ // model: the car screen's when it starts (Modo História: the Opala); a calendar with its own keeps that one.
+ start(pilot,laps,model='opala'){if(!this.available)return null;this.state={version:1,mode:this.mode,calendar:this.calendar,model:this.info.model??(CAR_MODELS.includes(model)?model:'opala'),pilot,laps,rounds:[...this.rounds],results:[],started:new Date().toISOString()};this.save();return this.state;}
  reset(){this.state=null;this.save();}
  // Scores a finished race (rows in finishing order, as in race-results.js resultRows) once:
  // only the round due, at its circuit. Returns the summary shown on the result sheet.
@@ -115,7 +126,7 @@ export class Championship {
   const row=this.state?.results[round]?.rows.find(r=>r.player);if(!row||row.dsq)return false;
   row.points=0;row.dsq=true;this.save();return true;
  }
- standings(){return championshipStandings(this.state);}
+ standings(){return championshipStandings(this.state,this.model);}
  // What a scored round meant: its points, the standings after it and what comes next.
  summary(round=this.round-1){
   const result=this.state?.results[round];if(!result)return null;

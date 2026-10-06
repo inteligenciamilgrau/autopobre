@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import {mergeGeometries} from 'three/addons/utils/BufferGeometryUtils.js';
 import {FANS,strapPath} from './immersive-state.js';
-import {RIVAL_ROSTER,OPALA_99_RIVAL} from './race-roster.js';
+import {RIVAL_ROSTER,OPALA_99_RIVAL,FUSCA_ROSTER,FUSCA_99_RIVAL} from './race-roster.js';
 import {createPeople,setPose,POSES,OUTFITS,Idler} from './pit-crew.js';
 import {curveloPitFrame,serviceSpot,garageBays,pitPoint} from './pit-lane.js';
 import {footState,stepOnFoot,placeFootCamera,turnFootView,zoomFootView,footJump} from './on-foot.js';
@@ -382,21 +382,22 @@ export class ImmersiveVisuals {
  // from the template as loaded: main.js paints the player's car only after). '99' puts them all back
  // and hides it: the story's update() only shows or hides the cars in this.rivals. A new model (the
  // 99's other paint, main.js setLivery) builds it again. fusca: the Fusca's model when the race is in Fuscas
- // (the car screen's Fusca tab): the whole field races one, Stevan Gaipo the 99's (fuscaRival).
+ // (the car screen's Fusca tab): the field is the Copa Fusca's (race-roster.js FUSCA_ROSTER), Cristiano Canto in
+ // the 99 (fuscaRival), and `number` one of its cars.
  seatOpala99(template,number,fusca=null){
   this.rosterCars??=[...this.rivals];if(fusca&&!this.fuscaCars)this.buildFuscas(fusca);
   const field=fusca?this.fuscaCars:this.rosterCars;this.rivals.splice(0,this.rivals.length,...field);
   for(const o of [this.opala99,this.fusca99,...(this.fuscaCars??[])])if(o&&!field.includes(o))o.visible=false;
-  const i=RIVAL_ROSTER.findIndex(e=>e.number===number);if(i<0)return null;
+  const i=(fusca?FUSCA_ROSTER:RIVAL_ROSTER).findIndex(e=>e.number===number);if(i<0)return null;
   if(fusca){this.rivals[i]=this.fusca99;return this.fusca99;}
   if(this.opala99&&this.opala99Template!==template){this.opala99.removeFromParent();this.disposeCar(this.opala99,this.opala99Template);this.opala99=null;}
   if(!this.opala99){const e=OPALA_99_RIVAL;this.opala99=this.rivalCar(template,e.color,e.number,e.shortName,{driven:true,stripe:e.stripe,livery99:true});this.opala99.name='Opala_99_rival';this.opala99.userData.entry=e;this.opala99Template=template;this.root.add(this.opala99);}
   this.rivals[i]=this.opala99;return this.opala99;
  }
- // The field in Fuscas, built for the first Fusca race and kept: the grid's 14 and the 99.
+ // The field in Fuscas, built for the first Fusca race and kept: the Copa Fusca's 14 and the 99.
  buildFuscas(template){
   const build=e=>{const o=this.fuscaRival(template,e,e.shortName);o.userData.entry=e;o.visible=false;this.root.add(o);return o;};
-  this.fuscaCars=RIVAL_ROSTER.map(build);this.fusca99=build(OPALA_99_RIVAL);
+  this.fuscaCars=FUSCA_ROSTER.map(build);this.fusca99=build(FUSCA_99_RIVAL);
  }
  // A rival in a Fusca (fusca.js): the team's colours as the player's Fusca wears them, the cabin without the
  // player's details (rivalCabin), its driver moved onto the Fusca's seat (the Fusca's own steering wheel hides behind his), and a distant model and brake

@@ -9,9 +9,9 @@ import {prepareWheels} from './car-wheels.js';
 // driver's side, tyres on y=0, its 2.40 m wheelbase centred on the Opala's). In a Fusca race the whole field races
 // one (immersive-visuals.js fuscaRival), with its own mechanics (physics.js FUSCA_MECHANICS). A Fusca prepared to
 // race, as a Copa Fusca photo shows one: no bumpers nor running boards, small black wheels, the body 19 cm lower than
-// the street car's (the sills 7 cm off the ground, the arches just over the tyres), the engine lid propped open. Each wears a team's colours as the Opalas do (race-roster.js), as the
-// Copa Fusca's liveries do: the body paint and the dash in the first, the four fenders in the second (the Opala's
-// stripe), the number on both doors and on the roof.
+// the street car's (the sills 7 cm off the ground, the arches just over the tyres), the engine lid propped open. Each is
+// a Copa Fusca car (race-roster.js FUSCA_CHOICES) in its colours, as the cup's liveries go: the body paint and the
+// dash in the first, the four fenders in the second (the Opala's stripe), the number on both doors and on the roof.
 export const FUSCA_URL='./assets/fusca_v2.glb?v=fusca-v2-corrida-5';
 // The driver (driver.js and rival-driver.js, with the race wheel he turns) moves this much from the Opala's
 // seat: onto the Fusca's steering wheel, 26 cm further forward, 8 cm lower and 6 cm inboard (the Fusca is
@@ -44,6 +44,22 @@ export const FUSCA_PROFILE=Object.freeze({
 export const FUSCA_WHEEL_TRAVEL=.5,FUSCA_WHEEL_BUMP=.012;
 // Where the numbers go (car frame): on each door, and on the roof, read from the driver's side as the Opalas' are.
 const DOOR={x:.33,y:.37,w:.46,h:.34},ROOF={x:-.1,y:1.11,w:.66,h:.52},SIDE=.72;
+// The lightning bolt (fuscaCar, graphic 'raio'): between the arches (the rear one ends near x -.67, the front one
+// starts near 1.1), through the door number's height.
+export const BOLT=Object.freeze({x:.24,y:.41,w:1.52,h:.38});
+// Its outline, tail to point (u along, v down, 0-1).
+export const BOLT_SHAPE=Object.freeze([[.02,.3],[.5,.42],[.45,.13],[.98,.58],[.55,.5],[.6,.82],[.02,.64]]);
+// The bolt drawn tail to point along the canvas, yellow to orange, black edged; flip: drawn the other way (the
+// left side's sticker runs from the nose to the tail).
+function boltSticker(flip){
+ const c=document.createElement('canvas');c.width=1024;c.height=256;const ctx=c.getContext('2d');
+ if(flip){ctx.translate(1024,0);ctx.scale(-1,1);}
+ ctx.beginPath();BOLT_SHAPE.forEach(([x,y],i)=>ctx[i?'lineTo':'moveTo'](x*1024,y*256));ctx.closePath();
+ const g=ctx.createLinearGradient(0,0,1024,0);g.addColorStop(0,'#f2601c');g.addColorStop(.55,'#ffb21a');g.addColorStop(1,'#ffe03a');
+ ctx.lineJoin='miter';ctx.lineWidth=14;ctx.strokeStyle='#121314';ctx.stroke();ctx.fillStyle=g;ctx.fill();
+ const map=new THREE.CanvasTexture(c);map.colorSpace=THREE.SRGBColorSpace;map.anisotropy=4;
+ return finishMaterial(new THREE.MeshPhysicalMaterial({name:'Raio_colado',map,transparent:true,depthWrite:false,roughness:.35,clearcoat:.8,polygonOffset:true,polygonOffsetFactor:-2,polygonOffsetUnits:-2}));
+}
 // Painted like the body: the paint, the dash (a Fusca's is the body's sheet metal) and the bare metal inside; in
 // the second colour, the fenders (the exporter's Paralama_fusca).
 const PAINTED=['Pintura_fusca','Fusca_painel','Pintura_interna_fusca'],FENDERS='Paralama_fusca';
@@ -94,6 +110,12 @@ export function fuscaCar(template,entry){
  for(const side of [-1,1])stuck.push([bendOnBody(body,V(DOOR.x,DOOR.y,side*SIDE),V(side,0,0),V(0,1,0),DOOR.w,DOOR.h,16,8),'Numero_porta_'+entry.number]);
  stuck.push([bendOnBody(body,V(ROOF.x,ROOF.y,0),V(-1,0,0),V(0,0,1),ROOF.w,ROOF.h),'Numero_teto_'+entry.number]);
  for(const [geometry,name] of stuck){const decal=new THREE.Mesh(geometry,sticker);decal.name=name;decal.renderOrder=2;decal.receiveShadow=true;root.add(decal);own.push(geometry);}
+ // A livery's drawing (race-roster.js graphic) along both sides, under the door numbers: Benício's lightning bolt,
+ // between the wheel arches, pointing to the nose on either side.
+ if(entry.graphic==='raio')for(const side of [-1,1]){
+  const art=boltSticker(side<0),geometry=bendOnBody(body,V(BOLT.x,BOLT.y,side*SIDE),V(side,0,0),V(0,1,0),BOLT.w,BOLT.h,40,10);
+  const decal=new THREE.Mesh(geometry,art);decal.name='Raio_'+(side<0?'esquerdo':'direito');decal.renderOrder=1;decal.receiveShadow=true;root.add(decal);own.push(art,geometry);
+ }
  root.userData.own=own;root.userData.wheels=wheels;root.userData.entry=entry;root.userData.lamp=lamp;
  root.userData.brake=v=>{if(lamp)lamp.emissiveIntensity=v>BRAKE_ON?7:0;};
  return root;
