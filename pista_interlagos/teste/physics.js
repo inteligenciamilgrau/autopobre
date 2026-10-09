@@ -311,8 +311,9 @@ export class TestCar {
   // speeding there costs the lap, like cutting the track.
   const limit=pitLimit(this.pitGeo,p);this.limiter=limit!==null;
   if(limit!==null&&speed>limit+PIT_TOLERANCE){if(this.lapValid)this.pitPenalty={kmh:speed*3.6,clock:this.clock};this.lapValid=false;this.invalidReason='pit';}
-  // Reverse: Q backs up at once; the manual's R gear backs up with the throttle.
-  const back=input.reverse?1:manual&&this.gear<0?input.throttle*engaged:0;
+  // Reverse: Q backs up at once, the brake held at rest (brake-reverse.js) as far as it is pressed; the
+  // manual's R gear backs up with the throttle.
+  const back=input.reverse?Math.min(1,input.reverse):manual&&this.gear<0?input.throttle*engaged:0;
   if(back)drive-=3*back*(condition?.power??1);
   // Rear-wheel drive: acceleration moves load onto the rear axle, and a
   // traction limiter keeps the driven tyres just past the peak of grip.

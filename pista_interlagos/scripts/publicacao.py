@@ -13,7 +13,7 @@ MODULES = (
     'race-results.js', 'race-results.css', 'lap-records.js', 'ghost-lap.js', 'ghost-car.js', 'championship.js', 'championship-board.js', 'pistas.css',
     'race-roster.js', 'car-select.js', 'car-livery.js', 'fusca.js', 'fusca-cockpit.js', 'carros.css',
     'car-finish.js', 'car-reflections.js',
-    "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", 'graphics-settings.js', 'graphics-panel.js', 'debug-overlay.js', 'graficos.css', "mobile-controls.js", "mobile.css", "gamepad-controls.js", "wheel-controls.js", "wheel-panel.js", "manual-gearbox.js",
+    "sound-effects.js", "game-music.js", "recorded-music.js", "race-field.js", "crash-parts.js", "settings.js", "settings.css", 'graphics-settings.js', 'graphics-panel.js', 'debug-overlay.js', 'graficos.css', "mobile-controls.js", "mobile.css", "gamepad-controls.js", "wheel-controls.js", "wheel-panel.js", "manual-gearbox.js", "brake-reverse.js",
     'main.js', 'player-preferences.js', 'physics.js', 'camera-return.js', 'car-audio.js', 'car-openings.js', 'cockpit.js', 'cockpit-materials.js', 'cockpit-instruments.js', 'cockpit-rear.js', 'cockpit-equipment.js',
     'driver.js', 'driver-rig.js', 'driver-controls.js', 'driver-helmet.js', 'rival-driver.js', 'family-phone.js',
     'camera-rig.js',

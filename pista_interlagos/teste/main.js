@@ -40,6 +40,7 @@ import {GamepadControls} from './gamepad-controls.js';
 import {WheelControls} from './wheel-controls.js';
 import {WheelPanel} from './wheel-panel.js';
 import {ManualGearbox} from './manual-gearbox.js';
+import {BrakeReverse} from './brake-reverse.js';
 import {setupSettings} from './settings.js';
 import {CarAudio} from './car-audio.js?v=20260913-immersive';
 import {PlayerPreferences,CAMERA_MODES,LAPS} from './player-preferences.js';
@@ -913,8 +914,10 @@ const pressed=code=>keys.has(code)||mobile?.pressed.has(code)||code!=='Space'&&(
 // Keyboard, touch pads, the controller's triggers and stick and a racing wheel's pedals (analog) all
 // drive at once. On foot the controller's left stick also walks, pushed up or down; in the car it never
 // accelerates. A wheel with no centring spring rests anywhere: on foot it turns the pilot only past a
-// quarter of its lock.
-function input(){
+// quarter of its lock. The physics loop passes its step, which alone moves the brake-to-reverse latch on.
+// Modo Corrida out of fuel: nothing drives, Q included.
+const outOfFuel=()=>immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee;
+function input(step=0){
  const afoot=pitstop?.coffee||immersive?.onFoot(),walk=afoot?gamepad.walk:0,set=afoot?0:wheelSet;
  const steer=afoot?Math.sign(wheel.steering)*Math.max(0,Math.abs(wheel.steering)-.25)/.75:wheel.steering;
  const command={ignition:pressed('KeyI')?1:0,throttle:Math.max(pressed('KeyW')||pressed('ArrowUp')?1:0,mobile?.throttle??0,gamepad.throttle,wheel.throttle,walk),brake:Math.max(pressed('KeyS')||pressed('ArrowDown')?1:0,mobile?.brake??0,gamepad.brake,wheel.brake,-walk),left:Math.max(pressed('KeyA')||pressed('ArrowLeft')?1:0,-(mobile?.steering??0),-gamepad.steering,-set,-steer),right:Math.max(pressed('KeyD')||pressed('ArrowRight')?1:0,mobile?.steering??0,gamepad.steering,set,steer),reverse:pressed('KeyQ')?1:0,handbrake:pressed('Space')?1:0};
@@ -922,7 +925,7 @@ function input(){
  if(!afoot&&wheel.steers&&command.left+command.right===Math.abs(steer))command.wheel=true;
  // Câmbio manual: the gear the player put in, and a wheel's clutch pedal (the keyboard has none).
  if(manualGearbox()&&!afoot){ownGearbox();gearbox.setLever(wheel.lever);command.gear=gearbox.gear;command.clutch=wheel.clutch;}
- return command;
+ return brakeReverse.apply(command,car,{allowed:!afoot&&command.gear===undefined&&!outOfFuel(),dt:step});
 }
 // The recon lap races the Opala 99 with the rivals' racecraft (RaceField.heroInput). Each physics
 // step asks for a new command; the sound and the driver's hands reuse the last one.
@@ -1026,7 +1029,7 @@ function runFrame(){const rawDt=clock.getDelta(),dt=Math.min(rawDt,.08);gamepad.
  // The sound is heard from the rival the recon lap watches (N), otherwise from the player's car.
  const heard=watchedRival()?.car??car;
  if(automatic&&!paused&&(mobile?.throttle||mobile?.brake||mobile?.steering||gamepad.driving||wheel.driving))takeWheel();
- if(!paused&&!frozen){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input();if(immersive&&!immersive.active&&immersive.freeFuel<=0&&!pitstop?.coffee){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);recordGhost();accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
+ if(!paused&&!frozen){if(automatic)immersive.recordAssisted=true;accumulator+=dt;while(accumulator>=1/120){const command=automatic?pilot(1/120):input(1/120);if(outOfFuel()){command.throttle=0;command.reverse=0;}if(!pitstop?.beforeStep(command,1/120)&&!immersive?.step(command,1/120)){const before=Math.hypot(car.vx,car.vy);car.step(command,1/120);const impact=Math.max(car.wallImpactSpeed??0,car.crashImpactSpeed??0,before-Math.hypot(car.vx,car.vy));if(impact>4){if(heard===car)carAudio.effect('collision');immersive?.wallImpact(impact);frameImpact=Math.max(frameImpact,impact);}const heardBefore=Math.hypot(heard.vx,heard.vy);immersive?.stepFree(1/120,command);if(heard!==car&&Math.max(heard.wallImpactSpeed??0,heard.crashImpactSpeed??0,heardBefore-Math.hypot(heard.vx,heard.vy))>4)carAudio.effect('collision');}lakeContact?.step(car,1/120);skidMarks.update(car,command,1/120);recordGhost();accumulator-=1/120;if(!immersive.active&&immersive.freeResultReady&&!multiplayer?.holdResults()){menu(true);break;}}}
  automaticRecords.update(immersive);automaticAIRecords.update(immersive);updateRecordTvs(performance.now());
  skidMarks.flush();
  tyreSmoke.clearView(...(isInside()?[1.5,9]:followsCar(mode)?[.6,Math.max(2,(CAMERA_FRAMES[mode]?.back??9)*.45)]:[.5,2]));tyreSmoke.update(car,skidMarks.wheels,paused||frozen?0:dt,renderer.domElement.height);if(!paused&&!frozen)for(const r of immersive?.rivals??[])if(r.broken?.smokeLeft>0)tyreSmoke.plume(r.car,dt);lakeContact?.update(paused?0:dt,renderer.domElement.height);treeField?.update(paused?0:dt,renderer.domElement.height);
@@ -1277,6 +1280,8 @@ const gearbox=new ManualGearbox(),manualGearbox=()=>preferences.values.gearbox==
 // The player takes the gearbox over from the automatic (a race start, the recon lap's autopilot, the
 // cool-down after the flag): it starts in the car's gear, or the H lever's.
 function ownGearbox(){if(!car.manualGear){gearbox.sync(car,wheel.lever);car.manualGear=true;}}
+// With the automatic the brake held at rest backs up (brake-reverse.js).
+const brakeReverse=new BrakeReverse();
 function shiftGear(step){
  if(!manualGearbox()||!ready||!sessionStarted||paused||automatic||immersive?.onFoot()||pitstop?.opened)return;
  ownGearbox();if(step>0)gearbox.up();else gearbox.down(car);
