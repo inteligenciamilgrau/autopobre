@@ -31,8 +31,9 @@ export class ImmersiveMode {
  // layout: the circuit's Box 99 (pit-box99.js), whose garage and café the pilot can walk
  // into before the race; obstacles: walls the walking camera must not pass through.
  // playerView: the camera the player last chose (main.js), the one the race is driven in.
- constructor({scene,carRoot,car,data,driver,rivalTemplate,skidMarks,resetVehicle,releaseMouse,onNormal,layout=null,obstacles=[],setView=null,getView=null,playerView=null}){
-  Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal,setView,getView,playerView});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
+ // onGo: the start is given (free countdown or story grid), the car must be ready to go.
+ constructor({scene,carRoot,car,data,driver,rivalTemplate,skidMarks,resetVehicle,releaseMouse,onNormal,onGo=null,layout=null,obstacles=[],setView=null,getView=null,playerView=null}){
+  Object.assign(this,{carRoot,car,data,resetVehicle,releaseMouse,onNormal,onGo,setView,getView,playerView});let profile={};try{profile=JSON.parse(localStorage.getItem('opala99-immersive-v1'))||{};}catch{}
   this.freeCountdown=0;this.goTime=0;this.freeFuel=12;this.laps=3;this.lineup=null;this.freeLineup=null;this.freeTotalLaps=3;this.storyLaps=3;this.freeFinished=false;this.freePosition=GRID_SIZE;this.freePlayerProgress=0;this.rivalTrails=RIVAL_ROSTER.map(()=>skidMarks?.createTrail());this.field=new RaceField(data,{onStep:(r,i,input,dt)=>{r.input=input;this.rivalTrails[i]?.update(r.car,input,dt);},onReset:()=>this.rivalTrails.forEach(t=>t?.breakTrails())});this.parts=new CrashParts(scene);this.state=new ImmersiveState(profile);this.visual=new ImmersiveVisuals(scene,carRoot,data,driver,car,rivalTemplate);this.lastPhase='off';this.lastUI='';this.near=-1;this.rivals=this.field.rivals;this.projectile=null;this.towOrigin=0;this.prepLitres=this.fuelChoice=6;this.prepFilm=false;
   this.brand=document.querySelector('.wordmark');this.baseBrand=this.brand.innerHTML;this.baseTitle=document.title;
   this.controls=document.querySelector('footer>div');this.baseControls=this.controls.innerHTML;
@@ -375,7 +376,7 @@ export class ImmersiveMode {
  }
  step(input,dt){
   const s=this.state,c=this.car;this.goTime=Math.max(0,(this.goTime||0)-dt);
-  if(!s.active&&this.freeCountdown>0){this.stop();const before=Math.ceil(this.freeCountdown);this.freeCountdown=Math.max(0,this.freeCountdown-dt);if(this.freeCountdown===0){this.goTime=.85;s.emitSound('raceGo');}else if(Math.ceil(this.freeCountdown)<before)s.emitSound('countdown');return true;}
+  if(!s.active&&this.freeCountdown>0){this.stop();const before=Math.ceil(this.freeCountdown);this.freeCountdown=Math.max(0,this.freeCountdown-dt);if(this.freeCountdown===0){this.goTime=.85;s.emitSound('raceGo');this.onGo?.();}else if(Math.ceil(this.freeCountdown)<before)s.emitSound('countdown');return true;}
   if(this.finishing){this.stepFinish(input,dt);return true;}if(!s.active)return false;
   if(s.phase==='crowd'&&this.inCar)this.near=-1;
   else if(s.phase==='crowd'){
@@ -407,7 +408,7 @@ export class ImmersiveMode {
    if((s.fan!==null||s.desk||s.leo||s.cafe)&&this.footLock&&document.pointerLockElement)document.exitPointerLock();
    this.near=this.visual.nearestFan();}
   else if(s.phase==='starting')s.startEngine(input,dt);
-  else if(s.phase==='grid'){const before=Math.ceil(s.countdown);s.countdown-=dt;if(s.countdown<=0){s.startRace();this.goTime=.85;}else if(Math.ceil(s.countdown)<before)s.emitSound('countdown');}
+  else if(s.phase==='grid'){const before=Math.ceil(s.countdown);s.countdown-=dt;if(s.countdown<=0){s.startRace();this.goTime=.85;this.onGo?.();}else if(Math.ceil(s.countdown)<before)s.emitSound('countdown');}
   else if(s.phase==='race'){
    const before=Math.hypot(c.vx,c.vy);c.step(input,dt);const speed=Math.hypot(c.vx,c.vy),L=this.data.meta.reconstructed_xy_m,impact=Math.max(c.wallImpactSpeed??0,c.crashImpactSpeed??0,before-speed);if(impact>4)this.wallImpact(impact);
    this.raceProgress=Math.max(0,this.raceProgress+lapTravel(this.previousS,c.surface.s,L));this.previousS=c.surface.s;

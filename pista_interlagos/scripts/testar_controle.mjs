@@ -13,8 +13,8 @@ function pad({id='Xbox 360 Controller (XInput STANDARD GAMEPAD)',index=0,mapping
  return {id,index,mapping,connected:true,axes,buttons:Array.from({length:17},(_,i)=>{const v=buttons[i]??0;return {pressed:v>.5,value:v};}),
   vibrationActuator:{playEffect:(type,params)=>{effects.push({type,...params});return Promise.resolve('complete');}}};
 }
-let menus=0;const looks=[],changes=[];
-const controls=new GamepadControls({target,onMenu:()=>menus++,onLook:(dx,dy)=>looks.push([dx,dy]),onChange:c=>changes.push(c.connected)});
+let menus=0,lookEnds=0;const looks=[],changes=[];
+const controls=new GamepadControls({target,onMenu:()=>menus++,onLook:(dx,dy)=>looks.push([dx,dy]),onLookEnd:()=>lookEnds++,onChange:c=>changes.push(c.connected)});
 // No controller: nothing moves.
 controls.poll(1/60);
 assert.equal(controls.connected,false);assert.deepEqual([controls.throttle,controls.brake,controls.steering],[0,0,0]);
@@ -56,6 +56,11 @@ pads=[pad({buttons:{[MENU_BUTTON]:1}})];controls.poll(1/60);assert.equal(menus,2
 looks.length=0;pads=[pad({axes:[0,0,1,0]})];controls.poll(1/60);controls.poll(1/30);
 assert.equal(looks.length,2);assert.ok(looks[0][0]>0&&Math.abs(looks[1][0]-2*looks[0][0])<1e-9&&looks[0][1]===0);
 controls.poll(0);assert.equal(looks.length,2,'no look without time');
+// Let go (back in its dead zone), the look ends, once; the pad going away mid-look ends it too.
+assert.equal(lookEnds,0,'held, no end');pads=[pad({axes:[0,0,.2,0]})];controls.poll(1/60);assert.equal(lookEnds,1,'let go, the look ends');
+controls.poll(1/60);assert.equal(lookEnds,1,'only once');
+pads=[pad({axes:[0,0,0,-1]})];controls.poll(1/60);pads=[];controls.poll(1/60);assert.equal(lookEnds,2,'pad gone mid-look');
+pads=[pad()];controls.poll(1/60);assert.equal(lookEnds,2);
 // Two controllers: the one being used drives.
 pads=[pad({id:'Wireless Controller (STANDARD GAMEPAD Vendor: 054c Product: 09cc)',index:0}),pad({index:1,buttons:{7:1}})];controls.poll(1/60);
 assert.equal(controls.pad.index,1);assert.equal(controls.throttle,1);
@@ -106,4 +111,4 @@ controls.bump(3);assert.equal(effects.length,0);
 controls.bump(6);controls.bump(30);assert.equal(effects.length,2);
 assert.equal(effects[0].type,'dual-rumble');assert.ok(effects[1].strongMagnitude===1&&effects[1].duration>effects[0].duration&&effects[0].strongMagnitude>0);
 controls.rumble=false;controls.bump(30);assert.equal(effects.length,2);
-console.log('Controller passed: analog triggers and stick with dead zones, curves, buttons as keys, Menu, right-stick look, two pads (a worn one stays out), standard pads only, held buttons, release on disconnect/hidden, rumble.');
+console.log('Controller passed: analog triggers and stick with dead zones, curves, buttons as keys, Menu, right-stick look and its let-go, two pads (a worn one stays out), standard pads only, held buttons, release on disconnect/hidden, rumble.');

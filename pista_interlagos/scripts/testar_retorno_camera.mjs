@@ -15,4 +15,9 @@ assert.equal(c.update(17000,10,true),false,'Pause cancels return');
 assert.equal(c.update(18000,10,false),false,'Resume restarts movement delay');
 assert.equal(c.update(21000,10,false),true);
 c.reset(22000);assert.equal(c.active,false);assert.equal(c.movingSince,null);
-console.log('Camera return: 14 timing/state assertions passed.');
+// The controller's right stick let go: back to the front at once, parked or moving, until the next look.
+c.recall();assert.equal(c.update(22001,0,false),true,'Stick let go returns even parked');
+assert.equal(c.update(22002,10,false),true);assert.equal(c.update(22003,10,true),false,'Not while paused');
+c.manual(22100);assert.equal(c.recalled,false);assert.equal(c.update(22101,0,false),false,'A new look ends it');
+c.recall();c.reset(23000);assert.equal(c.recalled,false,'A reset ends it');
+console.log('Camera return: timing/state assertions and the right stick let go passed.');

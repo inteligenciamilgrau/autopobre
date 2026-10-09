@@ -2,7 +2,8 @@
 // browser does not map, has its buttons and axes elsewhere, and is left out). As in F1 and the other racing
 // games, RT (R2) accelerates and LT (L2) brakes, both analog, and the left stick steers. The other
 // buttons press the keyboard's keys (BUTTON_KEYS), so every place that answers a key answers the
-// controller too; the right stick looks around like the captured mouse (onLook, in mouse pixels).
+// controller too; the right stick looks around like the captured mouse (onLook, in mouse pixels), and
+// let go it says so (onLookEnd: the view turns back to the front).
 export const BUTTON_KEYS=Object.freeze({
  0:['Space'],          // A / ✕: handbrake (on foot a jump, on the podium Continuar)
  1:['KeyQ'],           // B / ○: reverse, held
@@ -37,9 +38,9 @@ const padName=pad=>pad?.id.replace(/\s*\(.*\)\s*$/,'').trim()||'Controle';
 export class GamepadControls {
  // ignore(pad): a device another reader drives (a racing wheel set up in wheel-controls.js, which
  // may even call itself a standard pad). suspended: reads nothing (the wheel's setup is listening).
- constructor({target=document,onMenu,onLook,onChange,onShift,ignore}={}){
-  this.target=target;this.onMenu=onMenu;this.onLook=onLook;this.onChange=onChange;this.onShift=onShift;this.ignore=ignore;this.suspended=false;
-  this.steering=this.throttle=this.brake=this.walk=0;this.held=new Set();this.menuHeld=false;this.pad=null;this.other=null;
+ constructor({target=document,onMenu,onLook,onLookEnd,onChange,onShift,ignore}={}){
+  this.target=target;this.onMenu=onMenu;this.onLook=onLook;this.onLookEnd=onLookEnd;this.onChange=onChange;this.onShift=onShift;this.ignore=ignore;this.suspended=false;
+  this.steering=this.throttle=this.brake=this.walk=0;this.held=new Set();this.menuHeld=false;this.looking=false;this.pad=null;this.other=null;
   this.curve=STEERING_CURVES.normal;this.rumble=true;this.touching=new Map();this.rests=new Map();
   addEventListener('gamepadconnected',()=>this.poll(0));addEventListener('gamepaddisconnected',()=>this.poll(0));
  }
@@ -73,7 +74,7 @@ export class GamepadControls {
  poll(dt){
   const seen=c=>[c.pad?.id,c.pad?.index,c.unsupported].join('|'),before=seen(this);
   this.pad=document.hidden||this.suspended?null:this.pick();const pad=this.pad;if(seen(this)!==before)this.onChange?.(this);
-  if(!pad){this.steering=this.throttle=this.brake=this.walk=0;this.releaseAll();this.menuHeld=false;return;}
+  if(!pad){this.steering=this.throttle=this.brake=this.walk=0;this.releaseAll();this.menuHeld=false;this.lookAt(false);return;}
   const button=i=>pad.buttons[i],axis=i=>pad.axes[i]??0;
   // (LT and RT, each from where it rests on this pad: a worn one gives no brake or throttle at rest)
   const key=pad.index+' '+pad.id,rest=this.rests.get(key)??[null,null];this.rests.set(key,rest);
@@ -92,7 +93,10 @@ export class GamepadControls {
   const menu=!!button(MENU_BUTTON)?.pressed;if(menu&&!this.menuHeld)this.onMenu?.();this.menuHeld=menu;
   const lookX=stickValue(axis(2),1.4,LOOK_DEADZONE),lookY=stickValue(axis(3),1.4,LOOK_DEADZONE);
   if((lookX||lookY)&&dt>0)this.onLook?.(lookX*LOOK_SPEED*dt,lookY*LOOK_SPEED*.6*dt);
+  this.lookAt(!!(lookX||lookY));
  }
+ // The right stick back in its dead zone (or the pad gone): the look is over.
+ lookAt(looking){if(this.looking&&!looking)this.onLookEnd?.();this.looking=looking;}
  key(type,code){this.target.dispatchEvent(new KeyboardEvent(type,{code,key:keyName(code),bubbles:true,cancelable:true}));}
  press(code){this.key('keydown',code);this.key('keyup',code);}
  releaseAll(){for(const index of this.held)for(const code of BUTTON_KEYS[index])this.key('keyup',code);this.held.clear();}

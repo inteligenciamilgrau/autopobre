@@ -714,13 +714,17 @@ function lookAround(dx,dy){
  cameraReturn.manual(performance.now());
 }
 // The right stick needs no captured mouse: on foot it turns the walking camera, at the box (in the
-// car) it orbits round the crew, and on the podium the mouse alone moves the photo camera.
+// car) it orbits round the crew, and on the podium the mouse alone moves the photo camera. In the car,
+// let go, the view turns back to the front at once (the mouse keeps its 3 s return while moving).
+let padLooked=false;
 function padLook(dx,dy){
+ padLooked=false;
  if(!ready||paused)return;
  if(pitstop?.opened){if(!pitstop.coffee)pitstop.orbitView(dx,dy);else if(!pitstop.coffee.menu)pitstop.turnView(dx,dy);return;}
  if(immersive?.onFoot()){immersive.visual.turnView(dx,dy);return;}
- if(!immersive?.ownsMouse())lookAround(dx,dy);
+ if(!immersive?.ownsMouse()){lookAround(dx,dy);padLooked=true;}
 }
+function padLookEnd(){if(padLooked)cameraReturn.recall();padLooked=false;}
 $('view').addEventListener('pointermove',e=>{if(!pointerLocked&&e.buttons)cameraReturn.manual(performance.now());});
 window.addEventListener('pointerup',()=>$('view').classList.remove('dragging'));
 $('view').addEventListener('pointercancel',()=>$('view').classList.remove('dragging'));
@@ -842,7 +846,8 @@ function updateCamera(dt){
  // Holding B counts as looking around: the 3 s return waits until it is let go.
  const photo=mode==='cockpit'&&!rival?cockpitView:null,lookingBack=lookBackAllowed()&&pressed('KeyB');
  if(lookingBack)cameraReturn.manual(performance.now());
- const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*2.8);
+ // The right stick let go swings back quicker than the slow return after the mouse.
+ const centering=cameraReturn.update(performance.now(),vel,paused),blend=1-Math.exp(-dt*(cameraReturn.recalled?6:2.8));
  // Speed widens the view (camera-rig.js: by the share of the car's top speed, near misses punch it); inside
  // the car rough ground, kerbs and very high speed add a fine shake (the follow views turn instead).
  const motion=reducedMotion.matches?0:graphics.values.cameraMotion,top=topSpeed(subject.mechanics);
@@ -1288,7 +1293,7 @@ function shiftGear(step){
 }
 let wheelPanel=null;
 const wheel=new WheelControls({onMenu:padMenu,onShift:shiftGear,onChange:wheelStatus});
-const gamepad=new GamepadControls({onLook:padLook,onChange:padStatus,onMenu:padMenu,onShift:shiftGear,ignore:pad=>wheel.uses(pad.id)});
+const gamepad=new GamepadControls({onLook:padLook,onLookEnd:padLookEnd,onChange:padStatus,onMenu:padMenu,onShift:shiftGear,ignore:pad=>wheel.uses(pad.id)});
 $('padSteering').value=preferences.values.padSteering;gamepad.setSteering(preferences.values.padSteering);
 $('padSteering').onchange=()=>{preferences.update({padSteering:$('padSteering').value});gamepad.setSteering(preferences.values.padSteering);};
 $('padRumble').checked=gamepad.rumble=preferences.values.padRumble;
@@ -1571,7 +1576,10 @@ async function loadCircuit(){
  speedFx=createSpeedEffects({smoke:tyreSmoke,level:graphics.values.speedEffects});scene.add(speedFx.root);
  restBodyPose();
  carLivery.clear();
- immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();wheelSet=0;mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);}});
+ immersive=new ImmersiveMode({scene,carRoot,car,data,driver,rivalTemplate:model,skidMarks,layout:pitLayout,obstacles:cameraObstacles,setView:setCameraMode,getView:()=>mode,playerView:()=>preferences.values.camera,resetVehicle:()=>reset(),releaseMouse:()=>{keys.clear();wheelSet=0;mobile?.clear();if(document.pointerLockElement)document.exitPointerLock();},onNormal:()=>{storyRound=null;chooseImmersive(false);reset();menu(true);},
+  // The start always finds the handbrake down: A (Space) pressed to skip the opening, in the 3-2-1 or in the
+  // story paddock pulled it, and the car would sit there at the green light.
+  onGo:()=>mobile?.setHandbrake(false)});
  immersive.onMainMenu=returnToMainMenu;
  // The ghost's shell is the same for every paint and car colour: built once, from the first model (at
  // rest, as the rivals were just cloned), with the distant rivals' profile beyond 45 m.
@@ -1622,7 +1630,7 @@ async function loadCircuit(){
   // Interior cameras ride on the sprung body, so report them in its frame.
   cockpitInfo:()=>({...cockpit.info(),eyeLocal:carBody.worldToLocal(camera.position.clone()).toArray(),fov:camera.fov,externalVisible:model.visible,
    renderedFrame,mirrorFrame,mirrorEyeLocal:carBody.worldToLocal(cockpit.rearCamera.position.clone()).toArray(),sideMirrors:(fuscaBody.active?fuscaMirrors:sideMirrors).info(),fusca:fuscaBody.info()?.cabin??null}),
-  viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs,
+  viewControls:()=>({pointerLocked,lockPending,lockUnavailable,yaw:headLook.yaw,pitch:headLook.pitch,centering:cameraReturn.active,recalled:cameraReturn.recalled,movingSince:cameraReturn.movingSince,lastInput:cameraReturn.lastInput,delayMs:cameraReturn.delayMs,
    lookBack:{held:lookBack.held,allowed:lookBackAllowed(),amount:lookBack.amount,side:lookBack.side,viewYaw:headView.yaw,viewPitch:headView.pitch,eyeShift:[...twist]},photo:cockpitView&&structuredClone(cockpitView)}),
   // Interior photography: a fixed cockpit-local pose {eye:[x,y,z],yaw,pitch,fov,hideDriver,roll?} replaces the
   // head look (no clamps, shake or speed widening) while in the cockpit camera; null returns to play.
