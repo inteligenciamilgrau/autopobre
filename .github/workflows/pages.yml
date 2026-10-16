@@ -1,8 +1,10 @@
 name: Redirecionar para autopobre.com.br
 
 # The game moved to github.com/autopobre/autopobre and https://autopobre.com.br. This repository's
-# Pages site (www.inteligenciamilgrau.com.br/autopobre/) only sends visitors there, with the saves
-# kept in their browser (redirecionamento/). It publishes on every push to main.
+# Pages site (www.inteligenciamilgrau.com.br/autopobre/) sends visitors there with the saves kept in
+# their browser (redirecionamento/), except the legacy releases, kept here as a memory: /apr_v1/
+# (apr-1.0) and /apr_v2/ (apr-2.1), built from their tags. The redirect page is the site's 404 too,
+# so every other path still leaves for the new address. It publishes on every push to main.
 on:
   push:
     branches: [main]
@@ -18,7 +20,7 @@ concurrency:
 jobs:
   build:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 20
     permissions:
       contents: read
       pages: read
@@ -26,14 +28,66 @@ jobs:
       - name: Baixar o redirecionamento
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
+          path: atual
           persist-credentials: false
           sparse-checkout: redirecionamento
+      - name: Baixar a versao legada de /apr_v1/
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: apr-1.0
+          path: apr_v1
+          persist-credentials: false
+      - name: Baixar a versao legada de /apr_v2/
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: apr-2.1
+          path: apr_v2
+          persist-credentials: false
+      - name: Preparar Node.js
+        uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+        with:
+          node-version: '24'
+          cache: npm
+          cache-dependency-path: '*/pista_interlagos/teste/package-lock.json'
+      - name: Preparar Python
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.12'
+      - name: Instalar a dependencia fixada no lock
+        run: |
+          for pasta in apr_v1 apr_v2; do
+            npm ci --prefix "$pasta/pista_interlagos/teste" --ignore-scripts --no-audit --no-fund
+          done
+      - name: Gerar as versoes legadas e juntar com o redirecionamento
+        run: |
+          (cd apr_v1 && python pista_interlagos/scripts/preparar_publicacao.py)
+          (cd apr_v2 && python pista_interlagos/scripts/preparar_publicacao.py)
+          mkdir site
+          cp -a atual/redirecionamento/. site/
+          for pasta in apr_v1 apr_v2; do
+            mkdir "site/$pasta"
+            cp -a "$pasta/dist/." "site/$pasta/"
+          done
+      - name: Conferir que as legadas sairam sem multiplayer
+        run: |
+          for pasta in apr_v1 apr_v2; do
+            for arquivo in multiplayer.js multiplayer.css net-room.js net-cars.js net-link.js net-verify.js bancada-som.html bancada-som.js; do
+              if [ -e "site/$pasta/$arquivo" ]; then
+                echo "::error::A versao legada de $pasta tem $arquivo; ela vai sem multiplayer."
+                exit 1
+              fi
+            done
+            if grep -rqE 'sala[.](autopobre|inteligenciamilgrau)[.]com[.]br' --include='*.js' --include='*.html' "site/$pasta"; then
+              echo "::error::A versao legada de $pasta conecta ao servidor das salas."
+              exit 1
+            fi
+          done
       - name: Configurar GitHub Pages
         uses: actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d # v6.0.0
-      - name: Enviar o redirecionamento para publicacao
+      - name: Enviar o site para publicacao
         uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
         with:
-          path: redirecionamento
+          path: site
 
   deploy:
     needs: build
